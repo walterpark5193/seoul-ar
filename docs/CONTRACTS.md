@@ -181,6 +181,8 @@ export function createArSession(opts: ArSessionOptions): ArSession;
 export function arSupported(): boolean;    // navigator.mediaDevices?.getUserMedia 존재 + WebGL 가능
 ```
 
+좌표계 주의(2026-11-17 보강): MindAR의 `anchor.group`은 타깃 그림을 자기 XY 평면에 놓고 z가 카메라 쪽이다. 씬(4절)은 XZ 평면에 y 위다. 따라서 `ArSession.anchor`는 MindAR `anchor.group`에 직접 넣은 **내부 Group**이고, `inner.rotation.x = Math.PI / 2`로 돌려 둔다(씬의 y가 그림에서 솟아오르고, 씬의 z(남)가 그림의 아래가 된다). 뷰는 이 `anchor`에 `seoulScene.group`을 그대로 add 한다.
+
 마커 파일: `frontend/public/marker/target.png`(정사각 1024), `frontend/public/marker/target.mind`.
 도구: `node tools/marker/make-slide.mjs` (target.png와 `frontend/public/marker/slide.png` 1920×1080 생성), `node tools/marker/compile-target.mjs` (target.mind 생성).
 
