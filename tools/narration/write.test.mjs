@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildPrompt, extractText, parseScript, allowedNumbers, validateScript, fallbackScript, writeScripts,
+  buildPrompt, extractText, speechFromCaption, parseScript, allowedNumbers, validateScript, fallbackScript, writeScripts,
 } from "./write.mjs";
 
 const facts = {
@@ -21,13 +21,14 @@ describe("extractText", () => {
 describe("parseScript", () => {
   it("코드펜스와 잡문 허용", () => {
     const t = '결과입니다.\n```json\n{"caption":"가","speech":"나"}\n```\n끝';
-    expect(parseScript(t)).toEqual({ caption: "가", speech: "나" });
-    expect(parseScript('앞 {"caption":"가","speech":"나"} 뒤')).toEqual({ caption: "가", speech: "나" });
+    expect(parseScript(t)).toEqual({ caption: "가", speech: "가" });
+    expect(parseScript('앞 {"caption":"가"} 뒤')).toEqual({ caption: "가", speech: "가" });
   });
   it("필드 누락 거절", () => {
-    expect(parseScript('{"caption":"가"}')).toBe(null);
-    expect(parseScript('{"caption":"가","speech":3}')).toBe(null);
+    expect(parseScript('{"speech":"나"}')).toBe(null);
+    expect(parseScript('{"caption":3}')).toBe(null);
     expect(parseScript("없음")).toBe(null);
+    expect(parseScript('{"caption":"가"}')).toEqual({ caption: "가", speech: "가" });
   });
 });
 
@@ -49,13 +50,27 @@ describe("validateScript", () => {
   it("91자 거절", () => expect(validateScript(facts, { ...good, caption: "가".repeat(91) }).ok).toBe(false));
   it("90자는 통과", () => expect(validateScript(facts, { ...good, caption: "가".repeat(90) }).ok).toBe(true));
   it("금지어 거절", () => {
-    expect(validateScript(facts, { ...good, caption: "OO아파트가 있습니다." }).ok).toBe(false);
     expect(validateScript(facts, { ...good, caption: "123번지입니다." }).ok).toBe(false);
     expect(validateScript(facts, { ...good, speech: "폭등했습니다." }).ok).toBe(false);
   });
   it("n 0은 없었다는 취지 필요", () => {
     expect(validateScript(zero, good).ok).toBe(false);
     expect(validateScript(zero, fallbackScript(zero)).ok).toBe(true);
+  });
+});
+
+describe("speechFromCaption / 지명 숫자 / 아파트", () => {
+  it("㎡만 바꾼다", () => expect(speechFromCaption("㎡당 2,890만 원")).toBe("제곱미터당 2,890만 원"));
+  it("지명 속 숫자는 무시", () => {
+    const f = { ...facts, topDong: "당산동4가" };
+    expect(validateScript(f, { caption: "당산동4가가 가장 높았습니다. 거래는 25건입니다." }).ok).toBe(true);
+    expect(validateScript(f, { caption: "당산동4가 거래는 7건입니다." }).ok).toBe(false);
+  });
+  it("아파트라는 단어는 허용", () => expect(validateScript(facts, { caption: "아파트 거래가 많았습니다. 모두 25건입니다." }).ok).toBe(true));
+  it("writeScripts speech는 caption에서 유도", async () => {
+    const c = { send: async () => reply({ caption: "㎡당 2,890만 원입니다. 25건입니다.", speech: "임의 숫자 99" }) };
+    const r = await writeScripts([facts], { client: c });
+    expect(r.items["gu-202611-강남구"].speech).toBe("제곱미터당 2,890만 원입니다. 25건입니다.");
   });
 });
 
@@ -89,7 +104,7 @@ describe("writeScripts", () => {
   it("성공하면 bedrock", async () => {
     const c = fake([reply(good)]);
     const r = await writeScripts([facts], { client: c, modelId: "m" });
-    expect(r.items["gu-202611-강남구"]).toEqual({ ...good, source: "bedrock" });
+    expect(r.items["gu-202611-강남구"]).toEqual({ caption: good.caption, speech: speechFromCaption(good.caption), source: "bedrock" });
     expect(r.failures).toEqual([]);
     expect(c.calls[0].modelId).toBe("m");
   });

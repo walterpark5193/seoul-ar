@@ -8,7 +8,7 @@ export const MAX_SPEECH = 200;
 export const CONCURRENCY = 4;
 
 const BANNED = [
-  "아파트", "번지", "지번", "본번", "부번", "동 호", "단지명",
+  "번지", "지번", "본번", "부번", "동 호", "단지명",
   "폭등", "폭락", "대박", "꼭 사야", "무조건", "투자", "매수", "매도", "추천", "급등", "급락",
 ];
 
@@ -45,14 +45,13 @@ export function buildPrompt(facts) {
     "",
     "[규칙]",
     "- 존댓말로 정확히 두 문장을 씁니다.",
-    `- caption은 자막용이며 공백 포함 ${MAX_CAPTION}자 이내입니다. 숫자는 아라비아 숫자로 쓰고 금액은 "2,890만 원", "52.6억 원"처럼 씁니다.`,
-    '- speech는 낭독용입니다. 같은 내용을 소리 내어 읽기 좋게 쓰고 금액은 "2천8백90만 원"처럼 읽는 표기로 씁니다.',
+    `- caption은 자막 한 개만 씁니다. 자막용이며 공백 포함 ${MAX_CAPTION}자 이내입니다. 숫자는 아라비아 숫자로 쓰고 금액은 "2,890만 원", "52.6억 원"처럼 씁니다.`,
     "- 사실표에 있는 숫자만 사용합니다. 계산해서 새 숫자를 만들거나 다른 달·다른 구와 비교하는 숫자를 쓰지 않습니다.",
-    "- 아파트 이름, 건물명, 지번, 본번, 부번은 쓰지 않습니다.",
+    "- 아파트 이름(단지명), 건물명, 지번, 본번, 부번은 쓰지 않습니다.",
     '- 투자 권유와 과장("폭등", "대박", "꼭 사야" 등)은 쓰지 않습니다.',
     '- 거래가 없으면 "이번 달 거래가 없었습니다"는 취지로만 씁니다.',
     "",
-    '출력은 JSON 한 개만 씁니다. 형식: {"caption": "...", "speech": "..."}  다른 설명은 붙이지 않습니다.',
+    '출력은 JSON 한 개만 씁니다. 형식: {"caption": "..."}  다른 설명은 붙이지 않습니다.',
   ].join("\n");
 }
 
@@ -65,6 +64,10 @@ export function extractText(resp) {
   return null;
 }
 
+export function speechFromCaption(caption) {
+  return String(caption).replaceAll("㎡", "제곱미터");
+}
+
 export function parseScript(text) {
   if (typeof text !== "string") return null;
   let s = text.trim();
@@ -75,8 +78,9 @@ export function parseScript(text) {
   if (a < 0 || b <= a) return null;
   try {
     const o = JSON.parse(s.slice(a, b + 1));
-    if (o && typeof o.caption === "string" && typeof o.speech === "string") {
-      return { caption: o.caption.trim(), speech: o.speech.trim() };
+    if (o && typeof o.caption === "string") {
+      const caption = o.caption.trim();
+      return { caption, speech: speechFromCaption(caption) };
     }
   } catch { /* 형식 오류 */ }
   return null;
@@ -109,10 +113,11 @@ export function allowedNumbers(facts) {
 
 export function validateScript(facts, script) {
   const errors = [];
-  if (!script || typeof script.caption !== "string" || typeof script.speech !== "string") {
-    return { ok: false, errors: ["caption과 speech가 모두 문자열이어야 합니다"] };
+  if (!script || typeof script.caption !== "string") {
+    return { ok: false, errors: ["caption이 문자열이어야 합니다"] };
   }
-  const { caption, speech } = script;
+  const caption = script.caption;
+  const speech = typeof script.speech === "string" ? script.speech : speechFromCaption(caption);
   if (!caption.trim()) errors.push("caption이 비었습니다");
   if (!speech.trim()) errors.push("speech가 비었습니다");
   if ([...caption].length > MAX_CAPTION) errors.push(`caption이 ${MAX_CAPTION}자를 넘습니다(${[...caption].length}자)`);
@@ -121,7 +126,9 @@ export function validateScript(facts, script) {
     if (caption.includes(w) || speech.includes(w)) errors.push(`금지어: ${w}`);
   }
   const allowed = allowedNumbers(facts);
-  const tokens = caption.match(/\d[\d,]*(\.\d+)?/g) ?? [];
+  let scan = caption;
+  for (const name of [facts.gu, facts.topDong]) if (name) scan = scan.replaceAll(name, " ");
+  const tokens = scan.match(/\d[\d,]*(\.\d+)?/g) ?? [];
   for (let t of tokens) {
     t = t.replace(/,+$/, "");
     if (!allowed.has(t)) errors.push(`사실표에 없는 숫자: ${t}`);
@@ -134,7 +141,7 @@ export function fallbackScript(facts) {
   const { y, m } = ym(facts.month);
   if (!facts.n) {
     const t = `${facts.gu}는 이번 달 거래가 없었습니다. 다른 구를 살펴보겠습니다.`;
-    return { caption: t, speech: t };
+    return { caption: t, speech: speechFromCaption(t) };
   }
   const s1 = `${facts.gu}는 ${y}년 ${m}월 거래가 ${facts.n}건이었습니다.`;
   let s2;
@@ -145,7 +152,7 @@ export function fallbackScript(facts) {
     s2 = "㎡당 가격은 집계하지 못했습니다.";
   }
   const caption = `${s1} ${s2}`;
-  return { caption, speech: caption.replaceAll("㎡", "제곱미터") };
+  return { caption, speech: speechFromCaption(caption) };
 }
 
 async function askOnce(client, modelId, prompt) {
@@ -175,7 +182,7 @@ export async function writeScripts(factsList, { client, modelId = MODEL_ID, retr
           lastErrors = ["JSON을 해석하지 못했습니다"];
         } else {
           const v = validateScript(facts, script);
-          if (v.ok) return { id, caption: script.caption, speech: script.speech, source: "bedrock" };
+          if (v.ok) return { id, caption: script.caption, speech: speechFromCaption(script.caption), source: "bedrock" };
           lastErrors = v.errors;
         }
       } catch (e) {
