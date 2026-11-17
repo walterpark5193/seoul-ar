@@ -19,7 +19,9 @@ export type RotateMode = "idle" | "one" | "two" | "spinning" | "resetting";
  */
 export interface RotateState { yaw: number; zoom: number; mode: RotateMode; panX: number; }
 export interface Rotator {
+  /** 관성 중이면 멈추고 잡는다. 리셋 중이면 리셋을 먼저 즉시 끝내고(yaw 0·zoom 1·panX 0) 거기서 잡는다. */
   grabOne(p: Point, t: number): void;
+  /** grabOne과 같이 관성·리셋을 처리한 뒤, 잡는 순간의 중점 x·거리·zoom을 기준으로. */
   grabTwo(a: Point, b: Point, t: number): void;
   move(p: Point, t: number): void;
   /** 중점 Δx → yaw(잠겨 있으면 없음), 거리 비 → zoomAt. 기준점은 잠겨 있으면 두 손 중점의 ndc x(x·2 − 1), 아니면 0(지도: panX 0 유지). */
@@ -94,9 +96,21 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
 
   const snapshot = (): RotateState => ({ yaw, zoom, mode, panX });
 
-  function stopMotion(): void {
+  /** 정면·1배·가운데에 멈춘다(리셋의 끝). */
+  function settleFront(): void {
+    yaw = 0;
+    zoom = 1;
+    panX = 0;
+    mode = "idle";
+  }
+  /**
+   * 잡기 전에 움직임을 멈춘다. 관성은 그 각도에서 멈추고, 리셋은 끝까지 마친다(컨트롤러 판정 2026-11-17):
+   * 반쯤 돌아온 자세가 펼친 화면의 회전 잠금(비뚤어진 정면)이나 지도의 panX ≠ 0으로 남지 않게.
+   */
+  function stopForGrab(): void {
     omega = 0;
-    if (mode === "spinning" || mode === "resetting") mode = "idle";
+    if (mode === "resetting") settleFront();
+    else if (mode === "spinning") mode = "idle";
   }
   function startSamples(t: number): void {
     travel = 0;
@@ -158,7 +172,7 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
   return {
     grabOne(p, t) {
       if (!finitePoint(p) || !Number.isFinite(t)) return;
-      stopMotion();
+      stopForGrab();
       mode = "one";
       lastX = p.x;
       startSamples(t);
@@ -166,7 +180,7 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
     grabTwo(a, b, t) {
       if (!finitePoint(a) || !finitePoint(b) || !Number.isFinite(t)) return;
       const wasHeld = mode === "one" || mode === "two";
-      stopMotion();
+      stopForGrab();
       mode = "two";
       lastX = (a.x + b.x) / 2;
       const d = twoDist(a, b);
@@ -209,7 +223,9 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
       dist0 = null;
     },
     catch() {
-      stopMotion();
+      // 13.2: 관성·리셋 모두 그 자리(각도 유지)에서 멈춘다. 잡기와 달리 리셋을 마치지 않는다.
+      omega = 0;
+      if (mode === "spinning" || mode === "resetting") mode = "idle";
     },
     wheel(deltaY, anchorNdcX = 0) {
       if (!Number.isFinite(deltaY) || deltaY === 0 || mode === "resetting") return;
@@ -228,10 +244,7 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
       samples = [];
       dist0 = null;
       if (instant || !(c.resetSeconds > 0) || (yaw === 0 && zoom === 1 && panX === 0)) {
-        yaw = 0;
-        zoom = 1;
-        panX = 0;
-        mode = "idle";
+        settleFront();
         return;
       }
       resetFromYaw = yaw; // 이미 (-π, π]라 0으로 곧장 가는 것이 최단 방향
@@ -256,10 +269,7 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
         resetElapsed += dt;
         const u = Math.min(1, resetElapsed / c.resetSeconds);
         if (u >= 1) {
-          yaw = 0;
-          zoom = 1;
-          panX = 0;
-          mode = "idle";
+          settleFront();
         } else {
           const e = easeOutCubic(u);
           yaw = resetFromYaw * (1 - e);

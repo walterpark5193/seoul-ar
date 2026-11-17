@@ -429,17 +429,96 @@ describe("reset", () => {
     expect(r.state.mode).toBe("idle");
     expect(r.tick(1).yaw).toBe(mid);
   });
-  it("grabOne during reset stops it and grabs", () => {
+  it("grabOne during reset finishes the reset, then grabs", () => {
     const r = createRotator();
     drag(r, 0.4, 0.6, 0, 50);
     r.move(P(0.6), 300);
     r.release(400);
     r.reset();
     r.tick(0.2);
-    const mid = r.state.yaw;
+    expect(r.state.yaw).toBeGreaterThan(0); // 반쯤 돌아온 자세
     r.grabOne(P(0.5), 600);
-    expect(r.state.mode).toBe("one");
-    expect(r.tick(1).yaw).toBe(mid);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "one", panX: 0 });
+    expect(r.tick(1).yaw).toBe(0);
+  });
+});
+
+// 컨트롤러 판정(2026-11-17): 잡기가 0.6초 리셋을 끊으면 리셋을 먼저 즉시 끝내고(yaw 0·zoom 1·panX 0) 거기서 잡는다.
+// 반쯤 돌아온 자세가 펼친 화면의 회전 잠금(비뚤어진 정면)이나 지도의 panX(가운데 아님)로 남지 않게.
+describe("grab during reset finishes the reset first", () => {
+  /** 한 손으로 yaw를 +90°로 만들고 천천히 놓는다(관성 없음). */
+  function at90(): Rotator {
+    const r = createRotator();
+    drag(r, 0, 0.5, 0, 1000, 10);
+    r.move(P(0.5), 1300);
+    r.release(1400);
+    expect(deg(r.state.yaw)).toBeCloseTo(90, 6);
+    expect(r.state.mode).toBe("idle");
+    return r;
+  }
+
+  it("reset from yaw 90° interrupted at 0.25 s by grabTwo: yaw 0, zoom 1, panX 0 before any move", () => {
+    const r = at90();
+    r.setYawLocked(true); // 펼친 화면에 들어감: 잠그고 정면 복귀
+    r.reset();
+    r.tick(0.25);
+    expect(deg(r.state.yaw)).toBeGreaterThan(10); // 반쯤(약 18°)
+    r.grabTwo(P(0.2), P(0.3), 2000);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "two", panX: 0 });
+    expect(r.tick(0.5)).toEqual({ yaw: 0, zoom: 1, mode: "two", panX: 0 }); // 남은 리셋 보간 없음
+    // 확대는 1배에서 잰다(잡는 순간의 zoom = 1)
+    r.moveTwo(P(0.175), P(0.325), 2033); // 중점 그대로, 거리 0.1 → 0.15
+    expect(r.state.zoom).toBeCloseTo(1.5, 12);
+    expect(r.state.yaw).toBe(0);
+  });
+
+  it("reset from zoom 1.6 / panX −0.34 interrupted by grabOne: yaw 0, zoom 1, panX 0", () => {
+    const r = createRotator();
+    r.setYawLocked(true);
+    r.zoomAt(1.6, -0.9); // 펼친 화면 왼쪽 끝에서 확대
+    expect(r.state.panX).toBeCloseTo(-0.3375, 12);
+    r.setYawLocked(false); // 지도로 나감: 풀고 정면 복귀
+    r.reset();
+    r.tick(0.2);
+    expect(r.state.panX).toBeLessThan(-0.05);
+    expect(r.state.zoom).toBeGreaterThan(1.1);
+    r.grabOne(P(0.5), 3000);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "one", panX: 0 });
+    expect(r.tick(0.5)).toEqual({ yaw: 0, zoom: 1, mode: "one", panX: 0 });
+    // 잡은 뒤에는 평소처럼 0°에서 돌린다
+    r.move(P(0.6), 3033);
+    expect(deg(r.state.yaw)).toBeCloseTo(18, 6);
+    expect(r.state.panX).toBe(0);
+  });
+
+  it("a grab after the reset finished is unaffected", () => {
+    const r = at90();
+    r.zoomAt(1.3, 0);
+    r.reset();
+    for (let i = 0; i < 7; i++) r.tick(0.1);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
+    r.zoomAt(1.2, 0); // 리셋 뒤 다시 확대
+    r.grabOne(P(0.4), 5000);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1.2, mode: "one", panX: 0 }); // 잡기가 확대를 건드리지 않는다
+    r.move(P(0.5), 5033);
+    expect(deg(r.state.yaw)).toBeCloseTo(18, 6);
+    r.release(5400);
+    r.grabTwo(P(0.4), P(0.5), 6000);
+    expect(r.state.zoom).toBeCloseTo(1.2, 12);
+    expect(deg(r.state.yaw)).toBeCloseTo(18, 6);
+    r.moveTwo(P(0.4), P(0.6), 6033); // 거리 두 배: 1.2 × 2 → 1.6에서 자름
+    expect(r.state.zoom).toBe(1.6);
+  });
+
+  it("an invalid grab during reset changes nothing (reset keeps running)", () => {
+    const r = at90();
+    r.reset();
+    r.tick(0.25);
+    const mid = r.state;
+    r.grabOne(P(Number.NaN), 2000);
+    r.grabTwo(P(0.2), P(0.3), Number.NaN);
+    expect(r.state).toEqual(mid);
+    expect(r.state.mode).toBe("resetting");
   });
 });
 

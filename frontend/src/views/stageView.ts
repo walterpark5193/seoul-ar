@@ -127,6 +127,19 @@ export function wheelPixels(deltaY: number, deltaMode = 0): number {
 }
 
 /**
+ * 이벤트의 클라이언트 좌표 → 무대 화면 좌표(요소 기준 0..1). attachPointer의 pointermove와 같은 환산이다
+ * (마우스 좌표는 거울 보정하지 않는다: 거울은 손 영상에만). 요소 크기가 0이면 null.
+ */
+export function stagePoint(
+  el: { getBoundingClientRect(): { left: number; top: number; width: number; height: number } },
+  e: { clientX: number; clientY: number },
+): Point | null {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return null;
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+
+/**
  * 한 인식 프레임의 이벤트 순서. grab과 twoFist가 같은 프레임에 나면 twoFist를 먼저 보낸다:
  * 리듀서가 돌리는 중의 grab을 무시하므로 두 주먹이 구 위에서 한꺼번에 쥐어져도 구를 들었다 내리지(해설·깜빡임) 않는다.
  */
@@ -205,8 +218,11 @@ export interface StageControllerDeps {
 export interface KeyLike { key: string; code?: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; }
 /** 투표 패널 버튼의 data 속성(이벤트 위임) */
 export interface PanelTarget { set?: string | null; confirm?: boolean; method?: string | null; }
-/** 무대 포인터: 휠은 deltaMode(0 픽셀·1 줄·2 페이지)까지 받는다(attachPointer는 deltaY만 넘기므로 DOM 껍데기가 직접 잇는다). */
-export interface StagePointer extends PointerHandlers { wheel(deltaY: number, deltaMode?: number): void; }
+/**
+ * 무대 포인터: 휠은 deltaMode(0 픽셀·1 줄·2 페이지)와 휠 이벤트 자리(at, stagePoint)까지 받는다
+ * (attachPointer는 deltaY만 넘기므로 DOM 껍데기가 직접 잇는다). at이 없으면 마지막 포인터 자리.
+ */
+export interface StagePointer extends PointerHandlers { wheel(deltaY: number, deltaMode?: number, at?: Point | null): void; }
 
 export interface StageController {
   readonly state: StageState;
@@ -760,9 +776,10 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   /**
    * 휠: 지도·펼친 화면에서, 든 구 없음·투표 진행 중 아님일 때만. 픽셀로 모아 WHEEL_STEP_PX마다 한 단계(방향이 바뀌면 새로 센다).
-   * 기준점(계약 13.8): 펼친 화면은 포인터의 ndc x(x·2 − 1, 포인터가 없으면 가운데), 지도는 가운데(panX 0 유지).
+   * 기준점(계약 13.8): 펼친 화면은 휠 이벤트 자리 at의 ndc x(x·2 − 1). at이 없으면 마지막 포인터 자리, 그것도 없으면 가운데.
+   * 지도는 가운데(panX 0 유지).
    */
-  function wheel(deltaY: number, deltaMode = 0): void {
+  function wheel(deltaY: number, deltaMode = 0, at?: Point | null): void {
     if (phase !== "running") return;
     const v = state.vote;
     if (state.lifted !== null || (v !== null && v.phase !== "result")) { wheelAcc = 0; return; }
@@ -770,7 +787,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     if (!Number.isFinite(px) || px === 0) return;
     if (Math.sign(px) !== Math.sign(wheelAcc)) wheelAcc = 0;
     wheelAcc += px;
-    const anchor = state.mode === "spread" && mousePoint ? mousePoint.x * 2 - 1 : 0;
+    const p = at ?? mousePoint;
+    const anchor = state.mode === "spread" && p ? p.x * 2 - 1 : 0;
     while (Math.abs(wheelAcc) >= WHEEL_STEP_PX) {
       const dir = Math.sign(wheelAcc);
       rotator.wheel(dir, anchor);
@@ -1124,7 +1142,7 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
     undo.push(attachPointer(layer, { move, down, up, leave }));
     const onWheel = (ev: WheelEvent) => {
       ev.preventDefault(); // 페이지가 스크롤·확대되지 않게(passive: false)
-      controller.pointer.wheel(ev.deltaY, ev.deltaMode);
+      controller.pointer.wheel(ev.deltaY, ev.deltaMode, stagePoint(layer, ev)); // 기준점은 휠이 일어난 자리(13.8)
     };
     layer.addEventListener("wheel", onWheel, { passive: false });
     undo.push(() => layer.removeEventListener("wheel", onWheel));

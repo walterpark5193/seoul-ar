@@ -14,7 +14,7 @@ import { createNarrator, type AudioLike, type NarrationItem, type Narrator } fro
 import type { GestureName, HandFrame, HandObs, Point, Vec3 } from "../stage/types";
 import {
   HAND_ERROR_LIMIT, HAND_START_TIMEOUT_MS, HEARTBEAT_MS, RESULT_GUARD_MS, VIEW_PUBLISH_MS, VOTE_TICK_MS,
-  createStageController, normalizeKey, orderGestureEvents, voteCandidates, voteTiming, wheelPixels,
+  createStageController, normalizeKey, orderGestureEvents, stagePoint, voteCandidates, voteTiming, wheelPixels,
   type StageControllerDeps, type StartResult, type UiPart,
 } from "./stageView";
 
@@ -1871,6 +1871,86 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
     s.render();
     expect(s.zoom()).toBe(z);
     expect(s.pan()).toBe(p);
+  });
+
+  it("spread wheel zoom anchors at the wheel event position, not the last pointer move", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.c.pointer.move({ x: 0.9, y: 0.5 }); // 마지막 pointermove는 오른쪽(ndc 0.8)
+    s.c.pointer.wheel(-100, 0, { x: 0.05, y: 0.5 }); // 휠은 왼쪽 끝(ndc −0.9)에서
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    expect(s.pan()).toBeCloseTo(-0.9 + 0.9 / 1.1, 9);
+    // 포인터가 나간 뒤(마지막 점 없음)에도 휠 자리를 기준으로
+    s.c.pointer.leave();
+    s.c.pointer.wheel(-100, 0, { x: 0.05, y: 0.5 });
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.21, 9);
+    expect(s.pan()).toBeCloseTo(-0.9 + 0.9 / 1.21, 9);
+    // 지도는 휠 자리가 왼쪽 끝이어도 가운데 기준(panX 0)
+    s.key(" ");
+    s.render(1);
+    expect(s.c.state.mode).toBe("map");
+    s.c.pointer.wheel(-100, 0, { x: 0.05, y: 0.5 });
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    expect(s.pan()).toBe(0);
+  });
+
+  it("stagePoint maps a wheel event like the pointer path (element-relative 0..1, no mirror for the mouse)", () => {
+    const el = { getBoundingClientRect: () => ({ left: 100, top: 50, width: 800, height: 400 }) };
+    expect(stagePoint(el, { clientX: 140, clientY: 250 })).toEqual({ x: 0.05, y: 0.5 });
+    expect(stagePoint(el, { clientX: 900, clientY: 50 })).toEqual({ x: 1, y: 0 });
+    expect(stagePoint({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) }, { clientX: 1, clientY: 1 })).toBeNull();
+  });
+
+  it("a grab during the reset finishes the reset first", async () => {
+    // 손: 지도를 돌려 놓고 펼친 뒤, 정면 복귀 0.25초에 두 주먹 → 반쯤 돌아온 각도가 잠기지 않고 정면(0)
+    const h = setup({ pick: () => null });
+    await h.c.start("hands");
+    h.frames(4, [hand("Open_Palm", 0.6, 0.5)]);
+    h.frames(6, [hand("Closed_Fist", 0.6, 0.5)]);
+    for (let i = 1; i <= 10; i++) h.play(33, [hand("Closed_Fist", 0.6 - i * 0.02, 0.5)]);
+    h.play(500, [hand("Closed_Fist", 0.4, 0.5)]);
+    h.play(300, [hand("Open_Palm", 0.4, 0.5)]);
+    expect(h.c.state).toMatchObject({ rotate: "none", spinning: false });
+    expect(h.yaw()).toBeGreaterThan(Math.PI / 4 - 0.02);
+    h.key(" ");
+    expect(h.c.state.mode).toBe("spread");
+    h.render(0.25);
+    expect(h.yaw()).toBeGreaterThan(0.05); // 반쯤 돌아온 자세
+    h.frames(6, fists(0.4, 0.52)); // 편 손(0.4)을 그 자리에서 쥐고 둘째 손도 쥔다(주 손 그대로)
+    expect(h.c.state).toMatchObject({ mode: "spread", rotate: "two" });
+    h.render();
+    expect(h.yaw()).toBe(0);
+    expect(h.zoom()).toBe(1);
+    expect(h.pan()).toBe(0);
+    h.render(1);
+    expect(h.yaw()).toBe(0);
+
+    // 마우스: 펼친 화면 왼쪽에서 확대하고 나간 뒤 0.2초에 빈 지도를 누르면 가운데·1배에서 잡는다(panX가 지도에 남지 않음)
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.c.pointer.move({ x: 0.05, y: 0.5 });
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.pan()).toBeLessThan(-0.1);
+    s.key(" ");
+    expect(s.c.state.mode).toBe("map");
+    s.render(0.2);
+    expect(s.pan()).toBeLessThan(0);
+    s.c.pointer.down();
+    expect(s.c.state).toMatchObject({ mode: "map", rotate: "one" });
+    s.render();
+    expect(s.zoom()).toBe(1);
+    expect(s.pan()).toBe(0);
+    expect(s.yaw()).toBe(0);
+    s.c.pointer.wheel(-100); // 지도 확대는 다시 가운데 기준, panX 0 그대로
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    expect(s.pan()).toBe(0);
   });
 
   it("map zoom keeps panX 0", async () => {
