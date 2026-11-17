@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { convertGeoJson } from "./convert.mjs";
+import { convertWithReport } from "./convert.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const layoutPath = resolve(here, "../../frontend/src/geo/tile-layout.json");
@@ -30,10 +30,13 @@ export function buildTileGeo(layout) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const useRaw = existsSync(rawPath);
-  const geo = useRaw
-    ? convertGeoJson(JSON.parse(readFileSync(rawPath, "utf8")))
-    : buildTileGeo(JSON.parse(readFileSync(layoutPath, "utf8")));
+  let geo = null;
+  if (existsSync(rawPath)) {
+    const r = convertWithReport(JSON.parse(readFileSync(rawPath, "utf8")));
+    if (r.geo.gus.length === 25) geo = r.geo;
+    else console.warn(`경고: 원본 GeoJSON이 ${r.geo.gus.length}/25구만 일치, 타일 폴백 유지.\n누락: ${r.missing.join(", ")}\n미일치 feature: ${r.unmatched.join(", ") || "(없음)"}`);
+  }
+  geo ??= buildTileGeo(JSON.parse(readFileSync(layoutPath, "utf8")));
   writeFileSync(outPath, JSON.stringify(geo));
   console.log(`wrote ${outPath}: ${geo.gus.length} gus (${geo.crs})`);
 }

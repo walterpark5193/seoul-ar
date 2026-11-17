@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { convertGeoJson } from "./convert.mjs";
+import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { convertGeoJson, convertWithReport } from "./convert.mjs";
 import { GU_CODE } from "./gu.mjs";
 
 const mini = JSON.parse(readFileSync(new URL("./fixtures/mini.geojson", import.meta.url), "utf8"));
@@ -51,5 +55,36 @@ describe("convertGeoJson", () => {
   });
   it("centroid는 유한 숫자 쌍", () => {
     for (const g of geo.gus) for (const v of g.centroid) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe("이름 매칭과 누락 보고", () => {
+  const feat = (name) => ({ type: "Feature", properties: { name }, geometry: { type: "Polygon", coordinates: [[[127, 37], [127.1, 37], [127.1, 37.1], [127, 37]]] } });
+  it("서울특별시/서울시 접두사와 공백을 허용", () => {
+    const r = convertWithReport({ type: "FeatureCollection", features: [feat("서울특별시 강남구"), feat(" 서울시 중구 ")] });
+    expect(r.geo.gus.map((g) => g.name)).toEqual(["중구", "강남구"]);
+    expect(r.unmatched).toEqual([]);
+  });
+  it("미일치 이름은 unmatched, 나머지 구는 missing에 보고", () => {
+    const r = convertWithReport({ type: "FeatureCollection", features: [feat("강남"), feat("종로구")] });
+    expect(r.geo.gus).toHaveLength(1);
+    expect(r.unmatched).toEqual(["강남"]);
+    expect(r.missing).toHaveLength(24);
+    expect(r.missing).not.toContain("종로구");
+  });
+  it("빈 FeatureCollection은 gus 0개, 25구 전부 missing", () => {
+    const r = convertWithReport({ type: "FeatureCollection", features: [] });
+    expect(r.geo.gus).toEqual([]);
+    expect(r.missing).toHaveLength(25);
+  });
+});
+
+describe("CLI는 25구가 아니면 실패", () => {
+  it("픽스처(3구)는 비0 종료, 출력 파일 없음", () => {
+    const out = join(tmpdir(), `mini-out-${process.pid}.json`);
+    const r = spawnSync(process.execPath, [fileURLToPath(new URL("./convert.mjs", import.meta.url)), "--in", fileURLToPath(new URL("./fixtures/mini.geojson", import.meta.url)), "--out", out], { encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("3/25");
+    expect(existsSync(out)).toBe(false);
   });
 });
