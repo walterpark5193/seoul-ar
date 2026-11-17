@@ -4,7 +4,9 @@ import { VOTE_MAX, type GestureEvent, type GestureName, type GestureOutput, type
 
 export interface GestureConfig { minScore: number; confirmFrames: number; cooldownMs: number; releaseAfterMs: number; }
 export const DEFAULT_GESTURE_CONFIG: GestureConfig = Object.freeze({ minScore: 0.6, confirmFrames: 6, cooldownMs: 800, releaseAfterMs: 300 });
-export interface GestureMachine { push(frame: HandFrame, ctx: { voting: boolean }): GestureOutput; reset(): void; readonly fist: boolean; }
+/** voting: 투표 진행 중(이벤트 없음). spinning: 관성으로 도는 중이면 grab은 쿨다운을 기다리지 않는다(확정 프레임은 그대로, 계약 13.3). */
+export interface GestureCtx { voting: boolean; spinning?: boolean; }
+export interface GestureMachine { push(frame: HandFrame, ctx: GestureCtx): GestureOutput; reset(): void; readonly fist: boolean; }
 
 const WRIST = 0;
 const INDEX_MCP = 5;
@@ -83,7 +85,7 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     lastTwoT = -Infinity;
   }
 
-  function push(frame: HandFrame, ctx: { voting: boolean }): GestureOutput {
+  function push(frame: HandFrame, ctx: GestureCtx): GestureOutput {
     const { t, hands } = frame;
     const handCount = Math.min(hands.length, VOTE_MAX);
 
@@ -156,6 +158,8 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     const events: GestureEvent[] = [];
     const fire = (e: GestureEvent) => { events.push(e); cooldownUntil = t + c.cooldownMs; };
     const ready = () => !fist && t >= cooldownUntil;
+    // 관성 중 주먹은 잡아 멈추기다: 휙 놓은 직후(쿨다운 안)라도 바로 잡혀야 한다. spread·victory는 그대로 쿨다운을 지킨다.
+    const grabReady = () => !fist && (ctx.spinning === true || t >= cooldownUntil);
 
     if (fist && (confirmed(notFistRun) || lostTracked)) {
       // 쿨다운 무시, 쿨다운 시작. 주먹을 두 손 펴기로 놓았을 때 이어서 spread가 나지 않게 spread 래치를 잠근다.
@@ -172,7 +176,7 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
       spreadOffRun = 0;
       events.push({ type: "twoFistEnd" });
     }
-    if (ready() && confirmed(fistRun)) { fist = true; fire({ type: "grab" }); }
+    if (grabReady() && confirmed(fistRun)) { fist = true; fire({ type: "grab" }); }
     // 두 주먹은 fist·쿨다운과 독립이고 쿨다운을 시작하지 않는다. 주 손도 주먹이면 같은 프레임에 grab 다음으로 난다.
     if (!twoFist && confirmed(twoFistRun)) { twoFist = true; events.push({ type: "twoFist" }); }
     if (ready() && spreadArmed && confirmed(spreadRun)) { spreadArmed = false; fire({ type: "spread" }); }

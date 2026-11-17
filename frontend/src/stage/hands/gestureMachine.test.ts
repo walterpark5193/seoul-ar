@@ -226,6 +226,42 @@ describe("cooldown", () => {
     expect(grabT - DT).toBeLessThan(releaseT + DEFAULT_GESTURE_CONFIG.cooldownMs);
   });
 
+  it("spinning: a fist grabs without waiting for the cooldown, still after confirmFrames (contract 13.3)", () => {
+    const m = createGestureMachine();
+    let t = 1000 - DT;
+    const step = (hands: HandObs[], spinning: boolean) => { t += DT; return m.push({ t, hands }, { voting: false, spinning }); };
+    for (let i = 0; i < 6; i++) step([fist()], false);
+    for (let i = 0; i < 6; i++) step([open()], false); // release → 관성 시작(쿨다운 800ms 시작)
+    const releaseT = t;
+    for (let i = 0; i < 3; i++) step([open()], true);
+    const outs = Array.from({ length: 6 }, () => step([fist()], true));
+    expect(types(outs)).toEqual(["grab"]);
+    expect(outs[5]!.events).toEqual([{ type: "grab" }]); // 확정 6프레임은 그대로
+    expect(t - releaseT).toBeLessThan(DEFAULT_GESTURE_CONFIG.cooldownMs);
+    expect(m.fist).toBe(true);
+    // 관성이 아니면(spinning false) 같은 흐름에서 쿨다운을 기다린다(없을 때는 위 "no grab within cooldownMs")
+    const n = createGestureMachine();
+    let u = 1000 - DT;
+    const stepN = (hands: HandObs[]) => { u += DT; return n.push({ t: u, hands }, { voting: false, spinning: false }); };
+    for (let i = 0; i < 6; i++) stepN([fist()]);
+    for (let i = 0; i < 6; i++) stepN([open()]);
+    for (let i = 0; i < 3; i++) stepN([open()]);
+    expect(types(Array.from({ length: 6 }, () => stepN([fist()])))).toEqual([]);
+  });
+
+  it("spinning does not lift the cooldown for spread or victory", () => {
+    const m = createGestureMachine();
+    let t = 1000 - DT;
+    const step = (hands: HandObs[]) => { t += DT; return m.push({ t, hands }, { voting: false, spinning: true }); };
+    for (let i = 0; i < 6; i++) step([fist()]);
+    for (let i = 0; i < 6; i++) step([open()]);
+    const releaseT = t;
+    const outs = Array.from({ length: 40 }, () => step([hand("Victory", 0.9)]));
+    const idx = outs.findIndex((o) => o.events.length > 0);
+    expect(types(outs)).toEqual(["victory"]);
+    expect(releaseT + DT * (idx + 1)).toBeGreaterThanOrEqual(releaseT + DEFAULT_GESTURE_CONFIG.cooldownMs);
+  });
+
   it("victory is blocked during cooldown after spread", () => {
     const d = driver(createGestureMachine());
     expect(types(d.run(6, twoOpen()))).toEqual(["spread"]);

@@ -1,5 +1,5 @@
 // 회전기: 도시를 지구본처럼 돌리는 yaw·zoom·관성 (계약 CONTRACTS-stage 13.2). 순수 모듈(DOM·three 없음).
-// 시간: grab/move/release의 t는 ms(performance.now), tick의 dt는 초.
+// 시간: grab/move/release의 t는 ms(performance.now), tick의 dt는 초. release(t)는 t 이전 velocityWindowMs 창만 본다.
 import type { Point } from "./types";
 
 export interface RotateConfig {
@@ -32,6 +32,11 @@ const TAU = 2 * Math.PI;
 const STOP_SPEED = 5 * DEG;
 /** 두 손 사이가 이보다 가까우면 확대 기준으로 쓰지 않는다(0으로 나누기 방지). */
 const MIN_TWO_DIST = 1e-3;
+/**
+ * 속도 창 앞으로 표본을 더 남겨 두는 시간(ms). release(t)의 t는 마지막 표본보다 앞설 수 있다:
+ * 손은 처음 편 프레임 시각을 넘기는데 놓기 확정은 그 뒤 6프레임(30fps 약 0.2초, 느린 기기·놓친 프레임이면 더)이다.
+ */
+const SAMPLE_HISTORY_MS = 1000;
 
 /** (-π, π]로 정규화. */
 function normalize(a: number): number {
@@ -88,28 +93,32 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
     yaw = normalize(yaw + d);
     const ts = Math.max(t, lastT());
     samples.push({ t: ts, a: travel });
-    // 창 시작 이전 표본은 하나만 남긴다(기준점).
-    const from = ts - c.velocityWindowMs;
-    while (samples.length > 2 && (samples[1]?.t ?? Infinity) <= from) samples.shift();
+    // 보관 구간(창 + SAMPLE_HISTORY_MS) 이전 표본은 하나만 남긴다(기준점).
+    const keepFrom = ts - c.velocityWindowMs - SAMPLE_HISTORY_MS;
+    let drop = 0;
+    while (samples.length - drop > 2 && (samples[drop + 1]?.t ?? Infinity) <= keepFrom) drop++;
+    if (drop > 0) samples.splice(0, drop);
   }
-  /** 최근 velocityWindowMs의 평균 각속도(라디안/초). now까지 마지막 위치를 유지했다고 본다. */
-  function recentVelocity(now: number): number {
-    const first = samples[0];
-    if (!first) return 0;
-    const end = Math.max(now, lastT());
-    const from = end - c.velocityWindowMs;
-    let t0 = first.t;
-    let a0 = first.a;
-    if (from > first.t) {
-      let i = 0;
-      while (i + 1 < samples.length && (samples[i + 1]?.t ?? Infinity) <= from) i++;
-      const s = samples[i] ?? first;
+  /** 시각 at의 누적 회전: 표본 사이는 직선 보간, 첫 표본 앞은 첫 값, 마지막 표본 뒤는 그 자리에 머문 것으로 본다. */
+  function travelAt(at: number): number {
+    for (let i = samples.length - 1; i >= 0; i--) {
+      const s = samples[i]!;
+      if (s.t > at) continue;
       const n = samples[i + 1];
-      a0 = n && n.t > s.t ? s.a + ((n.a - s.a) * (from - s.t)) / (n.t - s.t) : s.a;
-      t0 = from;
+      return n && n.t > s.t ? s.a + ((n.a - s.a) * (at - s.t)) / (n.t - s.t) : s.a;
     }
-    const span = (end - t0) / 1000;
-    return span > 0 ? (travel - a0) / span : 0;
+    return samples[0]?.a ?? 0;
+  }
+  /**
+   * end 이전 velocityWindowMs 구간의 평균 각속도(라디안/초). 그 구간의 표본만 쓴다(end 뒤 움직임은 넣지 않는다).
+   * end가 마지막 표본보다 늦으면 그때까지 마지막 위치를 유지했다고 보고, 첫 표본보다 이르면(잡기 전) 0.
+   */
+  function velocityUntil(end: number): number {
+    const first = samples[0];
+    if (!first || !(end > first.t)) return 0;
+    const from = Math.max(first.t, end - c.velocityWindowMs);
+    const span = (end - from) / 1000;
+    return span > 0 ? (travelAt(end) - travelAt(from)) / span : 0;
   }
   function twoDist(a: Point, b: Point): number {
     return Math.hypot(b.x - a.x, b.y - a.y);
@@ -153,7 +162,8 @@ export function createRotator(cfg: Partial<RotateConfig> = {}): Rotator {
     },
     release(t) {
       if (mode !== "one" && mode !== "two") return;
-      const w = Number.isFinite(t) ? recentVelocity(t) : 0;
+      // t 이전 창의 속도(계약 13.2): 손은 처음 편 프레임 시각을 넘긴다(놓기 확정은 그보다 늦다).
+      const w = Number.isFinite(t) ? velocityUntil(t) : 0;
       const speed = Math.abs(w);
       if (speed >= c.flickMinDegPerSec * DEG && speed > 0) {
         omega = Math.sign(w) * Math.min(speed, c.maxSpeedDeg * DEG);

@@ -5,6 +5,7 @@ import type { DataIndex, GuData, Stat } from "../data/types";
 import type { StateMessage } from "../realtime/types";
 import type { HandSource } from "../stage/hands/recognizer";
 import { createCursorMapper } from "../stage/hands/cursor";
+import { DEFAULT_GESTURE_CONFIG } from "../stage/hands/gestureMachine";
 import { createVoteCounter } from "../stage/hands/voteCounter";
 import { ALLOWED_KEYS, type StageChannelMessage, type StageMessage } from "../stage/net/messages";
 import { createRotator } from "../stage/rotate";
@@ -1323,7 +1324,7 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
     s.play(500, [hand("Open_Palm", x, 0.5)]);
     expect(turned(a, s.yaw())).toBeGreaterThan(0.5); // 놓은 뒤에도 관성으로 돈다(0.5초에 약 75°)
     under = "강남구";
-    s.play(400, [hand("Open_Palm", x, 0.5)]); // 쿨다운(800ms)이 지난다
+    s.play(400, [hand("Open_Palm", x, 0.5)]); // 관성이 이어지는 동안(관성 중 주먹은 쿨다운을 기다리지 않는다: fix A2 테스트)
     expect(s.c.state).toMatchObject({ spinning: true, hover: "강남구" }); // 관성 중에는 hover가 갱신된다
     for (let i = 0; i < 8 && s.c.state.spinning; i++) s.play(33, [hand("Closed_Fist", x, 0.5)]);
     // 구 위에서 쥐어도 잡기만 한다(들지 않음), 그대로 쥐고 있으면 이어서 돌릴 수 있다
@@ -1710,6 +1711,99 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
       .toEqual([{ type: "release" }, { type: "twoFist" }, { type: "grab" }, { type: "spread" }]);
     expect(orderGestureEvents([{ type: "grab" }])).toEqual([{ type: "grab" }]);
     expect(orderGestureEvents([{ type: "twoFistEnd" }, { type: "twoFist" }])).toEqual([{ type: "twoFistEnd" }, { type: "twoFist" }]);
+  });
+
+  it("losing the rotating fist while another hand is visible: no yaw jump, no spin; a re-acquired fist turns only by what it moves after (fix A1)", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    const palm = hand("Open_Palm", 0.2, 0.5); // 화면 오른쪽 끝(0.875)에 편 손이 계속 보인다
+    const grip = wideHand("Closed_Fist", 0.6, 0.5); // 손바닥이 넓어 주 손(화면 0.375)
+    s.frames(6, [grip, palm]);
+    expect(s.c.state.rotate).toBe("one");
+    s.play(500, [grip, palm]);
+    const held = s.yaw();
+    // 주먹만 사라진다: 300ms가 되는 프레임에 놓기, 같은 프레임에 편 손이 주 손이 된다
+    for (let i = 0; i < 15 && s.c.state.rotate === "one"; i++) s.play(33, [palm]);
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: false });
+    expect(s.yaw()).toBe(held);
+    s.play(1500, [palm]);
+    expect(s.yaw()).toBe(held);
+
+    // 같은 주먹을 다시 잡은 프레임(프레임이 0.4초 멈췄다 오고 그 사이 손이 움직였다): 기준만 다시 잡고, 그 뒤 움직인 만큼만 돈다
+    const r = setup({ pick: () => null });
+    await r.c.start("hands");
+    r.frames(6, [hand("Closed_Fist", 0.6, 0.5)]);
+    r.play(300, [hand("Closed_Fist", 0.6, 0.5)]);
+    const y0 = r.yaw();
+    r.frame([hand("Closed_Fist", 0.5, 0.5)], 400); // 화면 0.375 → 0.5(다시 잡음, 정지 가드로 놓지 않음)
+    r.render();
+    expect(r.c.state.rotate).toBe("one");
+    expect(r.yaw()).toBe(y0);
+    for (let i = 1; i <= 4; i++) r.play(33, [hand("Closed_Fist", 0.5 - i * 0.02, 0.5)]); // 화면 +0.1 → 18°
+    r.play(500, [hand("Closed_Fist", 0.42, 0.5)]);
+    expect(turned(y0, r.yaw())).toBeGreaterThan(Math.PI / 10 - 0.02);
+    expect(turned(y0, r.yaw())).toBeLessThan(Math.PI / 10 + 0.02);
+  });
+
+  it("a fist 300ms after a flick catches the spin without waiting for the gesture cooldown (fix A2)", async () => {
+    let under: string | null = null;
+    const f = setup({ pick: () => under });
+    await f.c.start("hands");
+    f.frames(6, [hand("Closed_Fist", 0.8, 0.5)]);
+    let x = 0.8;
+    for (let i = 0; i < 6; i++) f.play(33, [hand("Closed_Fist", (x -= 0.04), 0.5)]);
+    for (let i = 0; i < 8 && f.c.state.rotate === "one"; i++) f.play(33, [hand("Open_Palm", (x -= 0.04), 0.5)]);
+    expect(f.c.state).toMatchObject({ rotate: "none", spinning: true });
+    const releasedAt = f.clock.now();
+    under = "강남구"; // 구 위에서 쥐어도 들지 않고 잡기만 한다
+    f.play(300, [hand("Open_Palm", x, 0.5)]);
+    expect(f.c.state).toMatchObject({ spinning: true, hover: "강남구" });
+    for (let i = 0; i < 6 && f.c.state.spinning; i++) f.play(33, [hand("Closed_Fist", x, 0.5)]);
+    expect(f.c.state).toMatchObject({ spinning: false, rotate: "one", lifted: null });
+    expect(f.scene.lift).not.toHaveBeenCalled();
+    expect(f.clock.now() - releasedAt).toBeLessThan(DEFAULT_GESTURE_CONFIG.cooldownMs);
+    const caught = f.yaw();
+    f.render(0.5);
+    expect(f.yaw()).toBe(caught); // 그 자리에서 멈췄다
+  });
+
+  it("hand flick: the speed is taken when the hand opens, so a sweep that stops while the release confirms still spins (fix A3)", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    s.frames(6, [hand("Closed_Fist", 0.8, 0.5)]);
+    s.play(300, [hand("Closed_Fist", 0.8, 0.5)]);
+    let x = 0.8;
+    for (let i = 0; i < 6; i++) s.play(33, [hand("Closed_Fist", (x -= 0.04), 0.5)]); // 화면 0.05/33ms ≈ 273°/s
+    s.play(33, [hand("Open_Palm", (x -= 0.04), 0.5)]); // 끝에서 손을 편다
+    for (let i = 0; i < 8 && s.c.state.rotate === "one"; i++) s.play(33, [hand("Open_Palm", x, 0.5)]); // 멈춘 채 놓기 확정(6프레임)
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: true });
+    const a = s.yaw();
+    s.render(0.05);
+    // 처음 0.05초에 ≥ 150°/s × 0.047(지수 감속 적분): 놓기 확정 때의 정지가 아니라 편 순간의 속도
+    expect(turned(a, s.yaw())).toBeGreaterThan((150 * Math.PI / 180) * (1 - Math.exp(-2.5 * 0.05)) / 2.5);
+
+    // 멈추고 0.2초 쥐고 있다가 편 손: 관성 없음
+    const r = setup({ pick: () => null });
+    await r.c.start("hands");
+    r.frames(6, [hand("Closed_Fist", 0.8, 0.5)]);
+    r.play(300, [hand("Closed_Fist", 0.8, 0.5)]);
+    let y = 0.8;
+    for (let i = 0; i < 7; i++) r.play(33, [hand("Closed_Fist", (y -= 0.04), 0.5)]);
+    r.play(200, [hand("Closed_Fist", y, 0.5)]);
+    for (let i = 0; i < 8 && r.c.state.rotate === "one"; i++) r.play(33, [hand("Open_Palm", y, 0.5)]);
+    expect(r.c.state).toMatchObject({ rotate: "none", spinning: false });
+
+    // 두 주먹: 함께 밀다 끝에서 한 손을 펴고 멈춰도 관성
+    const t = setup({ pick: () => null });
+    await t.c.start("hands");
+    let p = 0.6;
+    let q = 0.8;
+    t.frames(6, fists(p, q));
+    expect(t.c.state.rotate).toBe("two");
+    for (let i = 0; i < 6; i++) t.play(33, fists((p -= 0.04), (q -= 0.04)));
+    t.play(33, [hand("Closed_Fist", (p -= 0.04), 0.5), hand("Open_Palm", (q -= 0.04), 0.5)]);
+    for (let i = 0; i < 8 && t.c.state.rotate === "two"; i++) t.play(33, [hand("Closed_Fist", p, 0.5), hand("Open_Palm", q, 0.5)]);
+    expect(t.c.state).toMatchObject({ rotate: "none", spinning: true });
   });
 
   it("two fists held through the end of a camera vote do not rotate on the result screen", async () => {

@@ -111,6 +111,43 @@ describe("release and inertia", () => {
     const yaw = r.state.yaw;
     expect(r.tick(0.5).yaw).toBe(yaw);
   });
+  it("release(t) earlier than the last sample: velocity of the window ending at t (hand opened mid-flick)", () => {
+    const r = createRotator();
+    drag(r, 0.3, 0.5, 0, 100, 5);                 // 360°/s로 밀다가
+    for (let t = 133; t <= 300; t += 33) r.move(P(0.5), t); // 멈춘 채 놓기 확정을 기다린다(약 0.2초)
+    r.release(100);                                // 손을 처음 편 시각
+    expect(r.state.mode).toBe("spinning");
+    const yaw0 = r.state.yaw;
+    const f = DEFAULT_ROTATE.friction;
+    const dt = 1 / 60;
+    expect(deg(dAng(yaw0, r.tick(dt).yaw))).toBeCloseTo((360 / f) * (1 - Math.exp(-f * dt)), 6);
+    expect(deg(yaw0)).toBeCloseTo(36, 6); // 각도는 지금 자리(놓기 확정 때)에서 이어진다
+  });
+  it("release(t) between samples interpolates; a window after the hand stopped is still", () => {
+    // 0~100ms 360°/s, 100~200ms 정지 → release(150): [50, 150] 중 50~100만 움직임 = 18°/0.1초 = 180°/s
+    const r = createRotator();
+    drag(r, 0.3, 0.5, 0, 100, 5);
+    r.move(P(0.5), 200);
+    r.move(P(0.5), 300);
+    r.release(150);
+    expect(r.state.mode).toBe("spinning");
+    const f = DEFAULT_ROTATE.friction;
+    const dt = 1 / 60;
+    const yaw0 = r.state.yaw;
+    expect(deg(dAng(yaw0, r.tick(dt).yaw))).toBeCloseTo((180 / f) * (1 - Math.exp(-f * dt)), 6);
+    // 멈추고 0.1초 넘게 들고 있다가 편 손(release(200)): 창 [100, 200]이 정지라 관성 없음
+    const s = createRotator();
+    drag(s, 0.3, 0.5, 0, 100, 5);
+    s.move(P(0.5), 200);
+    s.move(P(0.5), 400);
+    s.release(200);
+    expect(s.state.mode).toBe("idle");
+    // 잡기보다 앞선 t: 표본이 없으니 관성 없음
+    const e = createRotator();
+    drag(e, 0.3, 0.5, 1000, 1100, 5);
+    e.release(900);
+    expect(e.state.mode).toBe("idle");
+  });
   it("speed just below threshold: no spin", () => {
     const r = createRotator();
     drag(r, 0.5, 0.5 + 5 / 180, 0, 100, 5); // 5° / 0.1초 = 50°/s < 60

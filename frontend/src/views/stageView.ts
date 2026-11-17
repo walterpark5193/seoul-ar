@@ -23,7 +23,7 @@ import { createRotator, type Rotator } from "../stage/rotate";
 import { createStageRenderer } from "../stage/stageRenderer";
 import { defaultCandidates, initialStageState, parseVoteParam, reduceStage } from "../stage/stageState";
 import {
-  VOTE_MAX, VOTE_TIMING, type Effect, type GestureEvent, type GestureOutput, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState,
+  VOTE_MAX, VOTE_TIMING, type Effect, type GestureEvent, type GestureOutput, type HandFrame, type HandObs, type InputMode, type Point, type StageEvent, type StageMode, type StageState,
 } from "../stage/types";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
 import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
@@ -275,6 +275,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let rotBy: "hand" | "mouse" | null = null;       // 지금 잡고 있는 입력(점·시간 기준이 이쪽을 따른다)
   let pendingGrab: "one" | "two" | null = null;    // 잡을 점이 아직 없어 첫 점이 오면 잡는다
   let frameT = 0;                                  // 마지막 인식 프레임의 f.t(손 회전의 시간 기준)
+  let openT: number | null = null;                 // 손으로 돌리는 중 추적 손이 처음 주먹이 아니게 된 프레임의 f.t(휙 속도를 손을 편 순간으로 잰다)
   let twoPts: [Point, Point] | null = null;        // 이번 프레임 주 손·둘째 손 손바닥(화면 좌표). 정확히 두 손일 때만
   let spinShown = false;                           // 마지막으로 spinState로 알린 회전기 관성 여부
   let wheelAcc = 0;                                // 모은 휠 픽셀(부호 = 방향)
@@ -399,13 +400,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   /** 잡은 입력의 시간 기준: 손은 인식 프레임 시각(f.t), 마우스는 clock. 회전기 속도 표본이 한 기준으로만 쌓이게. */
   const rotT = () => (rotBy === "hand" ? frameT : clock.now());
-  const clearHold = () => { rotBy = null; pendingGrab = null; };
+  const clearHold = () => { rotBy = null; pendingGrab = null; openT = null; };
 
   function run(fx: Effect, src: InputSrc): void {
     switch (fx.type) {
       case "rotate.grabOne": {
         // grab은 손 프레임이나 마우스 누르기에서만 온다. 잡는 점: 손이면 손 커서, 마우스면 마지막 포인터 자리.
         rotBy = src === "hand" ? "hand" : "mouse";
+        openT = null;
         const at = rotBy === "hand" ? (handLost ? null : handPoint) : mousePoint;
         pendingGrab = at ? null : "one";
         if (at) rotator.grabOne(at, rotT());
@@ -414,10 +416,15 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       case "rotate.grabTwo":
         // 주 손·둘째 손이 이번 프레임에 다 있어야 잡는다. 없으면 둘 다 보이는 첫 프레임에 잡는다.
         rotBy = "hand";
+        openT = null;
         pendingGrab = twoPts ? null : "two";
         if (twoPts) rotator.grabTwo(twoPts[0], twoPts[1], frameT);
         return;
-      case "rotate.release": rotator.release(rotT()); clearHold(); return;
+      case "rotate.release":
+        // 손의 "놓기"는 손을 편 순간이다: 놓기 확정(6프레임 뒤)이 아니라 처음 편 프레임까지의 속도로 휙을 잰다(계약 13.2).
+        rotator.release(rotBy === "hand" ? (openT ?? frameT) : clock.now());
+        clearHold();
+        return;
       case "rotate.catch": rotator.catch(); return;
       case "rotate.reset": rotator.reset(reducedMotion); clearHold(); wheelAcc = 0; return;
       case "scene.layout":
@@ -516,10 +523,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     return Math.hypot(pb.x - pa.x, pb.y - pa.y) < TWO_HAND_MIN_DIST ? null : [pa, pb];
   }
 
-  /** 손으로 잡고 있으면 이번 프레임 점으로 돌린다(한 손: 커서, 두 손: 두 손바닥). 미룬 잡기는 점이 생긴 첫 프레임에. */
-  function followHands(cur: Point | null, t: number): void {
+  /**
+   * 손으로 잡고 있으면 이번 프레임 점으로 돌린다(한 손: 커서, 두 손: 두 손바닥). 미룬 잡기는 점이 생긴 첫 프레임에.
+   * regrab: 커서 손을 다시 잡았거나 주 손이 다른 손으로 바뀐 프레임(커서 필터를 새로 시작한 프레임). 이 점은 앞 점과
+   * 이어지지 않으므로 move 대신 grabOne으로 기준만 다시 잡는다(각도 그대로, 튐·가짜 관성 없음).
+   */
+  function followHands(cur: Point | null, t: number, regrab: boolean): void {
     if (state.rotate === "one" && rotBy === "hand" && cur) {
-      if (pendingGrab === "one") { pendingGrab = null; rotator.grabOne(cur, t); }
+      if (pendingGrab === "one" || regrab) { pendingGrab = null; openT = null; rotator.grabOne(cur, t); }
       else rotator.move(cur, t);
     } else if (state.rotate === "two" && twoPts) {
       // 두 손이 아닌 프레임(셋째 손·한 손 놓침)은 건너뛴다. 끝내는 것은 twoFistEnd가 맡는다.
@@ -528,12 +539,33 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     }
   }
 
+  /** gestureMachine과 같은 "확실한 주먹"(점수 미달 주먹은 주먹이 아니다). */
+  const sureFist = (h: HandObs) => h.gesture === "Closed_Fist" && h.score >= DEFAULT_GESTURE_CONFIG.minScore;
+  /**
+   * 손으로 돌리는 중 손을 편 첫 프레임을 기억한다(놓기 확정을 낼 비주먹 연속과 같은 기준).
+   * 한 손: 추적 손이 주먹이 아니면 기록, 주먹이면 지운다. 안 보이는 프레임은 중립.
+   * 두 손: 손이 둘 이상 보이는 프레임에서 "정확히 두 손이 모두 주먹"이 아니면 기록, 맞으면 지운다. 두 손 미만은 중립.
+   */
+  function trackOpen(f: HandFrame, p: HandObs | undefined): void {
+    if (rotBy !== "hand") return;
+    if (state.rotate === "one") {
+      if (!p) return;
+      if (sureFist(p)) openT = null;
+      else openT ??= f.t;
+    } else if (state.rotate === "two") {
+      if (f.hands.length < 2) return;
+      if (f.hands.length === 2 && f.hands.every(sureFist)) openT = null;
+      else openT ??= f.t;
+    }
+  }
+
   function onFrame(f: HandFrame): void {
     frameAt = clock.now(); // 프레임 시각 f.t(performance)와 섞지 않고 clock 한쪽으로만 잰다
     if (phase !== "running") return;
     const v = state.vote;
     const hands = state.input === "hands";
-    const out = hands ? gestures.push(f, { voting: v !== null && v.phase !== "result" }) : null;
+    // 관성 중이면 한 손 주먹이 쿨다운을 기다리지 않는다(휙 놓자마자 쥐어도 잡혀 멈춘다, 계약 13.3).
+    const out = hands ? gestures.push(f, { voting: v !== null && v.phase !== "result", spinning: state.spinning }) : null;
     liveHands = out ? out.handCount : Math.min(f.hands.length, VOTE_MAX);
     // 카메라로 세는 동안은 손이 0개인 프레임까지 모두 넣는다(0이 500ms 이어지면 0표).
     if (v && v.phase === "counting" && v.method === "camera") counter.push(f.t, liveHands);
@@ -543,10 +575,11 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     frameT = f.t;
     const p = out.primary === null ? undefined : f.hands[out.primary];
     gesture = p ? { name: p.gesture, score: p.score } : { name: "None", score: 0 };
+    // 진짜로 놓쳤다가 다시 잡으면 필터를 새로 시작한다. gestureMachine은 간격이 releaseAfterMs에 닿는 프레임에
+    // 곧바로 다른(가장 큰) 손을 주 손으로 잡으므로, 그 경우도 간격으로 판정한다. 이 프레임은 회전 기준도 다시 잡는다.
+    const regrab = p !== undefined && (handLost || (handSeenAt !== null && f.t - handSeenAt >= CURSOR_GAP_MS));
     if (p) {
-      // 진짜로 놓쳤다가 다시 잡으면 필터를 새로 시작한다. gestureMachine은 간격이 releaseAfterMs에 닿는 프레임에
-      // 곧바로 다른(가장 큰) 손을 주 손으로 잡으므로, 그 경우도 간격으로 판정한다.
-      if (handLost || (handSeenAt !== null && f.t - handSeenAt >= CURSOR_GAP_MS)) { cursor.reset(); handLost = false; }
+      if (regrab) { cursor.reset(); handLost = false; }
       handPoint = cursor.map(p.landmarks, f.t);
       handSeenAt = f.t;
       if (state.rotate === "none") hoverTo(pickAt(handPoint)); // 돌리는 동안에는 구를 고르지 않는다(hover null 유지)
@@ -556,7 +589,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       hoverTo(null);
     }
     twoPts = twoPalms(f, out);
-    followHands(p ? handPoint : null, f.t); // 이벤트 앞: 놓는 프레임의 마지막 움직임까지 속도에 든다
+    followHands(p ? handPoint : null, f.t, regrab); // 이벤트 앞: 놓는 프레임의 마지막 움직임까지 속도에 든다
+    trackOpen(f, p);
     renderCursor();
     for (const e of orderGestureEvents(out.events)) dispatch({ type: e.type }, "hand");
   }
