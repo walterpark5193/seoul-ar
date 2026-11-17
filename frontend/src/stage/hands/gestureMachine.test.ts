@@ -421,7 +421,7 @@ describe("voting", () => {
 describe("primary and handCount", () => {
   it("no hands → primary null, handCount 0", () => {
     const d = driver(createGestureMachine());
-    expect(d.step([])).toEqual({ primary: null, events: [], handCount: 0 });
+    expect(d.step([])).toEqual({ primary: null, secondary: null, events: [], handCount: 0 });
   });
 
   it("without a previous primary, the widest palm wins", () => {
@@ -503,6 +503,227 @@ describe("primary and handCount", () => {
     const many = Array.from({ length: 8 }, (_, i) => hand("Open_Palm", 0.9, [0.1 * (i + 1), 0.5]));
     expect(d.step(many).handCount).toBe(6);
     expect(d.step(many.slice(0, 3)).handCount).toBe(3);
+  });
+});
+
+describe("two fists (contract 13.3)", () => {
+  // L(0.3)이 조금 더 커서 추적 기억이 없으면 L이 주 손이 된다(같은 폭이면 부동소수 차이로 갈린다).
+  const L = (g: GestureName, score = 0.9) => hand(g, score, [0.3, 0.5], 0.12);
+  const R = (g: GestureName, score = 0.9) => hand(g, score, [0.7, 0.5]);
+  const twoFists = (): HandObs[] => [L("Closed_Fist"), R("Closed_Fist")];
+
+  it("secondary is the other hand", () => {
+    // 손 없음·한 손이면 null
+    const d0 = driver(createGestureMachine());
+    expect(d0.step([]).secondary).toBeNull();
+    expect(d0.step([open()]).secondary).toBeNull();
+
+    // 두 손: 주 손(큰 손)이 아닌 손
+    const d = driver(createGestureMachine());
+    const first = d.step([hand("Open_Palm", 0.9, [0.2, 0.5], 0.08), hand("Open_Palm", 0.9, [0.8, 0.5], 0.14)]);
+    expect([first.primary, first.secondary]).toEqual([1, 0]);
+    // 순서가 바뀌어도 주 손은 손목을 따라가고, 둘째 손은 남은 손(더 커도)
+    const swapped = d.step([hand("Open_Palm", 0.9, [0.78, 0.52], 0.1), hand("Open_Palm", 0.9, [0.25, 0.5], 0.2)]);
+    expect([swapped.primary, swapped.secondary]).toEqual([0, 1]);
+    // 한 손만 남으면 null
+    expect(d.step([hand("Open_Palm", 0.9, [0.78, 0.52], 0.1)]).secondary).toBeNull();
+
+    // 세 손: 주 손이 아닌 손 중 손바닥이 가장 큰 손
+    const d3 = driver(createGestureMachine());
+    const three = [hand("Open_Palm", 0.9, [0.2, 0.5], 0.08), hand("Open_Palm", 0.9, [0.5, 0.5], 0.14), hand("Open_Palm", 0.9, [0.8, 0.5], 0.12)];
+    const o3 = d3.step(three);
+    expect([o3.primary, o3.secondary]).toEqual([1, 2]);
+
+    // 투표 중에도 알려 준다
+    const dv = driver(createGestureMachine());
+    const ov = dv.step(three, true);
+    expect([ov.primary, ov.secondary]).toEqual([1, 2]);
+
+    // 주 손이 없는 프레임(추적 손 기억 중 근처에 손 없음): 모든 손이 "주 손이 아닌 손"이라 가장 큰 손
+    const dn = driver(createGestureMachine());
+    dn.step([hand("Open_Palm", 0.9, [0.5, 0.9], 0.1)]);
+    const on = dn.step([hand("Open_Palm", 0.9, [0.2, 0.2], 0.08), hand("Open_Palm", 0.9, [0.8, 0.2], 0.14)]);
+    expect([on.primary, on.secondary]).toEqual([null, 1]);
+  });
+
+  it("twoFist after 6 frames both fists", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    expect(types(d.run(5, twoFists()))).toEqual([]);
+    // 주 손도 주먹이므로 grab이 같은 프레임에 함께 난다(두 주먹은 단일 주먹 상태와 독립). 순서: grab → twoFist
+    expect(types(d.run(1, twoFists()))).toEqual(["grab", "twoFist"]);
+    expect(m.fist).toBe(true);
+  });
+
+  it("twoFist: a broken frame restarts the count, low score and other hand counts do not qualify", () => {
+    const d = driver(createGestureMachine());
+    expect(types(d.run(5, twoFists()))).toEqual([]);
+    d.step([L("Closed_Fist"), R("Closed_Fist", 0.5)]); // 한 손 점수 미달: 끊김
+    const outs = d.run(6, twoFists());
+    expect(outs.findIndex((o) => o.events.some((e) => e.type === "twoFist"))).toBe(5);
+
+    const d1 = driver(createGestureMachine());
+    expect(types(d1.run(30, [L("Closed_Fist"), R("Closed_Fist", 0.5)])).filter((e) => e === "twoFist")).toEqual([]);
+    const d2 = driver(createGestureMachine());
+    expect(types(d2.run(30, [L("Closed_Fist"), R("Open_Palm")])).filter((e) => e === "twoFist")).toEqual([]);
+    const d3 = driver(createGestureMachine());
+    expect(types(d3.run(30, [...twoFists(), hand("Closed_Fist", 0.9, [0.5, 0.2])])).filter((e) => e === "twoFist")).toEqual([]);
+  });
+
+  it("twoFist latch", () => {
+    const d = driver(createGestureMachine());
+    expect(types(d.run(6, twoFists()))).toEqual(["grab", "twoFist"]);
+    // 쿨다운이 지나도록 계속 쥐고 있어도 다시 나지 않는다
+    expect(types(d.run(60, twoFists()))).toEqual([]);
+  });
+
+  it("twoFistEnd when one opens", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    d.run(6, twoFists());
+    // 둘째 손(R)이 편다: 비주먹 6프레임째 한 번. 주 손 주먹(fist)은 그대로
+    expect(types(d.run(5, [L("Closed_Fist"), R("Open_Palm")]))).toEqual([]);
+    expect(d.step([L("Closed_Fist"), R("Open_Palm")]).events).toEqual([{ type: "twoFistEnd" }]);
+    expect(m.fist).toBe(true);
+    expect(types(d.run(30, [L("Closed_Fist"), R("Open_Palm")]))).toEqual([]);
+    // 풀린 뒤 다시 두 주먹 → 새로 6프레임 확정 후 다시 twoFist
+    expect(types(d.run(5, twoFists()))).toEqual([]);
+    expect(types(d.run(1, twoFists()))).toEqual(["twoFist"]);
+    // 점수 미달 주먹도 주먹이 아님(release와 같은 기준)
+    expect(types(d.run(6, [L("Closed_Fist"), R("Closed_Fist", 0.4)]))).toEqual(["twoFistEnd"]);
+  });
+
+  it("twoFistEnd when the primary hand opens comes with release (release first)", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    d.run(6, twoFists());
+    const outs = d.run(6, [L("Open_Palm"), R("Closed_Fist")]);
+    expect(types(outs)).toEqual(["release", "twoFistEnd"]);
+    expect(outs.findIndex((o) => o.events.length > 0)).toBe(5);
+    expect(m.fist).toBe(false);
+  });
+
+  it("twoFist survives 1-frame dropout", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    d.run(6, twoFists());
+    const outs = [
+      ...d.run(10, twoFists()),
+      d.step([L("Closed_Fist")]), // 둘째 손 한 프레임 놓침
+      ...d.run(10, twoFists()),
+      d.step([]), // 두 손 다 한 프레임 놓침
+      ...d.run(10, twoFists()),
+      d.step([L("Closed_Fist"), R("None")]), // 한 프레임 None
+      ...d.run(10, twoFists()),
+      ...d.run(9, [L("Closed_Fist")]), // releaseAfterMs 미만(297ms) 놓침
+      ...d.run(30, twoFists()),
+    ];
+    expect(types(outs)).toEqual([]);
+    expect(m.fist).toBe(true);
+  });
+
+  it("twoFistEnd after hand loss 300ms", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    d.run(6, twoFists());
+    // 둘째 손이 사라지고 주 손 주먹만 남는다: 마지막 두 손 프레임 뒤 9프레임(297ms)은 아직, 10번째(330ms)에서 한 번
+    expect(types(d.run(9, [L("Closed_Fist")]))).toEqual([]);
+    expect(d.step([L("Closed_Fist")]).events).toEqual([{ type: "twoFistEnd" }]);
+    expect(m.fist).toBe(true);
+    expect(types(d.run(20, [L("Closed_Fist")]))).toEqual([]);
+
+    // 두 손이 다 사라지면 release와 같은 프레임(330ms)
+    const m2 = createGestureMachine();
+    const d2 = driver(m2);
+    d2.run(6, twoFists());
+    expect(types(d2.run(9, []))).toEqual([]);
+    expect(types(d2.run(1, []))).toEqual(["release", "twoFistEnd"]);
+    expect(types(d2.run(20, []))).toEqual([]);
+  });
+
+  it("hand-loss twoFistEnd uses elapsed time since the last two-hand frame (uneven intervals)", () => {
+    const m = createGestureMachine();
+    let t = 1000;
+    for (let i = 0; i < 6; i++) m.push({ t: (t += 33), hands: twoFists() }, { voting: false });
+    const lastTwoT = t;
+    const gaps = [20, 50, 45, 20, 50, 40, 30, 44]; // 누적 299ms
+    for (const g of gaps) expect(m.push({ t: (t += g), hands: [L("Closed_Fist")] }, { voting: false }).events).toEqual([]);
+    expect(t - lastTwoT).toBe(299);
+    expect(m.push({ t: (t += 1), hands: [L("Closed_Fist")] }, { voting: false }).events).toEqual([{ type: "twoFistEnd" }]);
+  });
+
+  it("voting silences twoFist", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    expect(types(d.run(30, twoFists(), true))).toEqual([]);
+    // 투표 중 본 프레임은 확정에 세지 않는다
+    expect(types(d.run(5, twoFists()))).toEqual([]);
+    expect(types(d.run(1, twoFists()))).toEqual(["grab", "twoFist"]);
+    // 두 주먹 상태에서 투표가 시작되면 조용히 해제: twoFistEnd 없음
+    expect(d.step(twoFists(), true).events).toEqual([]);
+    expect(types(d.run(30, [L("Open_Palm"), R("Open_Palm")], true))).toEqual([]);
+    // 투표 뒤 손을 펴거나 놓쳐도 twoFistEnd(또는 release)는 나오지 않는다(이미 풀림)
+    expect(types(d.run(30, [L("Open_Palm"), R("Open_Palm")]))).toEqual([]);
+    expect(types(d.run(30, []))).toEqual([]);
+    expect(m.fist).toBe(false);
+  });
+
+  it("single fist grab/release unaffected by second fist", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    const outs: GestureOutput[] = [];
+    // 주 손(L)만 주먹: 지금처럼 6프레임째 grab
+    const g = d.run(6, [L("Closed_Fist")]);
+    outs.push(...g);
+    expect(types(g)).toEqual(["grab"]);
+    expect(g.findIndex((o) => o.events.length > 0)).toBe(5);
+    // 둘째 손이 들어와 주먹: twoFist만(grab 다시 없음)
+    const two = d.run(6, twoFists());
+    outs.push(...two);
+    expect(types(two)).toEqual(["twoFist"]);
+    expect(m.fist).toBe(true);
+    // 둘째 손이 펴지면 twoFistEnd만(release 없음)
+    const half = d.run(6, [L("Closed_Fist"), R("Open_Palm")]);
+    outs.push(...half);
+    expect(types(half)).toEqual(["twoFistEnd"]);
+    expect(m.fist).toBe(true);
+    // 둘째 손이 사라져도 주먹은 그대로
+    const solo = d.run(30, [L("Closed_Fist")]);
+    outs.push(...solo);
+    expect(types(solo)).toEqual([]);
+    // 주 손은 내내 L(0번)
+    expect(outs.every((o) => o.primary === 0)).toBe(true);
+    // 주 손을 펴면 지금처럼 비주먹 6프레임째 release
+    const rel = d.run(6, [L("Open_Palm")]);
+    expect(types(rel)).toEqual(["release"]);
+    expect(rel.findIndex((o) => o.events.length > 0)).toBe(5);
+    expect(m.fist).toBe(false);
+  });
+
+  it("twoFist ignores the grab cooldown; opening the two fists does not spread", () => {
+    // 브이 직후(쿨다운 중) 두 주먹: twoFist는 쿨다운과 무관하게 나고, grab은 쿨다운에 막힌다.
+    // 그대로 두 손을 펴면 release가 없어도 twoFistEnd가 spread 래치를 잠가 펼치기로 번지지 않는다(release 규칙과 같은 이유).
+    const m = createGestureMachine();
+    const d = driver(m);
+    expect(types(d.run(6, [L("Victory")]))).toEqual(["victory"]);
+    expect(types(d.run(8, twoFists()))).toEqual(["twoFist"]);
+    expect(m.fist).toBe(false);
+    const opened = d.run(40, [L("Open_Palm"), R("Open_Palm")]);
+    expect(types(opened)).toEqual(["twoFistEnd"]);
+    // 모양이 confirmFrames 연속 바뀌면 다시 spread 가능
+    d.run(6, [L("Open_Palm")]);
+    expect(types(d.run(6, twoOpen()))).toEqual(["spread"]);
+  });
+
+  it("reset clears the two-fist state", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    d.run(6, twoFists());
+    m.reset();
+    // 풀린 상태라 손을 펴도 twoFistEnd 없음, 다시 쥐면 6프레임째 twoFist
+    expect(types(d.run(30, [L("Open_Palm"), R("Open_Palm")])).filter((e) => e.startsWith("twoFist"))).toEqual([]);
+    m.reset();
+    expect(types(d.run(6, twoFists()))).toEqual(["grab", "twoFist"]);
   });
 });
 

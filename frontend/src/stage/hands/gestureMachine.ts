@@ -1,5 +1,5 @@
-// 제스처 판정기. 계약: docs/CONTRACTS-stage.md 2.2, 설계 5.2·4.4.
-// 순수 모듈: HandFrame 시퀀스를 받아 grab/release/spread/victory 이벤트와 주 손을 낸다.
+// 제스처 판정기. 계약: docs/CONTRACTS-stage.md 2.2·11·13.3, 설계 5.2·4.4.
+// 순수 모듈: HandFrame 시퀀스를 받아 grab/release/spread/victory/twoFist/twoFistEnd 이벤트와 주 손·둘째 손을 낸다.
 import { VOTE_MAX, type GestureEvent, type GestureName, type GestureOutput, type HandFrame, type HandObs, type Vec3 } from "../types";
 
 export interface GestureConfig { minScore: number; confirmFrames: number; cooldownMs: number; releaseAfterMs: number; }
@@ -28,11 +28,12 @@ function nearest(hands: readonly HandObs[], wrist: Vec3): { i: number; d: number
   return best;
 }
 
-/** 손바닥 폭(5↔17)이 가장 큰 손. 같으면 앞 손. 손이 없으면 null. */
-function widest(hands: readonly HandObs[]): number | null {
+/** 손바닥 폭(5↔17)이 가장 큰 손(except 번 손은 빼고). 같으면 앞 손. 후보가 없으면 null. */
+function widest(hands: readonly HandObs[], except: number | null = null): number | null {
   let best: number | null = null;
   let bestW = -Infinity;
   for (const [i, h] of hands.entries()) {
+    if (i === except) continue;
     const w = planar(h.landmarks[INDEX_MCP], h.landmarks[PINKY_MCP]) ?? 0;
     if (w > bestW) { best = i; bestW = w; }
   }
@@ -61,6 +62,11 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
   let victoryArmed = true;
   let spreadOffRun = 0;
   let victoryOffRun = 0;
+  // 두 주먹(13.3): 단일 주먹 상태(fist)와 독립. twoFist가 곧 래치이고 twoFistEnd로만 풀린다.
+  let twoFist = false;
+  let twoFistRun = 0;      // 정확히 두 손이 모두 확실한 주먹인 연속 프레임
+  let twoFistOffRun = 0;   // 두 손 이상 보이는데 두 주먹이 아닌 연속 프레임(두 손 미만 프레임은 중립)
+  let lastTwoT = -Infinity; // 손이 두 개 이상 보인 마지막 시각
 
   const sure = (h: HandObs, g: GestureName) => h.gesture === g && h.score >= c.minScore;
   const confirmed = (run: number) => run >= c.confirmFrames;
@@ -72,6 +78,9 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     fistRun = notFistRun = spreadRun = victoryRun = 0;
     spreadArmed = victoryArmed = true;
     spreadOffRun = victoryOffRun = 0;
+    twoFist = false;
+    twoFistRun = twoFistOffRun = 0;
+    lastTwoT = -Infinity;
   }
 
   function push(frame: HandFrame, ctx: { voting: boolean }): GestureOutput {
@@ -97,6 +106,8 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     } else {
       primary = widest(hands);
     }
+    // 둘째 손: 두 손 이상이면 주 손이 아닌 손 중 가장 큰 손(주 손이 없는 프레임이면 전체 중 가장 큰 손).
+    const secondary = hands.length >= 2 ? widest(hands, primary) : null;
     const p = primary === null ? undefined : hands[primary];
     const w = p?.landmarks[WRIST];
     if (w) tracked = { wrist: w, t };
@@ -119,6 +130,17 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     if (confirmed(spreadOffRun)) spreadArmed = true;
     if (confirmed(victoryOffRun)) victoryArmed = true;
 
+    // 두 주먹: 주 손과 무관하게 보이는 손 전부로 본다. 점수 미달 주먹은 주먹이 아니다(release와 같은 기준).
+    // 두 손 미만 프레임은 비주먹 확정에 중립이고(한두 프레임 놓침에 풀리지 않게), 손이 두 개 이상 보인
+    // 마지막 시각부터 releaseAfterMs가 지나면 손을 놓친 것으로 본다(손 없음 release와 같은 방식).
+    const isTwoFist = hands.length === 2 && hands.every((h) => sure(h, "Closed_Fist"));
+    twoFistRun = isTwoFist ? twoFistRun + 1 : 0;
+    if (hands.length >= 2) {
+      lastTwoT = t;
+      twoFistOffRun = isTwoFist ? 0 : twoFistOffRun + 1;
+    }
+    const lostTwo = hands.length < 2 && t - lastTwoT >= c.releaseAfterMs;
+
     if (ctx.voting) {
       // 투표 중: 이벤트 없음. 쥔 주먹은 조용히 놓고, 투표 중 본 프레임은 확정에도 래치 풀림에도 쓰지 않는다.
       // 투표가 끝날 때 들고 있던 두 손·브이가 곧바로 spread·victory가 되지 않게 래치를 잠가 둔다.
@@ -126,7 +148,9 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
       fistRun = notFistRun = spreadRun = victoryRun = 0;
       spreadOffRun = victoryOffRun = 0;
       spreadArmed = victoryArmed = false;
-      return { primary, events: [], handCount };
+      twoFist = false;
+      twoFistRun = twoFistOffRun = 0;
+      return { primary, secondary, events: [], handCount };
     }
 
     const events: GestureEvent[] = [];
@@ -140,11 +164,21 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
       spreadOffRun = 0;
       fire({ type: "release" });
     }
+    if (twoFist && (confirmed(twoFistOffRun) || lostTwo)) {
+      // 쿨다운과 무관(시작도 안 함). 두 주먹을 그대로 두 손 펴기로 풀어도 펼치기로 번지지 않게
+      // release와 같은 이유로 spread 래치를 잠근다(grab이 쿨다운에 막혀 release가 없던 경우까지).
+      twoFist = false;
+      spreadArmed = false;
+      spreadOffRun = 0;
+      events.push({ type: "twoFistEnd" });
+    }
     if (ready() && confirmed(fistRun)) { fist = true; fire({ type: "grab" }); }
+    // 두 주먹은 fist·쿨다운과 독립이고 쿨다운을 시작하지 않는다. 주 손도 주먹이면 같은 프레임에 grab 다음으로 난다.
+    if (!twoFist && confirmed(twoFistRun)) { twoFist = true; events.push({ type: "twoFist" }); }
     if (ready() && spreadArmed && confirmed(spreadRun)) { spreadArmed = false; fire({ type: "spread" }); }
     if (ready() && victoryArmed && confirmed(victoryRun)) { victoryArmed = false; fire({ type: "victory" }); }
 
-    return { primary, events, handCount };
+    return { primary, secondary, events, handCount };
   }
 
   return { push, reset, get fist() { return fist; } };
