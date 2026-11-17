@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "./hud";
 import type { StageState } from "../types";
 
-const base: StageState = { mode: "map", hover: null, lifted: null, focus: null, input: "hands", vote: null, month: "202611", metric: "price", round: 0 };
+const base: StageState = { mode: "map", hover: null, lifted: null, focus: null, input: "hands", vote: null, month: "202611", metric: "price", round: 0, rotate: "none", spinning: false };
 const o = (conn: "idle" | "connecting" | "open" | "error" | "closed", publishFailed = false) => ({ conn, publishFailed, monthLabel: "2026년 11월" });
 
 describe("renderTopBar", () => {
@@ -33,10 +33,10 @@ describe("renderTopBar", () => {
 
 describe("renderHints", () => {
   it("손 모드", () => {
-    expect(renderHints(base)).toContain("주먹: 들어올리기 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거");
+    expect(renderHints(base)).toContain("주먹: 들어올리기 · 빈 곳 주먹 끌기: 돌리기 · 두 주먹: 돌리기·확대 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거");
   });
   it("마우스 모드", () => {
-    expect(renderHints({ ...base, input: "mouse" })).toContain("누르고 있기: 들어올리기 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드");
+    expect(renderHints({ ...base, input: "mouse" })).toContain("누르고 있기: 들어올리기 · 빈 곳 끌기: 돌리기 · 휠: 확대 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드");
   });
 });
 

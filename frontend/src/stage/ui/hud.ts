@@ -23,8 +23,8 @@ export function renderTopBar(s: StageState, o: { conn: ConnStatus; publishFailed
 
 export function renderHints(s: StageState): string {
   const text = s.input === "hands"
-    ? "주먹: 들어올리기 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거"
-    : "누르고 있기: 들어올리기 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드";
+    ? "주먹: 들어올리기 · 빈 곳 주먹 끌기: 돌리기 · 두 주먹: 돌리기·확대 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거"
+    : "누르고 있기: 들어올리기 · 빈 곳 끌기: 돌리기 · 휠: 확대 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드";
   return `<p class="stage-hints">${text}</p>`;
 }
 
