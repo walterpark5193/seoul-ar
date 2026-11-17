@@ -52,4 +52,39 @@ describe("requestFetchMonth", () => {
     expect(await requestNarrateMonth("202611", "k", vi.fn(async () => html))).toEqual({ kind: "network" });
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(200, { jobId: "j-2", month: "202610" })))).toEqual({ kind: "started", jobId: "j-2", month: "202610" });
   });
+
+  describe("server reasons (I1)", () => {
+    const withHeaders = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+      ({ ok: false, status, json: async () => body, headers: new Headers(headers) }) as unknown as Response;
+
+    it("429 is locked, with the server message and retry seconds from the body or Retry-After", async () => {
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () =>
+        withHeaders(429, { error: "locked", message: "암호를 너무 많이 틀렸습니다. 7분 뒤 다시 시도해 주세요.", retryAfterSeconds: 400 }))))
+        .toEqual({ kind: "locked", message: "암호를 너무 많이 틀렸습니다. 7분 뒤 다시 시도해 주세요.", retryAfterSeconds: 400 });
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => withHeaders(429, {}, { "Retry-After": "120" }))))
+        .toEqual({ kind: "locked", retryAfterSeconds: 120 });
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(429)))).toEqual({ kind: "locked" });
+    });
+
+    it("409 carries the server message (a narration job may hold the lock)", async () => {
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(409, { error: "busy", message: "2026년 11월 해설을 만드는 중입니다" }))))
+        .toEqual({ kind: "busy", message: "2026년 11월 해설을 만드는 중입니다" });
+    });
+
+    it("503 is a server-side problem with its message (auth_unavailable, passcode_too_short)", async () => {
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(503, { error: "auth_unavailable", message: "암호 확인 저장소를 쓸 수 없습니다." }))))
+        .toEqual({ kind: "server", message: "암호 확인 저장소를 쓸 수 없습니다." });
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(503, { error: "passcode_too_short" }))))
+        .toEqual({ kind: "server" });
+    });
+
+    it("400 carries the server message; non-Korean or non-JSON messages are ignored", async () => {
+      expect(await requestFetchMonth("209901", "k", vi.fn(async () => res(400, { message: "월은 2006년 1월부터 이번 달까지입니다." }))))
+        .toEqual({ kind: "bad-month", message: "월은 2006년 1월부터 이번 달까지입니다." });
+      expect(await requestFetchMonth("209901", "k", vi.fn(async () => res(400, { message: "bad month" })))).toEqual({ kind: "bad-month" });
+      const html = { ok: false, status: 503, json: async () => { throw new SyntaxError("<"); } } as unknown as Response;
+      expect(await requestFetchMonth("202610", "k", vi.fn(async () => html))).toEqual({ kind: "server" });
+    });
+  });
 });
+

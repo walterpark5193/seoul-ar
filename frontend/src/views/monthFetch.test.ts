@@ -117,7 +117,8 @@ describe("createMonthFetch", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(refreshIndex).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith("2026년 10월 데이터가 준비됐습니다");
-    expect(mf.view).toEqual({ phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" });
+    // 수집이 끝나면 워커가 이어서 돌리는 해설 작업(${jobId}-narration)을 따라간다(I2).
+    expect(mf.view).toMatchObject({ phase: "running", kind: "narration", month: "202610", jobId: "j-1-narration", total: 26 });
     emit(job({ state: "done", done: 25 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(refreshIndex).toHaveBeenCalledTimes(1);
@@ -244,6 +245,93 @@ describe("createMonthFetch", () => {
     emit(job({ done: 4, gu: "성동구" }));
     expect(mf.view).toMatchObject({ done: 4, gu: "성동구" });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe("server reasons (I1)", () => {
+    const cases: Array<[number, unknown, string]> = [
+      [429, {}, "암호를 너무 많이 틀렸습니다. 약 10분 뒤 다시 시도해 주세요."],
+      [429, { retryAfterSeconds: 130 }, "암호를 너무 많이 틀렸습니다. 약 3분 뒤 다시 시도해 주세요."],
+      [429, { message: "잠겼습니다. 4분 뒤에 다시 하세요." }, "잠겼습니다. 4분 뒤에 다시 하세요."],
+      [409, { message: "2026년 11월 해설을 만드는 중입니다" }, "2026년 11월 해설을 만드는 중입니다"],
+      [409, {}, "다른 달을 가져오는 중입니다. 끝난 뒤 다시 눌러 주세요."],
+      [503, { error: "passcode_too_short", message: "발표자 암호가 12자보다 짧습니다. 관리자에게 알려 주세요." }, "발표자 암호가 12자보다 짧습니다. 관리자에게 알려 주세요."],
+      [503, {}, "수집 서버가 지금 요청을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."],
+      [400, { message: "월은 2006년 1월부터 이번 달까지입니다." }, "월은 2006년 1월부터 이번 달까지입니다."],
+    ];
+
+    it.each(cases)("HTTP %i %j shows the right sentence", async (status, body, sentence) => {
+      const { mf } = setup({ stored: "pw", fetch: async () => res(status, body) });
+      await mf.submit("202610");
+      expect(mf.view).toEqual({ phase: "idle", error: sentence });
+    });
+
+    it("keeps the stored passcode on 429 and 503; only 401 wipes it", async () => {
+      for (const status of [429, 503]) {
+        const { mf, storage } = setup({ stored: "pw", fetch: async () => res(status) });
+        await mf.submit("202610");
+        expect(storage.getItem(PRESENTER_KEY), String(status)).toBe("pw");
+      }
+    });
+  });
+
+  describe("automatic narration after a fetch (I2)", () => {
+    async function fetchDone() {
+      const t = setup({ stored: "pw" });
+      await t.mf.submit("202610");
+      t.records.set("j-1", job({ state: "done", done: 25 }));
+      t.emit(job({ state: "done", done: 25 }));
+      await vi.advanceTimersByTimeAsync(0);
+      return t;
+    }
+    const auto = (over: Partial<JobMessage> = {}) =>
+      job({ jobId: "j-1-narration", kind: "narration", gu: undefined, done: 0, total: 26, ...over });
+
+    it("follows ${jobId}-narration with progress, then reloads the narration and toasts", async () => {
+      const { mf, emit, records, reloadNarration, toast, subscribeJobs } = await fetchDone();
+      expect(statusLine(mf.view)).toBe("2026년 10월 해설 생성 중");
+      expect(isBusy(mf.view)).toBe(true);
+      expect(subscribeJobs).toHaveBeenCalledTimes(1);
+      emit(auto({ done: 12 }));
+      expect(statusLine(mf.view)).toBe("2026년 10월 해설 생성 중 12/26");
+      records.set("j-1-narration", auto({ state: "done", done: 26 }));
+      emit(auto({ state: "done", done: 26 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reloadNarration).toHaveBeenCalledWith("202610");
+      expect(toast).toHaveBeenLastCalledWith("해설이 준비됐습니다");
+      expect(mf.view).toEqual({ phase: "idle", note: "해설이 준비됐습니다" });
+    });
+
+    it("falls back to polling data/jobs/${jobId}-narration.json", async () => {
+      const { fetch, records, reloadNarration } = await fetchDone();
+      records.set("j-1-narration", auto({ state: "done", done: 26 }));
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(fetch).toHaveBeenCalledWith("/data/jobs/j-1-narration.json", { cache: "no-store" });
+      expect(reloadNarration).toHaveBeenCalledWith("202610");
+    });
+
+    it("shows the narration error and unlocks", async () => {
+      const { mf, emit, records } = await fetchDone();
+      records.set("j-1-narration", auto({ state: "error", message: "모델을 호출하지 못했습니다." }));
+      emit(auto({ state: "error", message: "모델을 호출하지 못했습니다." }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 해설 생성 실패: 모델을 호출하지 못했습니다." });
+      expect(isBusy(mf.view)).toBe(false);
+    });
+
+    it("quietly stops following if the narration job never shows up", async () => {
+      const { mf, toast } = await fetchDone();
+      const toasts = toast.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(mf.view).toEqual({ phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" });
+      expect(toast.mock.calls.length).toBe(toasts);
+    });
+
+    it("keeps following once the job has been seen, even if it is slow", async () => {
+      const { mf, emit } = await fetchDone();
+      emit(auto({ done: 1 }));
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(mf.view).toMatchObject({ phase: "running", kind: "narration", done: 1 });
+    });
   });
 
   it("cancelKey returns to idle", async () => {
@@ -375,3 +463,23 @@ describe("needsFetchRender", () => {
     expect(needsFetchRender("running", "context")).toBe(true);
   });
 });
+
+describe("해설 생성 button while a narration job runs (I2)", () => {
+  const base = { value: "2026-10", max: "2026-11" };
+  const button = (h: string) => /<button[^>]*data-action="narrate"[^>]*>/.exec(h)?.[0] ?? "";
+  const text = (h: string) => h.replace(/<[^>]+>/g, " ");
+
+  it("is disabled with a 만드는 중 hint when the availability says running", () => {
+    const html = renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202610", state: "running" } });
+    expect(button(html)).toContain("disabled");
+    expect(text(html)).toContain("2026년 10월 해설을 만드는 중");
+  });
+
+  it("a running narration view for that month overrides an absent availability", () => {
+    const html = renderMonthFetch({ phase: "running", kind: "narration", month: "202610", jobId: "j-1-narration", done: 3, total: 26 },
+      { ...base, narration: { month: "202610", state: "absent" } });
+    expect(button(html)).toContain("disabled");
+    expect(text(html)).toContain("2026년 10월 해설을 만드는 중");
+  });
+});
+

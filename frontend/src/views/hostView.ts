@@ -12,7 +12,7 @@ import { esc } from "../ui/html";
 import { replaceKeepingFocus } from "../ui/patch";
 import { drawQr } from "../ui/qr";
 import {
-  createMonthFetch, defaultFetchMonth, monthInputValue, needsFetchRender, renderMonthFetch,
+  createMonthFetch, defaultFetchMonth, monthInputValue, narratingMonth, needsFetchRender, renderMonthFetch,
   type FetchView, type NarrationAvailability, type StorageLike,
 } from "./monthFetch";
 import { createTimeTravel, renderTimeTravel, type TravelView } from "./timeTravel";
@@ -137,7 +137,9 @@ export const mountHostView: MountView = (root, ctx) => {
     paintFetch(fetchView, "context");
     const n = ctx.loadNarration ? await ctx.loadNarration(month).catch(() => null) : null;
     if (mine !== narrationToken) return;
-    narration = { month, state: ctx.loadNarration ? (n ? "present" : "absent") : "unknown" };
+    // 그 달의 해설 작업이 도는 중이면(수집 뒤 자동 생성 포함) "없음"으로 보지 않는다. 버튼을 켜면 409가 나고 쓸데없이 다시 만든다.
+    const running = narratingMonth(fetchView) === month;
+    narration = { month, state: !ctx.loadNarration ? "unknown" : n ? "present" : running ? "running" : "absent" };
     paintFetch(fetchView, "context");
   };
 
@@ -159,7 +161,13 @@ export const mountHostView: MountView = (root, ctx) => {
     },
     forgetMonth: (m) => forgetMonth(m),
     toast: ctx.toast,
-    onChange: (v) => { fetchView = v; paintFetch(v, "view"); },
+    onChange: (v) => {
+      const wasNarrating = narratingMonth(fetchView) !== null;
+      fetchView = v;
+      paintFetch(v, "view");
+      // 해설 작업이 실패나 포기로 끝나면 버튼을 다시 판단한다(성공은 reloadNarration이 다시 확인한다).
+      if (wasNarrating && v.phase === "idle" && v.error) void checkNarration(ctx.store.getState().month);
+    },
   });
 
   render(ctx.store.getState());
