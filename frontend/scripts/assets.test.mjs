@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isZipMagic, checkModel, copyWasm, missingFiles, REQUIRED_WASM } from "./assets.mjs";
 
 describe("isZipMagic", () => {
@@ -63,6 +64,18 @@ describe("checkModel 오류 구분", () => {
     const f = join(dir, "plain");
     await writeFile(f, "x");
     await expect(checkModel(join(f, "child.task"))).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+});
+
+describe("REQUIRED_WASM", () => {
+  it("forVisionTasks가 고를 수 있는 SIMD·non-SIMD 변형이 모두 들어 있다", () => {
+    for (const n of ["vision_wasm_internal.js", "vision_wasm_internal.wasm", "vision_wasm_nosimd_internal.js", "vision_wasm_nosimd_internal.wasm"]) {
+      expect(REQUIRED_WASM).toContain(n);
+    }
+  });
+  it("설치된 @mediapipe/tasks-vision의 wasm 폴더에 전부 있다", async () => {
+    const wasm = fileURLToPath(new URL("../node_modules/@mediapipe/tasks-vision/wasm", import.meta.url));
+    expect(await missingFiles(wasm)).toEqual([]);
   });
 });
 

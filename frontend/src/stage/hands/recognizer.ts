@@ -1,5 +1,7 @@
 // 인식기 어댑터: 카메라 + MediaPipe GestureRecognizer → HandFrame. 계약: docs/CONTRACTS-stage.md 2.4.
 // 프론트에서 @mediapipe/tasks-vision을 import하는 유일한 파일이며, 동적 import만 쓴다.
+// 판은 0.10.35로 고정한다(package.json). 1.x는 createFromOptions에서 사용 통계 로거를 조건 없이 만들어
+// 1분마다 Google로 POST하고 끄는 옵션이 없다. 0.10.35에는 그 로거가 없다(scripts/check-bundle.mjs가 빌드마다 확인).
 import type { GestureName, HandFrame, HandObs } from "../types";
 import { VOTE_MAX } from "../types";
 
@@ -122,7 +124,7 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
       lastVideoTime = video.currentTime;
       let frame: HandFrame | null = null;
       try {
-        frame = toHandFrame(recognizer.recognizeForVideo(video, now) as unknown as RecognizerResultLike, now);
+        frame = toHandFrame(recognizer.recognizeForVideo(video, now), now); // GestureRecognizerResult ⊂ RecognizerResultLike(tsc가 확인)
         errors = 0;
       } catch (e) {
         errors++;

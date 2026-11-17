@@ -38,9 +38,13 @@ export async function copyWasm(srcDir, dstDir) {
   return names;
 }
 
+// @mediapipe/tasks-vision 0.10.35: forVisionTasks(path)는 WebAssembly SIMD 지원 여부에 따라
+// vision_wasm_internal 또는 vision_wasm_nosimd_internal을 고른다. module 변형은 지금 쓰지 않지만 함께 복사·확인한다.
 export const REQUIRED_WASM = [
   "vision_wasm_internal.js",
   "vision_wasm_internal.wasm",
+  "vision_wasm_nosimd_internal.js",
+  "vision_wasm_nosimd_internal.wasm",
   "vision_wasm_module_internal.js",
   "vision_wasm_module_internal.wasm",
 ];
