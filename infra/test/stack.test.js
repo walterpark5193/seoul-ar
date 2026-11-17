@@ -406,6 +406,19 @@ test("사이트 배포: prune 은 그대로, data/* 는 올리지도 지우지�
   assert.deepEqual(d.Properties.DistributionPaths, ["/*"]);
 });
 
+test("사이트 배포 핸들러: dist ~120MB(35개월 해설 음성)라 메모리·/tmp 2GB", () => {
+  const [, d] = siteDeployment();
+  const fnId = d.Properties.ServiceToken["Fn::GetAtt"][0];
+  const fn = template.toJSON().Resources[fnId];
+  assert.equal(fn.Type, "AWS::Lambda::Function");
+  assert.equal(fn.Properties.MemorySize, 2048);
+  assert.deepEqual(fn.Properties.EphemeralStorage, { Size: 2048 });
+  // 시드 배포(data 5MB)는 따로 512MB 핸들러를 쓴다
+  const seedFn = template.toJSON().Resources[seedDeployment()[1].Properties.ServiceToken["Fn::GetAtt"][0]];
+  assert.notEqual(seedFn, fn);
+  assert.equal(seedFn.Properties.MemorySize, 512);
+});
+
 test("시드 배포: dist/data → data/ 접두사, prune false, no-cache", () => {
   assert.equal(deployments().length, 2);
   const [, d] = seedDeployment();

@@ -39,9 +39,10 @@ curl -L -o frontend/public/models/gesture_recognizer.task \
 1. 문장 쓰기: `node tools/narration/write.mjs --data frontend/public/data --month 202611 --out tools/narration/scripts.json`
    - 기존 `scripts.json`과 병합합니다. `source: "edited"`(사람이 고친 문장)는 덮지 않고 그대로 두며, 현재 사실표와 맞지 않으면 경고합니다. 덮어쓰려면 `--force`.
    - 일부 구만 다시 쓰기: `--only 강남구,서초구`.
+   - 한 번에 한 달씩 씁니다. 저장소에는 데이터 스냅샷의 모든 달(`frontend/public/data/index.json`의 `months`, 지금 2024년 1월~2026년 11월 35개월) × 25개 구 = 875개가 실려 있습니다. 같은 `scripts.json`에 병합하므로 달을 차례로(동시에 말고) 실행합니다. 호출 한 번에 입력 약 830토큰, 출력 약 1,500토큰(생각 포함)을 쓰고 한 달(25개)에 1분 남짓 걸립니다.
    - 자막 속 숫자와 최상급은 `validateScript`가 사실표와 맞춰 봅니다(순위, 억·만 원, 건수, "가장 …", 동은 "3건 이상" 단서 또는 구 전체 최고일 때만).
 2. 사람이 검토: 고친 항목은 `source`를 `"edited"`로 바꾸고, `speech`는 caption과 같게 둡니다(㎡만 "제곱미터"). `cd tools && npx vitest run narration/shipped`로 실린 문장·manifest·mp3가 서로, 그리고 현재 데이터와 맞는지 확인합니다.
 3. 음성 합성: `node tools/narration/synth.mjs --scripts tools/narration/scripts.json --data frontend/public/data --month 202611 --out frontend/public/narration`
-   - 바뀐 문장만 다시 합성하고, 클립 길이(`ms`)를 manifest에 적습니다.
+   - `scripts.json`의 모든 달을 한 번에 합성합니다(`--month`는 템플릿에만 쓰임). 바뀐 문장만 다시 합성하고, 클립 길이(`ms`)를 manifest에 적습니다.
    - 이미 있는 mp3로 `ms`만 채우기(AWS 호출 없음): `node tools/narration/synth.mjs --backfill-ms --out frontend/public/narration`
    - 문장 목록에서 빠진 id의 mp3는 지우지 않습니다. 필요하면 손으로 정리합니다.

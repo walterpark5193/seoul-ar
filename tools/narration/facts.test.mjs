@@ -85,7 +85,7 @@ describe("buildFacts", () => {
     expect(f.topDongBasis).toBe("maxN");
   });
 
-  it("기준 건수는 3, 실데이터 종로구는 maxN(전부 1건), 서초구는 min3", () => {
+  it("기준 건수는 3, 실데이터(2026년 11월) 종로구는 maxN(3건 이상 동 없음), 서초구는 min3", () => {
     expect(TOP_DONG_MIN_N).toBe(3);
     const { index, byName } = load();
     const facts = buildFacts(index, byName, MONTH);
@@ -104,11 +104,11 @@ describe("buildFacts", () => {
     expect(mk([]).topDongIsMax).toBe(false);
   });
 
-  it("실데이터: 서초구는 잠원동(1건)이 더 비싸 false, 성동구 성수동1가는 true", () => {
+  it("실데이터(2026년 11월): 서초구는 잠원동(1건)이 더 비싸 false, 성동구 옥수동은 true", () => {
     const { index, byName } = load();
     const by = Object.fromEntries(buildFacts(index, byName, MONTH).map((f) => [f.gu, f]));
     expect(by["서초구"].topDongIsMax).toBe(false);
-    expect(by["성동구"]).toMatchObject({ topDong: "성수동1가", topDongIsMax: true });
+    expect(by["성동구"]).toMatchObject({ topDong: "옥수동", topDongBasis: "min3", topDongIsMax: true });
     for (const f of Object.values(by)) expect(typeof f.topDongIsMax).toBe("boolean");
   });
 });

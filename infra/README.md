@@ -5,7 +5,7 @@ CDK(JavaScript) 스택 `SeoulArStack`, 리전 us-east-1 고정(조직 SCP가 ap-
 - S3 비공개 버킷 + CloudFront(OAC). 403/404는 `/index.html` 200으로 응답(SPA). 이 규칙은 `/api/*`에도 적용되므로 API는 403/404를 쓰지 않는다(아래 표).
 - AppSync Events API `seoul-ar-events`, 채널 네임스페이스 `seoul`, API 키 인증(유효 90일).
 - `BucketDeployment` 두 개:
-  - `DeploySite`: `frontend/dist`(단 `data/*` 제외)와 배포 시점에 만든 `config.json`을 버킷 루트에 올리고(prune) CloudFront 캐시를 비운다. `exclude: ["data/*"]` 이므로 `data/` 아래는 올리지도 지우지도 않는다.
+  - `DeploySite`: `frontend/dist`(단 `data/*` 제외)와 배포 시점에 만든 `config.json`을 버킷 루트에 올리고(prune) CloudFront 캐시를 비운다. `exclude: ["data/*"]` 이므로 `data/` 아래는 올리지도 지우지도 않는다. dist가 ~120MB(MediaPipe wasm·모델, 35개월 구 해설 음성 1,079개)라 핸들러 Lambda를 `memoryLimit: 2048`, `ephemeralStorageSize: Size.mebibytes(2048)`로 둔다(기본 128MB·`/tmp` 512MB로는 압축 받기·풀기 중 메모리·공간이 모자랄 수 있다). 해설 달이 더 늘면 이 값을 다시 본다.
   - `DeployDataSeed`: `frontend/dist/data` → `data/` 를 prune 없이 올린다(저장소의 달 폴더와 `index.json`). 아무것도 지우지 않는다. `dist/data` 가 없으면 건너뛴다(정보 메시지만).
 - 월 실시간 수집과 AI 해설(아래): Lambda 두 개, Function URL, CloudFront `/api/*`, 배포마다 index 재구성, Bedrock.
 

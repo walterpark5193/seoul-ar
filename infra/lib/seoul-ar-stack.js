@@ -96,7 +96,10 @@ class SeoulArStack extends cdk.Stack {
       distribution,
       distributionPaths: ["/*"],
       prune: true,
-      memoryLimit: 1024, // dist 가 50MB(MediaPipe wasm·모델·음성)라 기본 128MB 로는 OOM 위험
+      // dist 가 ~120MB(MediaPipe wasm·모델, 35개월 구 해설 음성 1,079개). 기본 128MB 메모리·512MB /tmp 로는
+      // 압축 받기·풀기·sync 중 OOM 이나 공간 부족 위험이 있어 둘 다 2GB 로 둔다.
+      memoryLimit: 2048,
+      ephemeralStorageSize: cdk.Size.mebibytes(2048),
       exclude: ["data/*"],
       cacheControl: [s3deploy.CacheControl.fromString("no-cache")],
     });
