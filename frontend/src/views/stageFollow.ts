@@ -19,7 +19,9 @@ export function voteLine(m: VoteMessage): string {
 /** follow가 true일 때만 onLayout/onLift. 투표 결과는 follow와 무관하게 onVote. */
 export function bindStageFollow(o: StageFollowOptions): () => void {
   let last: StageMessage | null = null;
+  let applied = false;
   const apply = (m: StageMessage) => {
+    applied = true;
     o.onLayout(m.mode);
     o.onLift(m.lifted);
   };
@@ -34,7 +36,10 @@ export function bindStageFollow(o: StageFollowOptions): () => void {
   });
   // 따라가기를 다시 켜면 마지막으로 받은 무대 상태로 맞춘다.
   const offStore = o.store.subscribe((s, prev) => {
-    if (s.follow && !prev.follow && last) apply(last);
+    if (!s.follow || !last) return;
+    if (!prev.follow) apply(last);
+    // 따라가는 중 월·지표가 바뀌면 순위·높이가 새 값에 맞도록 배치를 다시 계산한다.
+    else if (applied && (s.month !== prev.month || s.metric !== prev.metric)) o.onLayout(last.mode);
   });
   return () => { offMsg(); offStore(); };
 }

@@ -130,6 +130,12 @@ export const mountArView: MountView = (root, ctx) => {
   const voteEl = root.querySelector<HTMLElement>("[data-vote]")!;
   banner.addEventListener("click", () => ctx.navigate("#/3d"));
   let voteTimer: ReturnType<typeof setTimeout> | null = null;
+  const viewerEl = root.querySelector<HTMLElement>(".viewer");
+  const sheetRo = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+    const h = Math.round(sheetHost.getBoundingClientRect().height);
+    if (h > 0) viewerEl?.style.setProperty("--sheet-h", `${h}px`);
+  });
+  sheetRo?.observe(sheetHost);
   const offBanner = ctx.stageChannel.subscribe((m) => {
     if (isStageMessage(m)) banner.hidden = false; // follow와 무관하게 처음 받으면 보인다
   });
@@ -174,6 +180,7 @@ export const mountArView: MountView = (root, ctx) => {
 
   return () => {
     alive = false;
+    sheetRo?.disconnect();
     offBanner();
     offVote();
     if (voteTimer) clearTimeout(voteTimer);

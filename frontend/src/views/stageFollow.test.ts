@@ -49,6 +49,18 @@ describe("stageFollow", () => {
     expect(o.onVote).toHaveBeenCalledWith("투표 결과 강남구 2표 · 마포구 1표 · 노원구 0표");
   });
 
+  it("re-runs layout when month or metric changes while following", () => {
+    const store = createStore({ ...INITIAL_STATE, month: "202611", follow: true });
+    const f = fakeChannel();
+    const o = { onLayout: vi.fn(), onLift: vi.fn(), onVote: vi.fn() };
+    bindStageFollow({ channel: f.channel, store, index, ...o });
+    f.emit({ v: 1, type: "stage", mode: "spread", lifted: null, ts: 1 });
+    expect(o.onLayout).toHaveBeenCalledTimes(1);
+    store.dispatch({ type: "remote", msg: { v: 1, type: "state", month: "202611", gu: null, metric: "count", ts: 2 } });
+    expect(o.onLayout).toHaveBeenCalledTimes(2);
+    expect(o.onLayout).toHaveBeenLastCalledWith("spread");
+  });
+
   it("malformed ignored", () => {
     const { f, o } = setup(true);
     f.emit(null);

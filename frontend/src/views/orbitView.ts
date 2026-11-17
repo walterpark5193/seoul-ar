@@ -92,6 +92,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     const covered = Math.min(sheetHost.getBoundingClientRect().height, h * 0.6);
     camera.setViewOffset(w, h, 0, covered / 2, w, h);
     camera.updateProjectionMatrix();
+    root.querySelector<HTMLElement>(".viewer")?.style.setProperty("--sheet-h", `${Math.round(sheetHost.getBoundingClientRect().height)}px`);
   };
   const ro = new ResizeObserver(resize);
   ro.observe(stage);
