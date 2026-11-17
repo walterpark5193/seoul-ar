@@ -214,4 +214,60 @@ describe("renderSheet", () => {
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<b>일원동</b>");
   });
+
+  describe("peek vs expanded (Task 4f)", () => {
+    const narration = { v: 1 as const, month: "202611", generatedAt: "", model: "anthropic.claude-haiku-5-5", items: { 강남구: "강남구 한 줄." } };
+    const peek = (st = state(), d: GuData | null = gangnam) => renderSheet(st, d, index, { expanded: false, narration, altView: { href: "#/3d", label: "3D로 보기" } });
+    const open = (st = state(), d: GuData | null = gangnam) => renderSheet(st, d, index, { expanded: true, narration, altView: { href: "#/3d", label: "3D로 보기" } });
+
+    it("peek shows the header line, the three figures and a 더 보기 handle only", () => {
+      const html = peek();
+      const t = text(html);
+      expect(t).toContain("강남구");
+      expect(t).toContain("2026년 11월");
+      expect(t).toContain("라이브");
+      expect(t).toContain("2,890만원/㎡");
+      expect(t).toContain("34건");
+      expect(t).toContain("52.6억");
+      expect(html).toMatch(/<button[^>]*data-action="sheet-toggle"[^>]*aria-expanded="false"[^>]*>(?:<span[^>]*><\/span>)?더 보기<\/button>/);
+      expect(html).toContain("sheet--peek");
+      expect(html).toContain("figs--peek");
+      expect(html).not.toContain("dong-list");
+      expect(html).not.toContain("ai-note");
+      expect(html).not.toContain("legend");
+      expect(html).not.toContain('data-action="metric"');
+      expect(html).not.toContain("<select");
+      expect(html).not.toContain('href="#/3d"');
+    });
+
+    it("peek still offers 라이브로 돌아가기 when not following", () => {
+      expect(peek(state({ follow: false }))).toContain('data-action="follow"');
+    });
+
+    it("expanded shows everything and a 접기 handle", () => {
+      const html = open();
+      expect(html).toMatch(/<button[^>]*data-action="sheet-toggle"[^>]*aria-expanded="true"[^>]*>(?:<span[^>]*><\/span>)?접기<\/button>/);
+      expect(html).toContain("sheet--open");
+      expect(html).toContain("dong-list");
+      expect(html).toContain("ai-note");
+      expect(html).toContain("legend");
+      expect(html).toContain('data-action="metric"');
+      expect(html).toContain("<select");
+      expect(html).toContain('href="#/3d"');
+      expect(html).not.toContain("figs--peek");
+    });
+
+    it("the default stays expanded (contract 8 보강: the top-5 list is part of renderSheet)", () => {
+      expect(renderSheet(state(), gangnam, index)).toContain("dong-list");
+    });
+
+    it("time-travel hold and the AI line keep working when expanded", () => {
+      const held = { ...gangnam, month: "202610" };
+      const html = open(state({ month: "202611" }), held);
+      expect(html).toContain("dong-list");
+      expect(text(html)).toContain("2026년 11월");
+      expect(text(html)).toContain("강남구 한 줄.");
+    });
+  });
 });
+

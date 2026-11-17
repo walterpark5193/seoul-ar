@@ -12,6 +12,11 @@ export interface SheetOptions {
   tuningNote?: string | null;
   /** 이 달의 AI 해설(CONTRACTS 12.3). 없거나 고른 키의 문장이 없으면 영역을 숨긴다. */
   narration?: Narration | null;
+  /**
+   * 펼침(기본, 계약 8절 보강의 상위 5 목록 등 전부)과 접힘(peek: 머리 한 줄 + 수치 한 줄 + "더 보기").
+   * 폰 화면에서 지도를 가리지 않도록 화면 마운트는 접힌 상태로 시작한다(sheetDom.ts).
+   */
+  expanded?: boolean;
 }
 
 export interface Figure { label: string; value: string; caption?: string; }
@@ -177,14 +182,25 @@ export function renderAiNote(state: AppState, narration: Narration | null | unde
 
 export function renderSheet(state: AppState, data: GuData | null, index: DataIndex | null, opts: SheetOptions = {}): string {
   const { title, figures, notes, listData, entries } = summarize(state, data, index);
+  const expanded = opts.expanded ?? true;
+  const handle = `<button type="button" class="sheet-handle" data-action="sheet-toggle" aria-expanded="${expanded}">` +
+    `<span class="sheet-grip" aria-hidden="true"></span>${expanded ? "접기" : "더 보기"}</button>`;
+  const head = `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +
+    `<p class="sheet-month">${esc(fmtMonth(state.month))} 매매 실거래</p></div>${renderLive(state)}</header>`;
+
+  if (!expanded) {
+    return `<section class="sheet sheet--peek" aria-label="고른 지역의 실거래 요약">` +
+      handle + head + renderFigures(figures, "figs figs--peek") +
+      `</section>`;
+  }
+
   const legend = state.gu
     ? (listData ? renderLegend("동별", state.metric, listData.dongs.map((d) => statValue(d, state.metric))) : "")
     : renderLegend("구별", state.metric, entries.map(([, s]) => statValue(s, state.metric)));
   const dongs = listData ? renderDongs(listData, state.metric) : "";
 
-  return `<section class="sheet" aria-label="고른 지역의 실거래 요약">` +
-    `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +
-    `<p class="sheet-month">${esc(fmtMonth(state.month))} 매매 실거래</p></div>${renderLive(state)}</header>` +
+  return `<section class="sheet sheet--open" aria-label="고른 지역의 실거래 요약">` +
+    handle + head +
     (opts.tuningNote ? `<p class="sheet-tuning">${esc(opts.tuningNote)}</p>` : "") +
     renderFigures(figures) +
     renderAiNote(state, opts.narration) +
