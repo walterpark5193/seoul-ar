@@ -101,7 +101,7 @@ function fakeScene(pick: (x: number, y: number) => string | null = () => "강남
 function fakeRenderer() {
   const subs = new Set<(dt: number) => void>();
   return {
-    camera: new PerspectiveCamera(), setMode: vi.fn(), setZoom: vi.fn(),
+    camera: new PerspectiveCamera(), setMode: vi.fn(), setZoom: vi.fn(), setPan: vi.fn(),
     onFrame(cb: (dt: number) => void) { subs.add(cb); return () => { subs.delete(cb); }; },
     render(dt: number) { for (const cb of [...subs]) cb(dt); },
     get listeners() { return subs.size; },
@@ -283,7 +283,9 @@ function setup(o: {
   const yaw = () => scene.group.rotation.y;
   /** 마지막으로 렌더러에 준 확대 배율(렌더 tick마다 준다). */
   const zoom = () => renderer.setZoom.mock.calls.at(-1)?.[0] as number | undefined;
-  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, live, play, glide, render, yaw, zoom, deps };
+  /** 마지막으로 렌더러에 준 옆 이동 panX(계약 13.8, 렌더 tick마다 준다). */
+  const pan = () => renderer.setPan.mock.calls.at(-1)?.[0] as number | undefined;
+  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, live, play, glide, render, yaw, zoom, pan, deps };
 }
 
 describe("voteCandidates", () => {
@@ -360,7 +362,7 @@ describe("stage controller", () => {
     const [st, sg] = s.wire;
     expect(st!.msg).toEqual({ v: 1, type: "state", month: MONTH, gu: "강남구", metric: "price", ts: s.clock.now() });
     expect(Object.keys(st!.msg).sort()).toEqual([...STATE_KEYS].sort());
-    expect(sg!.msg).toEqual({ v: 1, type: "stage", mode: "map", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1 });
+    expect(sg!.msg).toEqual({ v: 1, type: "stage", mode: "map", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1, panX: 0 });
     expect(Object.keys(sg!.msg).every((k) => ALLOWED_KEYS.stage.includes(k))).toBe(true);
     expect(s.loadGu).toHaveBeenCalledWith(MONTH, "강남구");
     await flush();
@@ -427,7 +429,7 @@ describe("stage controller", () => {
     expect(s.scene.setLayout).toHaveBeenLastCalledWith("spread", s.index.summary[MONTH], "price");
     expect(s.renderer.setMode).toHaveBeenLastCalledWith("spread");
     expect(s.narr.said.at(-1)).toEqual({ id: "spread-intro", interrupt: true, protect: false });
-    expect(s.wire.map((w) => w.msg)).toEqual([{ v: 1, type: "stage", mode: "spread", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1 }]);
+    expect(s.wire.map((w) => w.msg)).toEqual([{ v: 1, type: "stage", mode: "spread", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1, panX: 0 }]);
     s.key(" ");
     expect(s.c.state.mode).toBe("map");
     expect(s.scene.setLayout).toHaveBeenLastCalledWith("map", s.index.summary[MONTH], "price");
@@ -1439,11 +1441,10 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
     s.render(0.4);
     expect(s.yaw()).toBe(0);
     expect(s.zoom()).toBe(1);
-    // 펼친 화면에서는 끌기·휠이 돌리거나 확대하지 않는다
+    // 펼친 화면에서는 끌기가 돌리지 않는다(휠·두 주먹 확대는 계약 13.8: 아래 spread zoom 테스트)
     s.c.pointer.move({ x: 0.2, y: 0.5 });
     s.c.pointer.down();
     s.c.pointer.move({ x: 0.8, y: 0.5 });
-    s.c.pointer.wheel(-300);
     s.render();
     expect(s.c.state.rotate).toBe("none");
     expect(s.yaw()).toBe(0);
@@ -1816,5 +1817,185 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
     s.live(RESULT_GUARD_MS - 100, two); // 결과 직후 1.5초는 twoFist도 받지 않는다(그 뒤에는 래치로 다시 나지 않는다)
     expect(s.c.state.rotate).toBe("none");
     expect(s.c.state.vote?.phase).toBe("result");
+  });
+
+  // ----- 계약 13.8: 펼친 화면 확대(가리키는 곳 기준). 회전은 계속 막는다.
+  /** 스페이스로 펼치고 정면 복귀를 끝낸다. */
+  const enterSpread = (s: S) => {
+    s.key(" ");
+    expect(s.c.state.mode).toBe("spread");
+    s.render(1);
+  };
+
+  it("spread two fists zoom anchored at the hands", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    enterSpread(s);
+    s.frames(6, fists(0.7, 0.78)); // 화면 0.25·0.15: 왼쪽(1위 쪽), 중점 0.2(ndc −0.6), 거리 0.1
+    expect(s.c.state).toMatchObject({ mode: "spread", rotate: "two", lifted: null });
+    s.frame(fists(0.68, 0.8)); // 화면 0.275·0.125: 중점 그대로, 거리 0.15 → 1.5배
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.5, 9);
+    expect(s.pan()).toBeCloseTo(-0.6 + 0.6 / 1.5, 9); // 두 손 중점 아래 장면이 그대로: panX −0.2 < 0
+    expect(s.yaw()).toBe(0);
+    s.frame(fists(0.6, 0.72)); // 함께 옆으로(중점 0.2 → 0.3), 거리 그대로: 돌지도 확대되지도 않는다
+    s.render();
+    expect(s.yaw()).toBe(0);
+    expect(s.zoom()).toBeCloseTo(1.5, 9);
+    expect(s.pan()).toBeCloseTo(-0.2, 9);
+  });
+
+  it("spread wheel zoom anchored at pointer", async () => {
+    let under: string | null = null;
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.c.pointer.move({ x: 0.05, y: 0.5 }); // 왼쪽 끝: ndc −0.9
+    s.c.pointer.wheel(-100);
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    expect(s.pan()).toBeCloseTo(-0.9 + 0.9 / 1.1, 9);
+    expect(s.yaw()).toBe(0);
+    s.c.pointer.wheel(-100); // 같은 자리에서 한 칸 더: 기준점 아래가 계속 그대로
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.21, 9);
+    expect(s.pan()).toBeCloseTo(-0.9 + 0.9 / 1.21, 9);
+    const z = s.zoom();
+    const p = s.pan();
+    // 든 구가 있으면 휠은 확대하지 않는다
+    under = "종로구";
+    s.c.pointer.move({ x: 0.1, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state).toMatchObject({ mode: "spread", lifted: "종로구" });
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.zoom()).toBe(z);
+    expect(s.pan()).toBe(p);
+  });
+
+  it("map zoom keeps panX 0", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.05, y: 0.5 }); // 포인터가 왼쪽 끝이어도 지도는 가운데 기준
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.331, 9);
+    expect(s.pan()).toBe(0);
+    // 두 주먹(왼쪽)도 가운데 기준: 중점 이동은 회전이다
+    const h = setup({ pick: () => null });
+    await h.c.start("hands");
+    h.frames(6, fists(0.7, 0.78));
+    expect(h.c.state).toMatchObject({ mode: "map", rotate: "two" });
+    h.frame(fists(0.68, 0.8));
+    h.render();
+    expect(h.zoom()).toBeCloseTo(1.5, 9);
+    expect(h.pan()).toBe(0);
+  });
+
+  it("leaving spread resets zoom and pan", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.c.pointer.move({ x: 0.1, y: 0.5 });
+    s.c.pointer.wheel(-300);
+    s.render();
+    const p0 = s.pan()!;
+    expect(s.zoom()).toBeCloseTo(1.331, 9);
+    expect(p0).toBeLessThan(0);
+    s.key(" ");
+    expect(s.c.state.mode).toBe("map");
+    s.render(0.3); // 부드럽게 가운데·1배로
+    expect(s.pan()).toBeGreaterThan(p0);
+    expect(s.pan()).toBeLessThan(0);
+    s.render(0.4);
+    expect(s.zoom()).toBe(1);
+    expect(s.pan()).toBe(0);
+    s.c.pointer.wheel(-100); // 지도에서는 다시 가운데 기준
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    expect(s.pan()).toBe(0);
+
+    // 두 주먹으로 확대해 잡은 채 브이(전체 보기)로 나가도 풀린다. 움직임 줄이기: 즉시
+    const h = setup({ pick: () => null, extra: { reducedMotion: true } });
+    await h.c.start("hands");
+    enterSpread(h);
+    h.frames(6, fists(0.7, 0.78));
+    h.frame(fists(0.68, 0.8));
+    h.render();
+    expect(h.pan()).toBeLessThan(0);
+    h.key("Escape");
+    expect(h.c.state).toMatchObject({ mode: "map", rotate: "none" });
+    h.render(0.001);
+    expect(h.zoom()).toBe(1);
+    expect(h.pan()).toBe(0);
+  });
+
+  it("big screen message carries panX", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.glide(1000);
+    s.wire.length = 0;
+    const sent = () => s.wire.filter((w) => w.msg.type === "stage").map((w) => w.msg as StageMessage);
+    s.c.pointer.move({ x: 0.05, y: 0.5 });
+    s.c.pointer.wheel(-100);
+    s.glide(16);
+    const m = sent().at(-1)!;
+    expect(m).toMatchObject({ mode: "spread", lifted: null, yaw: 0, zoom: s.zoom(), panX: s.pan() });
+    expect(m.panX).toBeCloseTo(-0.9 + 0.9 / 1.1, 9);
+    expect(Object.keys(m).every((k) => ALLOWED_KEYS.stage.includes(k))).toBe(true);
+    // 하트비트에도 실린다
+    s.wire.length = 0;
+    s.clock.advance(HEARTBEAT_MS);
+    expect(sent().at(-1)).toMatchObject({ zoom: s.zoom(), panX: s.pan() });
+    // 나가면 가운데로 돌아간 값까지 보낸다
+    s.key(" ");
+    s.glide(1000);
+    expect(sent().at(-1)).toMatchObject({ mode: "map", yaw: 0, zoom: 1, panX: 0 });
+    await flush();
+    expect(s.c.publishFailed).toBe(false); // 모의 채널(toWire)이 모두 받아들였다
+  });
+
+  it("no rotation in spread from one fist or flick", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    enterSpread(s);
+    s.frames(4, [hand("Open_Palm", 0.6, 0.5)]);
+    s.frames(6, [hand("Closed_Fist", 0.6, 0.5)]); // 빈 곳 한 손 주먹: 펼친 화면에서는 무시
+    expect(s.c.state).toMatchObject({ mode: "spread", rotate: "none", lifted: null });
+    let x = 0.6;
+    for (let i = 0; i < 6; i++) s.play(33, [hand("Closed_Fist", (x -= 0.04), 0.5)]);
+    for (let i = 0; i < 8; i++) s.play(33, [hand("Open_Palm", (x -= 0.04), 0.5)]); // 휙 놓기
+    s.play(500, [hand("Open_Palm", x, 0.5)]);
+    expect(s.c.state).toMatchObject({ mode: "spread", rotate: "none", spinning: false });
+    expect(s.yaw()).toBe(0);
+
+    // 두 주먹 휙: 함께 밀다 끝에서 한 손을 펴도(지도라면 관성) 돌지 않는다
+    const t = setup({ pick: () => null });
+    await t.c.start("hands");
+    enterSpread(t);
+    let p = 0.6;
+    let q = 0.8;
+    t.frames(6, fists(p, q));
+    expect(t.c.state).toMatchObject({ mode: "spread", rotate: "two" });
+    for (let i = 0; i < 6; i++) t.play(33, fists((p -= 0.04), (q -= 0.04)));
+    expect(t.yaw()).toBe(0);
+    t.play(33, [hand("Closed_Fist", (p -= 0.04), 0.5), hand("Open_Palm", (q -= 0.04), 0.5)]);
+    for (let i = 0; i < 8 && t.c.state.rotate === "two"; i++) t.play(33, [hand("Closed_Fist", p, 0.5), hand("Open_Palm", q, 0.5)]);
+    expect(t.c.state).toMatchObject({ mode: "spread", rotate: "none", spinning: false });
+    t.render(0.5);
+    expect(t.yaw()).toBe(0);
+
+    // 마우스: 빈 곳 빠른 끌기도 돌리지 않는다
+    const m = setup({ pick: () => null });
+    await m.c.start("mouse");
+    enterSpread(m);
+    m.c.pointer.move({ x: 0.2, y: 0.5 });
+    m.c.pointer.down();
+    for (let i = 1; i <= 6; i++) { m.c.pointer.move({ x: 0.2 + i * 0.05, y: 0.5 }); m.glide(16); }
+    m.c.pointer.up();
+    m.glide(500);
+    expect(m.c.state).toMatchObject({ mode: "spread", rotate: "none", spinning: false });
+    expect(m.yaw()).toBe(0);
   });
 });

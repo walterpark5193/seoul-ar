@@ -160,9 +160,10 @@ export interface StageUi {
 
 /** group: 회전기가 도는 각도를 수직 축(rotation.y)에 그대로 얹는다(큰 화면도 같은 부호). */
 export type StageScene = Pick<SeoulScene, "setOverview" | "focus" | "setHover" | "lift" | "setLayout" | "pick"> & { readonly group: { rotation: { y: number } } };
-/** onFrame: 렌더 루프 한 번마다(dt 초). 회전기 tick·확대를 여기서 적용한다. */
+/** onFrame: 렌더 루프 한 번마다(dt 초). 회전기 tick·확대·옆 이동(setPan, 계약 13.8)을 여기서 적용한다. */
 export interface StageCamera {
-  camera: Camera; setMode(mode: StageMode, instant?: boolean): void; setZoom(z: number): void; onFrame(cb: (dt: number) => void): () => void;
+  camera: Camera; setMode(mode: StageMode, instant?: boolean): void; setZoom(z: number): void; setPan(p: number): void;
+  onFrame(cb: (dt: number) => void): () => void;
 }
 export type StartResult = { ok: true; source: HandSource } | { ok: false; reason: HandSourceError };
 export interface StageClock { now(): number; every(ms: number, fn: () => void): () => void; }
@@ -279,7 +280,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let twoPts: [Point, Point] | null = null;        // 이번 프레임 주 손·둘째 손 손바닥(화면 좌표). 정확히 두 손일 때만
   let spinShown = false;                           // 마지막으로 spinState로 알린 회전기 관성 여부
   let wheelAcc = 0;                                // 모은 휠 픽셀(부호 = 방향)
-  let sentView = { yaw: 0, zoom: 1 };              // 마지막 StageMessage에 실은 각도·배율
+  let sentView = { yaw: 0, zoom: 1, panX: 0 };     // 마지막 StageMessage에 실은 각도·배율·옆 이동
   let sentAt = -Infinity;                          // 그때 시각(clock)
   const guCache = new Map<string, GuData>();                                   // 받은 구 자료(월|구)
   const guLoading = new Map<string, Promise<GuData | null>>();                  // 받는 중인 요청(같은 구를 두 번 받지 않게)
@@ -338,19 +339,19 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     deps.onState?.(msg);
     track("state", () => deps.realtime.publish(msg));
   };
-  /** 모든 StageMessage에 지금 각도·배율을 싣는다(큰 화면은 없으면 정면 0·1로 돌아가므로 들기·펼치기 메시지에도). */
+  /** 모든 StageMessage에 지금 각도·배율·옆 이동을 싣는다(큰 화면은 없으면 정면 0·1·가운데로 돌아가므로 들기·펼치기 메시지에도). */
   const publishStage = () => {
-    const { yaw, zoom } = rotator.state;
-    sentView = { yaw, zoom };
+    const { yaw, zoom, panX } = rotator.state;
+    sentView = { yaw, zoom, panX };
     sentAt = clock.now();
     const msg = toStageMessage(state, sentAt, sentView);
     track("stage", () => deps.stageChannel.publish(msg));
   };
-  /** 각도·배율이 마지막으로 보낸 값과 다르면 VIEW_PUBLISH_MS 간격으로 보낸다(처음 바뀐 렌더에 바로, 멈추면 남은 값을 한 번). */
+  /** 각도·배율·옆 이동이 마지막으로 보낸 값과 다르면 VIEW_PUBLISH_MS 간격으로 보낸다(처음 바뀐 렌더에 바로, 멈추면 남은 값을 한 번). */
   const publishView = () => {
     if (phase !== "running") return;
-    const { yaw, zoom } = rotator.state;
-    if (yaw === sentView.yaw && zoom === sentView.zoom) return;
+    const { yaw, zoom, panX } = rotator.state;
+    if (yaw === sentView.yaw && zoom === sentView.zoom && panX === sentView.panX) return;
     if (clock.now() - sentAt < VIEW_PUBLISH_MS) return;
     publishStage();
   };
@@ -477,6 +478,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     const next = reduceStage(prev, e);
     if (next === prev) return;
     state = next;
+    // 펼친 화면은 확대만(계약 13.8): 회전기를 잠가 끌기·두 주먹·관성이 yaw를 바꾸지 않게. 효과(리셋·잡기)보다 먼저.
+    if (prev.mode !== next.mode) rotator.setYawLocked(state.mode === "spread");
     const pv = prev.vote;
     const nv = next.vote;
     if (nv && (!pv || pv.round !== nv.round)) {
@@ -745,27 +748,32 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   }
   const heartbeat = () => { publishState(); publishStage(); };
 
-  /** 렌더 루프 한 번: 관성·정면 복귀를 진행하고 도시 group과 카메라 거리에 적용, 관성 변화를 알리고 큰 화면에 보낸다. */
+  /** 렌더 루프 한 번: 관성·정면 복귀를 진행하고 도시 group과 카메라 거리·옆 이동에 적용, 관성 변화를 알리고 큰 화면에 보낸다. */
   function frameTick(dt: number): void {
     const v = rotator.tick(dt);
     scene.group.rotation.y = v.yaw;
     renderer?.setZoom(v.zoom);
+    renderer?.setPan(v.panX);
     syncSpin();
     publishView();
   }
 
-  /** 휠: 지도 화면·든 구 없음·투표 진행 중 아님일 때만. 픽셀로 모아 WHEEL_STEP_PX마다 한 단계(방향이 바뀌면 새로 센다). */
+  /**
+   * 휠: 지도·펼친 화면에서, 든 구 없음·투표 진행 중 아님일 때만. 픽셀로 모아 WHEEL_STEP_PX마다 한 단계(방향이 바뀌면 새로 센다).
+   * 기준점(계약 13.8): 펼친 화면은 포인터의 ndc x(x·2 − 1, 포인터가 없으면 가운데), 지도는 가운데(panX 0 유지).
+   */
   function wheel(deltaY: number, deltaMode = 0): void {
     if (phase !== "running") return;
     const v = state.vote;
-    if (state.mode !== "map" || state.lifted !== null || (v !== null && v.phase !== "result")) { wheelAcc = 0; return; }
+    if (state.lifted !== null || (v !== null && v.phase !== "result")) { wheelAcc = 0; return; }
     const px = wheelPixels(deltaY, deltaMode);
     if (!Number.isFinite(px) || px === 0) return;
     if (Math.sign(px) !== Math.sign(wheelAcc)) wheelAcc = 0;
     wheelAcc += px;
+    const anchor = state.mode === "spread" && mousePoint ? mousePoint.x * 2 - 1 : 0;
     while (Math.abs(wheelAcc) >= WHEEL_STEP_PX) {
       const dir = Math.sign(wheelAcc);
-      rotator.wheel(dir);
+      rotator.wheel(dir, anchor);
       wheelAcc -= dir * WHEEL_STEP_PX;
     }
   }
@@ -805,6 +813,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   // ----- 처음 그림: 시작 화면 뒤로 전체 지도가 보인다.
   scene.setOverview(summary(), state.metric);
   renderer?.setMode("map", true);
+  rotator.setYawLocked(state.mode === "spread"); // 넘겨받은 회전기도 처음 모드(지도)에 맞춘다
   // 회전기는 렌더 루프에서 진행한다. WebGL이 없으면(3D 없음) 틱 간격으로 진행해 관성이 멈추고 큰 화면도 따라간다.
   if (renderer) stops.push(renderer.onFrame(frameTick));
   stops.push(narrator.onCaption((t) => setPart("caption", renderCaption(t))));
