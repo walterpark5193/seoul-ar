@@ -381,6 +381,9 @@ kbd {
     linear-gradient(var(--c) 0 0) right bottom / 3px var(--len);
   background-repeat: no-repeat;
 }
+/* 손가락으로 도시 돌리기·키우기: 카메라 영역에서만 브라우저 기본 스크롤·확대를 끈다(시트는 그대로 스크롤된다). */
+.viewer--ar .stage { touch-action: none; }
+
 /* 화면 고정: 카메라 영상과 포즈를 멈춰 흔들림 없이 읽는다 */
 .ar-tools {
   position: absolute; z-index: 3;
@@ -498,6 +501,7 @@ kbd {
 .fetch-key { display: grid; gap: 8px; margin-top: 12px; }
 .fetch-key label { font-size: 14px; font-weight: 600; }
 .fetch-hint { color: var(--ink-2); font-size: 13px; }
+.fetch-year { margin-top: 10px; color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
 .fetch-status { margin-top: 10px; min-height: 1.5em; font-size: 14px; font-variant-numeric: tabular-nums; }
 .fetch-error { margin-top: 6px; color: var(--alert); font-size: 14px; font-weight: 600; line-height: 1.5; }
 

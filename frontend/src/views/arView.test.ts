@@ -167,6 +167,83 @@ describe("arView", () => {
     expect(seen).toEqual({ container, targetSrc: "/marker/target.mind" });
   });
 
+  describe("touch: turn and zoom the city on the marker (Task 4g)", () => {
+    const onStage = { closest: () => null };
+    const onSheet = { closest: (sel: string) => (sel.includes(".sheet-host") ? {} : null) };
+
+    async function started(opts: { reducedMotion?: boolean } = {}) {
+      const { session, hooks } = fakeSession(async () => {});
+      const scene = fakeScene();
+      const onPoseChange = vi.fn();
+      const running = (await beginAr({
+        container: {} as HTMLElement,
+        createArSession: () => session,
+        createScene: () => scene,
+        onFound: vi.fn(), onLost: vi.fn(), onFail: vi.fn(),
+        reducedMotion: opts.reducedMotion ?? false,
+        onPoseChange,
+      }))!;
+      return { running, scene, session, hooks, onPoseChange };
+    }
+
+    it("a one-finger horizontal drag turns scene.group around its up axis", async () => {
+      const { running, scene, onPoseChange } = await started();
+      running.gestures.pointerDown(1, 100, 300, onStage);
+      running.gestures.pointerMove(1, 200, 500);
+      expect(scene.group.rotation.y).toBeCloseTo(1.2);
+      expect(scene.group.rotation.x).toBe(0);
+      expect(onPoseChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("pinch scales scene.group uniformly and clamps", async () => {
+      const { running, scene } = await started();
+      running.gestures.pointerDown(1, 0, 0, onStage);
+      running.gestures.pointerDown(2, 100, 0, onStage);
+      running.gestures.pointerMove(2, 1000, 0);
+      expect(scene.group.scale.toArray()).toEqual([1.6, 1.6, 1.6]);
+    });
+
+    it("drags that start on the sheet are ignored", async () => {
+      const { running, scene } = await started();
+      expect(running.gestures.pointerDown(1, 0, 0, onSheet)).toBe(false);
+      running.gestures.pointerMove(1, 300, 0);
+      expect(scene.group.rotation.y).toBe(0);
+    });
+
+    it("원위치 eases back on the render loop and reports the default pose", async () => {
+      const { running, scene, hooks, onPoseChange } = await started();
+      running.gestures.pointerDown(1, 0, 0, onStage);
+      running.gestures.pointerMove(1, 100, 0);
+      running.gestures.pointerUp(1);
+      running.gestures.reset();
+      hooks.frame?.(0.3);
+      expect(scene.group.rotation.y).toBeGreaterThan(0);
+      hooks.frame?.(0.4);
+      expect(scene.group.rotation.y).toBe(0);
+      expect(scene.group.scale.x).toBe(1);
+      expect(onPoseChange).toHaveBeenLastCalledWith(true);
+      expect(scene.update).toHaveBeenCalled();
+    });
+
+    it("still works while frozen", async () => {
+      const { running, scene, session, hooks } = await started();
+      hooks.found?.();
+      running.toggleFreeze();
+      expect(session.frozen).toBe(true);
+      running.gestures.pointerDown(1, 0, 0, onStage);
+      running.gestures.pointerMove(1, -50, 0);
+      expect(scene.group.rotation.y).toBeCloseTo(-0.6);
+    });
+
+    it("reduced motion resets at once", async () => {
+      const { running, scene } = await started({ reducedMotion: true });
+      running.gestures.pointerDown(1, 0, 0, onStage);
+      running.gestures.pointerMove(1, 100, 0);
+      running.gestures.reset();
+      expect(scene.group.rotation.y).toBe(0);
+    });
+  });
+
   describe("화면 고정 toggle", () => {
     it("is disabled until the target has been found once", async () => {
       const { session, hooks } = fakeSession(async () => {});

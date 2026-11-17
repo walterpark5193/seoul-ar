@@ -25,6 +25,11 @@ export type FetchView =
   | { phase: "running"; kind: JobKind; month: string; jobId: string; done: number; total: number; gu?: string }
   | { phase: "loading"; kind: JobKind; month: string };
 
+/** 운영자가 돌리는 연 단위 수집 작업(fetch-year). 락을 쥐고 있으므로 그동안 버튼을 잠근다. */
+export interface YearJob { month: string; done: number; total: number; }
+/** 연 단위 작업 이벤트가 이만큼 끊기면 끝난 것으로 본다(작업이 죽었을 수 있다). */
+const YEAR_JOB_QUIET_MS = 120_000;
+
 /** 호스트가 고른 달의 해설 유무(버튼 활성 판단). */
 export interface NarrationAvailability { month: string; state: "unknown" | "present" | "absent" | "running"; }
 
@@ -126,8 +131,11 @@ function renderNarrate(n: NarrationAvailability | undefined, locked: boolean, v:
     `<span class="fetch-hint">${esc(hint)}</span></div>`;
 }
 
-export function renderMonthFetch(v: FetchView, o: { value: string; max: string; narration?: NarrationAvailability }): string {
-  const locked = isBusy(v) || v.phase === "key";
+export function renderMonthFetch(
+  v: FetchView,
+  o: { value: string; max: string; narration?: NarrationAvailability; yearJob?: YearJob | null },
+): string {
+  const locked = isBusy(v) || v.phase === "key" || !!o.yearJob;
   const keyForm = v.phase !== "key" ? "" :
     `<form class="fetch-key" data-form="key">` +
     `<label for="presenter-key">발표자 암호</label>` +
@@ -149,6 +157,7 @@ export function renderMonthFetch(v: FetchView, o: { value: string; max: string; 
     `</form>` +
     renderNarrate(o.narration, locked, v) +
     keyForm +
+    (o.yearJob ? `<p class="fetch-year">${esc(`연 단위 수집 중 ${o.yearJob.done}/${o.yearJob.total}`)}</p>` : "") +
     `<p class="fetch-status" role="status">${esc(statusLine(v))}</p>` +
     error +
     `</section>`;
@@ -168,7 +177,8 @@ export interface MonthFetchDeps {
   /** 해설 생성이 끝나면 그 달 해설을 다시 읽는다(캐시 비우고 다시 확인). */
   reloadNarration?(month: string): Promise<unknown>;
   toast(message: string): void;
-  onChange(view: FetchView): void;
+  /** 화면을 다시 그릴 때. yearJob: 지금 도는 연 단위 수집(없으면 null). */
+  onChange(view: FetchView, yearJob: YearJob | null): void;
   /** 같은 달을 다시 가져온 경우를 위해 구 데이터 캐시를 비운다. */
   forgetMonth?(month: string): void;
   now?: () => number;
@@ -180,6 +190,10 @@ export interface MonthFetchDeps {
 
 export interface MonthFetch {
   readonly view: FetchView;
+  /** 지금 도는 연 단위 수집(없으면 null). watch() 뒤에만 알 수 있다. */
+  readonly yearJob: YearJob | null;
+  /** 진행 채널을 미리 구독한다(호스트 마운트 때). 연 단위 작업을 버튼을 누르기 전에 알기 위해서다. */
+  watch(): void;
   /** 월 가져오기 */
   submit(input: string): Promise<void>;
   /** 해설 생성(이미 있는 달) */
@@ -200,13 +214,15 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
   let offJobs: (() => void) | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let lastProgress = 0;
+  let yearJob: YearJob | null = null;
+  let yearTimer: ReturnType<typeof setTimeout> | null = null;
   /** 수집 완료 뒤 자동으로 따라가는 해설 작업(I2). seen: 이벤트나 기록으로 한 번이라도 보였는지. */
   let auto: { jobId: string; startedAt: number; seen: boolean; readyNote: string } | null = null;
 
   const set = (v: FetchView) => {
     if (!alive) return;
     view = v;
-    d.onChange(v);
+    d.onChange(v, yearJob);
   };
 
   const readKey = (): string | null => {
@@ -281,8 +297,19 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
    * running(진행 숫자)은 확인 없이 반영한다.
    * verified: 기록 파일에서 읽은 것(폴링 또는 확인을 거친 것)이면 true.
    */
+  /** 연 단위 작업은 화면의 월 작업과 별개다. 표시와 버튼 잠금만 하고, 월 작업 상태는 건드리지 않는다. */
+  const onYearJob = (msg: JobMessage) => {
+    if (yearTimer) { clearTimeout(yearTimer); yearTimer = null; }
+    yearJob = msg.state === "running" ? { month: msg.month, done: msg.done, total: msg.total || TOTAL_GUS } : null;
+    if (yearJob) {
+      yearTimer = setTimeout(() => { yearTimer = null; yearJob = null; if (alive) d.onChange(view, null); }, YEAR_JOB_QUIET_MS);
+    }
+    if (alive) d.onChange(view, yearJob);
+  };
+
   const onJob = (msg: JobMessage, verified = false) => {
     if (!alive) return;
+    if (msg.kind === "fetch-year") { onYearJob(msg); return; }
     const msgKind: JobKind = msg.kind ?? "fetch";
     // 202 응답보다 진행 이벤트가 먼저 오면 그 작업을 받아들인다.
     if (view.phase === "sending" && msg.month === view.month && msgKind === view.kind && msg.state === "running") {
@@ -383,14 +410,18 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
 
   return {
     get view() { return view; },
+    get yearJob() { return yearJob; },
+    watch() {
+      if (alive) offJobs ??= d.subscribeJobs(onJob);
+    },
     async submit(input) {
-      if (!alive || isBusy(view)) return;
+      if (!alive || isBusy(view) || yearJob) return;
       const month = parseMonthInput(input, now());
       if (!month) { set({ phase: "idle", error: MSG.badMonth }); return; }
       await start("fetch", month);
     },
     async narrate(month) {
-      if (!alive || isBusy(view) || !/^\d{6}$/.test(month)) return;
+      if (!alive || isBusy(view) || yearJob || !/^\d{6}$/.test(month)) return;
       await start("narration", month);
     },
     async submitKey(key) {
@@ -405,6 +436,7 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     dispose() {
       alive = false;
       auto = null;
+      if (yearTimer) { clearTimeout(yearTimer); yearTimer = null; }
       stopPoll();
       offJobs?.();
       offJobs = null;

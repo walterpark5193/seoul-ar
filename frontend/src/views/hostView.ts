@@ -13,7 +13,7 @@ import { replaceKeepingFocus } from "../ui/patch";
 import { drawQr } from "../ui/qr";
 import {
   createMonthFetch, defaultFetchMonth, monthInputValue, narratingMonth, needsFetchRender, needsNarrationRecheck, renderMonthFetch,
-  type FetchView, type NarrationAvailability, type StorageLike,
+  type FetchView, type NarrationAvailability, type StorageLike, type YearJob,
 } from "./monthFetch";
 import { createTimeTravel, renderTimeTravel, type TravelView } from "./timeTravel";
 import type { MountView } from "./types";
@@ -122,13 +122,16 @@ export const mountHostView: MountView = (root, ctx) => {
   const fetchHost = root.querySelector<HTMLElement>("[data-fetch]")!;
   let fetchValue = monthInputValue(defaultFetchMonth(ctx.index, Date.now()));
   let fetchView: FetchView = { phase: "idle" };
+  let yearJob: YearJob | null = null; // 운영자의 연 단위 수집이 도는 중이면 버튼을 잠근다
   let lastPhase: FetchView["phase"] = "idle";
   // 고른 달(월 칩)의 해설 유무: "해설 생성" 버튼은 없을 때만 켠다.
   let narration: NarrationAvailability = { month: ctx.store.getState().month, state: "unknown" };
   /** cause "context"(월·index·해설 유무가 바뀜)는 암호를 입력하는 중이면 건너뛴다(입력이 지워지지 않게). */
   const paintFetch = (v: FetchView, cause: "view" | "context") => {
     if (!needsFetchRender(v.phase, cause)) return;
-    replaceKeepingFocus(fetchHost, renderMonthFetch(v, { value: fetchValue, max: monthInputValue(currentMonth(Date.now())), narration }));
+    replaceKeepingFocus(fetchHost, renderMonthFetch(v, {
+      value: fetchValue, max: monthInputValue(currentMonth(Date.now())), narration, yearJob,
+    }));
     if (v.phase === "key" && lastPhase !== "key") fetchHost.querySelector<HTMLInputElement>("#presenter-key")?.focus();
     lastPhase = v.phase;
   };
@@ -163,9 +166,10 @@ export const mountHostView: MountView = (root, ctx) => {
     },
     forgetMonth: (m) => forgetMonth(m),
     toast: ctx.toast,
-    onChange: (v) => {
+    onChange: (v, y) => {
       const prev = fetchView;
       fetchView = v;
+      yearJob = y;
       paintFetch(v, "view");
       // 해설 작업이 어떤 식으로든 끝나면(성공, 실패, 자동 해설 90초 포기) 해설 유무를 다시 확인한다.
       // 성공 때 reloadNarration이 부르는 확인은 아직 loading 단계라 "running"으로 남을 수 있어서, 여기서 한 번 더 확인한다.
@@ -177,6 +181,7 @@ export const mountHostView: MountView = (root, ctx) => {
   publish();
   paintTravel(travel.view);
   paintFetch(fetchView, "view");
+  monthFetch.watch(); // 연 단위 수집처럼 이 화면 밖에서 시작된 작업도 버튼을 누르기 전에 알게
   void checkNarration(ctx.store.getState().month);
 
   // 새 달을 가져와 index가 바뀌면 월 칩·시간 여행·해설 유무를 다시 그린다.
