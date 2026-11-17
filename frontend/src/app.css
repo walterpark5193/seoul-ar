@@ -235,6 +235,27 @@ kbd {
 
 .sheet-note { margin-top: 10px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
 
+/* 법정동 상위 5: 3D 라벨이 흔들려도 2D에서 읽히는 숫자. 순위는 실제 순서라 번호를 붙인다. */
+.dongs { margin-top: 12px; }
+.dongs-title { margin: 0 0 2px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.dong-list { margin: 0; padding: 0; list-style: none; }
+.dong {
+  display: grid; grid-template-columns: 1.3em minmax(0, 1fr) auto 5.2em;
+  align-items: baseline; column-gap: 8px;
+  font-size: 14px; line-height: 1.55; font-variant-numeric: tabular-nums;
+}
+.dong-rank { color: var(--ink-2); font-size: 12px; text-align: right; }
+.dong-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dong-val { text-align: right; }
+.dong-val .fig-num { font-size: 15px; font-weight: 600; }
+.dong-val .fig-unit { font-size: 12px; }
+.dong-val .fig-none { font-size: 13px; font-weight: 500; }
+.dong-sub { color: var(--ink-2); font-size: 12px; text-align: right; }
+/* 작은 폰(세로 660px 미만)에서는 3줄만: 시트가 그림을 덮지 않게 */
+@media (max-height: 660px) {
+  .dong:nth-child(n + 4) { display: none; }
+}
+
 .legend {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
   font-size: 12px; font-variant-numeric: tabular-nums;
@@ -306,6 +327,32 @@ kbd {
     linear-gradient(var(--c) 0 0) right bottom / 3px var(--len);
   background-repeat: no-repeat;
 }
+/* 화면 고정: 카메라 영상과 포즈를 멈춰 흔들림 없이 읽는다 */
+.ar-tools {
+  position: absolute; z-index: 3;
+  top: calc(10px + var(--safe-t)); right: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.btn-freeze {
+  min-height: var(--tap); min-width: 96px; padding: 0 16px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  background: rgb(11 16 32 / 0.72); color: var(--ink);
+  font-size: 15px; font-weight: 600;
+}
+.btn-freeze:disabled { color: var(--ink-2); cursor: not-allowed; }
+.ar-tools.is-frozen .btn-freeze { background: var(--amber); border-color: var(--amber); color: var(--night); }
+.freeze-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 0 12px; border-radius: 999px;
+  background: var(--ink); color: var(--night);
+  font-size: 14px; font-weight: 700;
+}
+.freeze-state::before {
+  content: ""; width: 3px; height: 11px;
+  border-left: 3px solid currentColor; border-right: 3px solid currentColor;
+  box-sizing: content-box;
+}
+
 .scan-text {
   position: absolute; top: calc(66px + var(--safe-t));
   padding: 10px 16px; border-radius: 999px;

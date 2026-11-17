@@ -101,6 +101,58 @@ describe("renderSheet", () => {
     expect(text(html)).toContain("3D로 보기");
   });
 
+  describe("top dong list", () => {
+    const dong = (name: string, medPerM2: number | null, n: number) => ({
+      name, n, cancelled: 0, nApt: 0, medPerM2, medPerM2Apt: null, medAmt: 1, maxAmt: 1, usage: {},
+    });
+    // CONTRACTS 2.2 order: medPerM2 desc, null last.
+    const many: GuData = {
+      ...gangnam,
+      dongs: [
+        dong("대치동", 3300, 7), dong("압구정동", 3200, 3), dong("삼성동", 3000, 9), dong("청담동", 2950, 2),
+        dong("역삼동", 2600, 12), dong("개포동", 2400, 5), dong("일원동", null, 1),
+      ],
+    };
+    const rows = (html: string) =>
+      [...html.matchAll(/<li class="dong[^"]*">([\s\S]*?)<\/li>/g)].map((m) => text(m[1]!).trim());
+
+    it("lists the top 5 dongs in the data's order for price, with value and count", () => {
+      const r = rows(renderSheet(state({ metric: "price" }), many, index));
+      expect(r).toHaveLength(5);
+      expect(r.map((t) => t.split(" ")[1])).toEqual(["대치동", "압구정동", "삼성동", "청담동", "역삼동"]);
+      expect(r[0]).toContain("3,300만원/㎡");
+      expect(r[0]).toContain("7건");
+      expect(r[0]).toMatch(/^1 /);
+    });
+
+    it("sorts by trade count for the count metric", () => {
+      const r = rows(renderSheet(state({ metric: "count" }), many, index));
+      expect(r.map((t) => t.split(" ")[1])).toEqual(["역삼동", "삼성동", "대치동", "개포동", "압구정동"]);
+      expect(r[0]).toContain("12건");
+      expect(r[0]).toContain("2,600만원/㎡");
+    });
+
+    it("shows 거래 없음 rows gracefully and lists fewer than 5 when there are fewer dongs", () => {
+      const r = rows(renderSheet(state({ metric: "price" }), gangnam, index));
+      expect(r).toHaveLength(2);
+      expect(r[1]).toContain("거래 없음");
+      expect(r[1]).toContain("2건");
+      expect(r.join(" ")).not.toMatch(/NaN|undefined|null/);
+    });
+
+    it("omits the list for Seoul overview, while loading, and for a gu with no dongs", () => {
+      expect(rows(renderSheet(state({ gu: null }), null, index))).toHaveLength(0);
+      expect(rows(renderSheet(state(), null, index))).toHaveLength(0);
+      expect(rows(renderSheet(state(), { ...gangnam, dongs: [] }, index))).toHaveLength(0);
+      expect(rows(renderSheet(state({ gu: "중구" }), many, index))).toHaveLength(0);
+    });
+
+    it("titles the list by metric", () => {
+      expect(text(renderSheet(state({ metric: "price" }), many, index))).toContain("㎡당 중앙값 상위 법정동");
+      expect(text(renderSheet(state({ metric: "count" }), many, index))).toContain("거래가 많은 법정동");
+    });
+  });
+
   it("escapes names coming from data", () => {
     const html = renderSheet(state(), gangnam, { ...index, gus: [...index.gus, "<script>"] });
     expect(html).not.toContain("<script>");

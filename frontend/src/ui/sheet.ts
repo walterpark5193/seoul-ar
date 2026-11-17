@@ -55,6 +55,29 @@ function renderFigures(figures: Figure[]): string {
     .join("")}</dl>`;
 }
 
+const TOP_DONGS = 5;
+
+/**
+ * 법정동 상위 5개(CONTRACTS 8절 보강): 3D 라벨이 흔들려도 숫자는 2D에서 읽히게.
+ * 가격 지표는 데이터 순서(medPerM2 내림차순, null 뒤) 그대로, 건수 지표는 n 내림차순(같으면 데이터 순서).
+ * 각 줄: 순위, 이름, 현재 지표 값, 다른 지표 값(가격이면 건수, 건수이면 ㎡당 중앙값).
+ */
+function renderDongs(data: GuData, metric: Metric): string {
+  if (data.dongs.length === 0) return "";
+  const ordered = metric === "price" ? data.dongs : [...data.dongs].sort((a, b) => b.n - a.n);
+  const top = ordered.slice(0, TOP_DONGS);
+  const title = metric === "price" ? "㎡당 중앙값 상위 법정동" : "거래가 많은 법정동";
+  const rows = top.map((d, i) => {
+    const main = metric === "price" ? fmtPerM2(d.medPerM2) : fmtCount(d.n);
+    const sub = metric === "price" ? fmtCount(d.n) : fmtPerM2(d.medPerM2);
+    const none = main === NO_TRADE ? " dong--none" : "";
+    return `<li class="dong${none}"><span class="dong-rank">${i + 1}</span> <span class="dong-name">${esc(d.name)}</span> ` +
+      `<span class="dong-val">${figure(main)}</span> <span class="dong-sub">${esc(sub)}</span></li>`;
+  }).join("");
+  return `<section class="dongs" aria-labelledby="dongs-title"><h3 class="dongs-title" id="dongs-title">${title}</h3>` +
+    `<ol class="dong-list">${rows}</ol></section>`;
+}
+
 function renderLegend(scope: string, metric: Metric, values: Array<number | null>): string {
   const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (nums.length === 0) return "";
@@ -107,6 +130,7 @@ export function renderSheet(state: AppState, data: GuData | null, index: DataInd
   let figures: Figure[];
   let notes: string[] = [];
   let legend: string;
+  let dongs = "";
 
   if (state.gu) {
     const fresh = data && data.month === state.month && data.gu === state.gu ? data : null;
@@ -115,6 +139,7 @@ export function renderSheet(state: AppState, data: GuData | null, index: DataInd
     ({ figures, notes } = guFigures(stat));
     if (stat && stat.n === 0) notes.unshift(`${fmtMonth(state.month)}에는 신고된 매매 거래가 없습니다.`);
     legend = fresh ? renderLegend("동별", state.metric, fresh.dongs.map((d) => statValue(d, state.metric))) : "";
+    dongs = fresh ? renderDongs(fresh, state.metric) : "";
   } else {
     const entries = (index?.gus ?? Object.keys(monthSummary))
       .map((g): [string, Stat | undefined] => [g, monthSummary[g]])
@@ -129,6 +154,7 @@ export function renderSheet(state: AppState, data: GuData | null, index: DataInd
     `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +
     `<p class="sheet-month">${esc(fmtMonth(state.month))} 매매 실거래</p></div>${renderLive(state)}</header>` +
     renderFigures(figures) +
+    dongs +
     (notes.length ? `<p class="sheet-note">${notes.map(esc).join(" ")}</p>` : "") +
     legend +
     renderControls(state, index, opts) +
