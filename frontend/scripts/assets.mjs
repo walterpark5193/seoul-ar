@@ -6,12 +6,15 @@ export function isZipMagic(bytes) {
 }
 
 export async function checkModel(path) {
-  let size;
+  let st;
   try {
-    size = (await stat(path)).size;
-  } catch {
-    return { ok: false, reason: "missing", bytes: 0 };
+    st = await stat(path);
+  } catch (e) {
+    if (e && e.code === "ENOENT") return { ok: false, reason: "missing", bytes: 0 };
+    throw e;
   }
+  if (!st.isFile()) return { ok: false, reason: "not-file", bytes: 0 };
+  const size = st.size;
   const fh = await open(path, "r");
   try {
     const buf = new Uint8Array(2);
@@ -33,4 +36,24 @@ export async function copyWasm(srcDir, dstDir) {
     names.push(e.name);
   }
   return names;
+}
+
+export const REQUIRED_WASM = [
+  "vision_wasm_internal.js",
+  "vision_wasm_internal.wasm",
+  "vision_wasm_module_internal.js",
+  "vision_wasm_module_internal.wasm",
+];
+
+export async function missingFiles(dir, names = REQUIRED_WASM) {
+  const missing = [];
+  for (const n of names) {
+    try {
+      if (!(await stat(join(dir, n))).isFile()) missing.push(n);
+    } catch (e) {
+      if (e && e.code === "ENOENT") missing.push(n);
+      else throw e;
+    }
+  }
+  return missing;
 }
