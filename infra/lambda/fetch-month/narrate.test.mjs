@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   SEOUL_KEY, NARRATION_KEYS, MAX_CHARS, MAX_CALLS, FORBIDDEN_RE, narrationKey,
-  validateSentence, parseJsonObject, buildFacts, generateNarration,
+  validateSentence, parseJsonObject, buildFacts, generateNarration, templateSentence, formatManwon, tallyText, retryHint,
 } from "./narrate.mjs";
 import { aggregateRows } from "./aggregate.mjs";
 import { GU_ORDER } from "./gu.mjs";
@@ -16,10 +16,10 @@ const perGu = () => GU_ORDER.map((gu) => aggregateRows(
 ));
 
 describe("상수와 키", () => {
-  test("키는 서울 전체 + GU_ORDER 25개, 상한 80자, 호출 30회", () => {
+  test("키는 서울 전체 + GU_ORDER 25개, 상한 100자, 호출 30회", () => {
     assert.equal(SEOUL_KEY, "서울 전체");
     assert.deepEqual(NARRATION_KEYS, ["서울 전체", ...GU_ORDER]);
-    assert.equal(MAX_CHARS, 80);
+    assert.equal(MAX_CHARS, 100);
     assert.equal(MAX_CALLS, 30);
     assert.equal(narrationKey("202610"), "data/202610/narration.json");
   });
@@ -50,9 +50,9 @@ describe("validateSentence", () => {
     }
   });
 
-  test("80자까지는 통과, 81자는 거절 (코드 포인트로 센다)", () => {
-    assert.equal(validateSentence("가".repeat(80)).ok, true);
-    assert.equal(validateSentence("가".repeat(81)).ok, false);
+  test("100자까지는 통과, 101자는 거절 (코드 포인트로 센다), 길이를 detail 로", () => {
+    assert.equal(validateSentence("가".repeat(100)).ok, true);
+    assert.deepEqual(validateSentence("가".repeat(101)), { ok: false, reason: "length", detail: { length: 101 } });
     assert.equal(validateSentence("가" + "😀".repeat(79)).ok, true);
   });
 
@@ -112,7 +112,9 @@ describe("generateNarration", () => {
     assert.equal(converse.calls.length, 1);
     assert.equal(out.calls, 1);
     assert.deepEqual(out.missing, []);
-    assert.deepEqual(Object.keys(out.narration), ["v", "month", "generatedAt", "model", "items"]);
+    assert.deepEqual(Object.keys(out.narration), ["v", "month", "generatedAt", "model", "items", "source"]);
+    assert.ok(Object.values(out.narration.source).every((x) => x === "model"));
+    assert.equal(Object.keys(out.narration.source).length, 26);
     assert.equal(out.narration.v, 1);
     assert.equal(out.narration.month, MONTH);
     assert.equal(out.narration.generatedAt, GEN);
@@ -120,7 +122,10 @@ describe("generateNarration", () => {
     assert.deepEqual(Object.keys(out.narration.items), NARRATION_KEYS);
     assert.match(converse.calls[0].prompt, /압구정동/);
     assert.equal(converse.calls[0].modelId, "anthropic.claude-haiku-5-5");
-    assert.ok(converse.calls[0].system.includes("80자"));
+    const sys = converse.calls[0].system;
+    assert.ok(sys.includes("70자 안팎") && sys.includes("최대 90자"), "길이 한도를 밝힌다");
+    assert.ok(sys.includes("5억 5,000만원"), "금액 표기 예");
+    assert.ok(sys.includes("좋은 예:"), "통과하는 문장 예");
   });
 
   test("모르는 키는 버린다", async () => {
@@ -130,23 +135,30 @@ describe("generateNarration", () => {
     assert.equal(out.narration.items["강남구"], "강남구 10월 거래 2건입니다.");
   });
 
-  test("누락·검증 실패 항목만 구별로 1회 재시도, 그래도 실패하면 생략", async () => {
+  test("걸린 항목만 이유를 알려 주며 1회 재시도, 그래도 걸리면 틀 문장(생략 없음)", async () => {
     const converse = fakeConverse((c) => {
-      if (c.single === null) return bulkReply({ 중구: undefined, 용산구: "용산구는 매수 추천 지역입니다.", 강남구: "가".repeat(90) });
+      if (c.single === null) return bulkReply({ 중구: undefined, 용산구: "용산구는 매수 추천 지역입니다.", 강남구: "가".repeat(110) });
       if (c.single === "중구") return '{"중구": "중구 10월 거래는 없었습니다."}';
       if (c.single === "용산구") return "용산구 10월 거래는 없었습니다."; // JSON 이 아닌 한 줄도 받는다
-      return '{"강남구": "강남구는 앞으로 오를 전망입니다."}'; // 다시 금지어 → 생략
+      return '{"강남구": "강남구는 앞으로 오를 전망입니다."}'; // 다시 금지어 → 틀 문장
     });
     const progress = [];
     const out = await generateNarration(base(converse, { onProgress: (p) => progress.push(p) }));
-    assert.deepEqual(converse.calls.map((c) => c.single), [null, "용산구", "중구", "강남구"].sort((a, b) => NARRATION_KEYS.indexOf(a) - NARRATION_KEYS.indexOf(b)));
+    const singles = converse.calls.filter((c) => c.single !== null);
+    assert.deepEqual(singles.map((c) => c.single), ["중구", "용산구", "강남구"]);
+    assert.match(singles[0].prompt, /앞 일괄 응답에 이 키가 없었습니다/);
+    assert.match(singles[1].prompt, /쓰면 안 되는 말\("매수"\)/);
+    assert.match(singles[2].prompt, /앞 문장은 110자였습니다\. 70자 안팎, 최대 90자로 줄여 주세요/);
     assert.equal(out.narration.items["중구"], "중구 10월 거래는 없었습니다.");
     assert.equal(out.narration.items["용산구"], "용산구 10월 거래는 없었습니다.");
-    assert.equal("강남구" in out.narration.items, false);
-    assert.deepEqual(out.missing, ["강남구"]);
+    assert.equal(out.narration.items["강남구"], templateSentence("강남구", buildFacts(MONTH, perGu())));
+    assert.equal(out.narration.source["강남구"], "template");
+    assert.equal(out.narration.source["중구"], "model");
+    assert.deepEqual(out.missing, []);
+    assert.deepEqual(out.templated, ["강남구"]);
+    assert.deepEqual(out.tally, { forbidden: 1 });
     assert.equal(out.calls, 4);
-    assert.deepEqual(Object.keys(out.narration.items), NARRATION_KEYS.filter((k) => k !== "강남구"));
-    // 진행: 첫 호출 뒤 통과 수, 재시도마다 하나씩, 마지막 26
+    assert.deepEqual(Object.keys(out.narration.items), NARRATION_KEYS);
     assert.deepEqual(progress.map((p) => p.done), [23, 24, 25, 26]);
     assert.deepEqual(progress.slice(1).map((p) => p.key), ["중구", "용산구", "강남구"]);
   });
@@ -160,13 +172,14 @@ describe("generateNarration", () => {
     assert.deepEqual(Object.keys(out.narration.items), NARRATION_KEYS);
   });
 
-  test("호출 상한: maxCalls 를 넘지 않고 남은 항목은 생략", async () => {
+  test("호출 상한: maxCalls 를 넘지 않고 남은 항목은 틀 문장 (26/26)", async () => {
     const converse = fakeConverse(() => "JSON 아님\n검증도 실패하는 두 줄");
     const out = await generateNarration(base(converse, { maxCalls: 5 }));
     assert.equal(converse.calls.length, 5);
     assert.equal(out.calls, 5);
-    assert.equal(Object.keys(out.narration.items).length, 0);
-    assert.deepEqual(out.missing, NARRATION_KEYS);
+    assert.equal(Object.keys(out.narration.items).length, 26);
+    assert.ok(Object.values(out.narration.source).every((x) => x === "template"));
+    assert.deepEqual(out.missing, []);
   });
 
   test("첫 호출이 예외면(권한 없음 등) 그대로 올린다: 재시도 26번을 하지 않는다", async () => {
@@ -186,14 +199,16 @@ describe("generateNarration", () => {
     assert.equal(out.calls, 2);
   });
 
-  test("구별 재시도 중 예외는 그 항목만 생략", async () => {
+  test("구별 재시도 중 예외는 그 항목만 틀 문장 (이유 '호출 실패')", async () => {
     const converse = fakeConverse((c) => {
       if (c.single === null) return bulkReply({ 중구: undefined });
       throw Object.assign(new Error("Too many requests"), { name: "ThrottlingException" });
     });
     const out = await generateNarration(base(converse));
-    assert.deepEqual(out.missing, ["중구"]);
-    assert.equal(Object.keys(out.narration.items).length, 25);
+    assert.deepEqual(out.missing, []);
+    assert.equal(out.narration.source["중구"], "template");
+    assert.deepEqual(out.tally, { error: 1 });
+    assert.equal(Object.keys(out.narration.items).length, 26);
   });
 
   test("첫 호출 전 마감이면 던진다(모은 것이 없다)", async () => {
@@ -208,8 +223,10 @@ describe("generateNarration", () => {
     const out = await generateNarration(base(converse, { beforeCall: () => { if (++n === 3) throw new Error("마감"); } }));
     assert.equal(converse.calls.length, 2);
     assert.equal(out.stoppedEarly, true);
-    assert.deepEqual(Object.keys(out.narration.items), ["서울 전체"]);
-    assert.equal(out.missing.length, 25);
+    assert.equal(out.narration.source["서울 전체"], "model");
+    assert.equal(Object.keys(out.narration.items).length, 26, "남은 항목은 틀 문장");
+    assert.equal(out.templated.length, 25);
+    assert.deepEqual(out.missing, []);
   });
 
   test("skip 키(읽지 못한 구 파일)는 만들지도 다시 시도하지도 않고 missing 에 넣는다. 구를 빼면 서울 전체도 뺀다", async () => {
@@ -238,5 +255,78 @@ describe("generateNarration", () => {
     await generateNarration(base(fakeConverse(() => ({ text: bulkReply(), stopReason: "end_turn" })), { log: (level, msg, fields) => quiet.push({ level, msg, fields }) }));
     assert.ok(quiet.some((l) => l.fields?.stopReason === "end_turn"));
     assert.ok(!quiet.some((l) => /잘림/.test(l.msg)));
+  });
+});
+
+
+describe("Task 11b: 검증 이유, 틀 문장, only", () => {
+  const base = (converse, over = {}) => ({ converse, modelId: "us.anthropic.claude-haiku-5-5", month: MONTH, perGu: perGu(), generatedAt: GEN, ...over });
+
+  test("그 항목 자신의 키로 시작하는 '종로구: …' 는 받고, 다른 키 조각은 거절", () => {
+    assert.equal(validateSentence("종로구: 8월 매매 141건입니다.", { key: "종로구" }).ok, true);
+    assert.deepEqual(validateSentence("종로구: 8월 매매 141건입니다.", { key: "중구" }), { ok: false, reason: "key", detail: { match: "종로구:" } });
+    assert.equal(validateSentence("종로구: 8월 매매 141건입니다.").reason, "key");
+    assert.equal(validateSentence("서울 전체: 8월 매매 1,014건입니다.", { key: "서울 전체" }).ok, true);
+    assert.equal(validateSentence('종로구: 8월 141건, "중구": 3건', { key: "종로구" }).reason, "key");
+  });
+
+  test("거절 detail: 금지어와 번지 표기", () => {
+    assert.deepEqual(validateSentence("강남구는 전망이 밝습니다.").detail, { word: "전망" });
+    assert.deepEqual(validateSentence("대치동 316-1 거래가 있었습니다.").detail, { match: "316-1" });
+    assert.equal(validateSentence("강남구 최고 5억 5,000만원, 5억 5천만원입니다.").ok, true, "억·천 표기는 통과");
+  });
+
+  test("retryHint 는 이유별 한 줄", () => {
+    assert.equal(retryHint({ reason: "length", detail: { length: 97 } }), "앞 문장은 97자였습니다. 70자 안팎, 최대 90자로 줄여 주세요.");
+    assert.match(retryHint({ reason: "lot", detail: { match: "316-1" } }), /316-1/);
+    assert.match(retryHint({ reason: "missing" }), /없었습니다/);
+  });
+
+  test("formatManwon: 억·만원 표기(하이픈 없음)", () => {
+    assert.equal(formatManwon(255000), "25억 5,000만원");
+    assert.equal(formatManwon(400000), "40억원");
+    assert.equal(formatManwon(9800), "9,800만원");
+    assert.equal(formatManwon(1234567), "123억 4,567만원");
+  });
+
+  test("틀 문장 모양: 구, 서울 전체, 거래 없음. 모두 검증을 통과", () => {
+    const facts = buildFacts(MONTH, perGu());
+    assert.equal(templateSentence("강남구", facts), "강남구 10월 매매 2건(취소 0건), ㎡당 중앙값 3,250만원, 최고 40억원.");
+    assert.equal(templateSentence("서울 전체", facts), "10월 서울 매매 2건, ㎡당 중앙값이 가장 높은 구는 강남구(3,250만원)입니다.");
+    assert.equal(templateSentence("종로구", facts), "종로구 10월에는 매매 거래가 없었습니다.");
+    for (const key of NARRATION_KEYS) assert.equal(validateSentence(templateSentence(key, facts), { key }).ok, true, key);
+  });
+
+  test("모든 응답이 걸려도 26/26: 이유 집계(tally)와 tallyText", async () => {
+    const tooLong = "가".repeat(120);
+    const converse = fakeConverse((c) => (c.single === null ? JSON.stringify(Object.fromEntries(NARRATION_KEYS.map((k) => [k, tooLong]))) : JSON.stringify({ [c.single]: tooLong })));
+    const logs = [];
+    const out = await generateNarration(base(converse, { log: (level, msg, fields) => logs.push({ level, msg, fields }) }));
+    assert.equal(Object.keys(out.narration.items).length, 26);
+    assert.equal(out.templated.length, 26);
+    assert.deepEqual(out.tally, { length: 26 });
+    assert.equal(tallyText(out.tally), "길이 26");
+    assert.equal(tallyText({ key: 2, length: 5, forbidden: 1 }), "길이 5, 키 조각 2, 금지어 1");
+    const rejects = logs.filter((l) => l.msg === "해설 검증 실패");
+    assert.equal(rejects.filter((l) => l.fields.phase === "bulk").length, 26);
+    assert.equal(rejects.filter((l) => l.fields.phase === "retry").length, 26);
+    assert.ok(rejects.every((l) => l.fields.reason === "length" && l.fields.length === 120));
+    assert.ok(logs.some((l) => l.msg === "해설 결과" && l.fields.template === 26));
+  });
+
+  test("일괄 호출이 설정 오류가 아닌 예외(스로틀링)면 다시 부르지 않고 모두 틀 문장", async () => {
+    const converse = fakeConverse(() => { throw Object.assign(new Error("slow down"), { name: "ThrottlingException" }); });
+    const out = await generateNarration(base(converse));
+    assert.equal(converse.calls.length, 1);
+    assert.equal(out.templated.length, 26);
+    assert.deepEqual(out.tally, { error: 26 });
+  });
+
+  test("only: 그 키들만 묻고 그 키들만 돌려준다", async () => {
+    const converse = fakeConverse(() => bulkReply());
+    const out = await generateNarration(base(converse, { only: ["중구", "서울 전체"] }));
+    assert.match(converse.calls[0].prompt, /키 목록\(정확히 이 2개\): 서울 전체, 중구/);
+    assert.deepEqual(Object.keys(out.narration.items), ["서울 전체", "중구"]);
+    assert.deepEqual(out.missing, []);
   });
 });

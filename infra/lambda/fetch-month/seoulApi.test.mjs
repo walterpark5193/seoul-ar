@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   SERVICE, BASE_URL, PAGE_SIZE, MAX_PAGES, SeoulApiError,
-  buildPageUrl, parsePage, fetchPage, filterRows, newestContractDay, fetchMonthRows,
+  buildPageUrl, parsePage, fetchPage, filterRows, newestContractDay, fetchMonthRows, fetchYearRows, YEAR_MAX_PAGES,
 } from "./seoulApi.mjs";
 import { fakeSeoulFetch, jsonResponse, row, FAKE_KEY } from "./fakes.mjs";
 
@@ -262,5 +262,45 @@ describe("fetchMonthRows: beforePage (작업자 마감 검사)", () => {
     const beforePage = () => { if (++n === 3) throw new Error("마감"); };
     await assert.rejects(fetchMonthRows({ key: FAKE_KEY, gu: "강남구", month: "202610", retries: 0, sleep: async () => {}, fetch, beforePage }), /마감/);
     assert.equal(fetch.calls.length, 2);
+  });
+});
+
+describe("fetchYearRows: 접수연도 전체 (연도 작업)", () => {
+  const base = { key: FAKE_KEY, gu: "강남구", year: "2024", retries: 0, sleep: async () => {} };
+  const days = (day, n, over = {}) => Array.from({ length: n }, () => row({ CTRT_DAY: day, ...over }));
+
+  test("RCPT_YR = year, 가장 최근 계약일로 멈추지 않는다(전년 계약만 있는 페이지도 넘긴다)", async () => {
+    const data = [...days("20241210", 1000), ...days("20231215", 1000), ...days("20240105", 400)];
+    const fetch = fakeSeoulFetch({ 강남구: data });
+    const out = await fetchYearRows({ ...base, fetch });
+    assert.equal(fetch.calls.length, 3);
+    assert.ok(fetch.calls.every((c) => c.year === "2024" && c.gu === "강남구"));
+    assert.equal(out.rows.length, 2400, "다른 해 행도 돌려준다(달 나누기는 호출하는 쪽)");
+    assert.equal(out.capped, false);
+    assert.equal(out.pages, 3);
+  });
+
+  test("다른 구 행은 버린다", async () => {
+    const fetch = fakeSeoulFetch({ 강남구: [row({ CTRT_DAY: "20240101" }), row({ CTRT_DAY: "20240102", CGG_NM: "서초구" })] });
+    assert.equal((await fetchYearRows({ ...base, fetch })).rows.length, 1);
+  });
+
+  test("list_total_count 에서 멈추고, 상한은 60페이지(capped)", async () => {
+    const exact = fakeSeoulFetch({ 강남구: days("20240301", 3000) });
+    assert.equal((await fetchYearRows({ ...base, fetch: exact })).pages, 3);
+    assert.equal(exact.calls.length, 3);
+    assert.equal(YEAR_MAX_PAGES, 60);
+    const huge = fakeSeoulFetch({ 강남구: days("20240301", 61000) });
+    const out = await fetchYearRows({ ...base, fetch: huge });
+    assert.equal(huge.calls.length, 60);
+    assert.equal(out.capped, true);
+    assert.equal(out.rows.length, 60000);
+  });
+
+  test("INFO-200 은 빈 결과, beforePage 를 페이지마다 부른다", async () => {
+    let n = 0;
+    const out = await fetchYearRows({ ...base, fetch: fakeSeoulFetch({}), beforePage: () => { n++; } });
+    assert.deepEqual(out.rows, []);
+    assert.equal(n, 1);
   });
 });

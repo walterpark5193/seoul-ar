@@ -514,3 +514,45 @@ describe("needsNarrationRecheck", () => {
     expect(needsNarrationRecheck({ phase: "idle" }, { phase: "idle" })).toBe(false);
   });
 });
+
+describe("연 단위 수집(fetch-year) 작업 (Task 4g 추가)", () => {
+  const year = (over: Partial<JobMessage> = {}) =>
+    job({ jobId: "y-1", kind: "fetch-year", month: "202600", gu: "강서구", done: 12, total: 25, ...over });
+
+  it("watch() subscribes once; a year job is shown as a note without changing the month-job view", () => {
+    const { mf, emit, subscribeJobs } = setup();
+    mf.watch();
+    mf.watch();
+    expect(subscribeJobs).toHaveBeenCalledTimes(1);
+    emit(year());
+    expect(mf.view).toEqual({ phase: "idle" });
+    expect(mf.yearJob).toEqual({ month: "202600", done: 12, total: 25 });
+    emit(year({ state: "done", done: 25 }));
+    expect(mf.yearJob).toBeNull();
+  });
+
+  it("the note locks both buttons while the year job holds the lock", () => {
+    const base = { value: "2026-10", max: "2026-11", narration: { month: "202611", state: "absent" as const } };
+    const html = renderMonthFetch({ phase: "idle" }, { ...base, yearJob: { month: "202600", done: 12, total: 25 } });
+    expect(html.replace(/<[^>]+>/g, " ")).toContain("연 단위 수집 중 12/25");
+    expect(html).toMatch(/data-fetch-submit[^>]*disabled/);
+    expect(/<button[^>]*data-action="narrate"[^>]*>/.exec(html)?.[0]).toContain("disabled");
+    expect(renderMonthFetch({ phase: "idle" }, base)).not.toContain("연 단위 수집");
+  });
+
+  it("year-job events never touch a running month job", async () => {
+    const { mf, emit } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(year({ jobId: "j-1" }));
+    expect(mf.view).toMatchObject({ phase: "running", kind: "fetch", jobId: "j-1", done: 0 });
+  });
+
+  it("forgets a year job that goes quiet for 2 minutes", async () => {
+    const { mf, emit } = setup();
+    mf.watch();
+    emit(year());
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mf.yearJob).toBeNull();
+  });
+});
+

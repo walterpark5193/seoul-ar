@@ -138,3 +138,26 @@ export async function fetchMonthRows({ fetch, key, gu, month, pageSize = PAGE_SI
   }
   return { rows: found, pages, capped: true };
 }
+
+export const YEAR_MAX_PAGES = 60; // 연도 작업: 구 하나의 접수연도 전체(최대 60,000건)
+
+/**
+ * 연도 작업(Task 13): 구 하나의 접수연도(RCPT_YR = year) 전체를 받는다. 계약일로 멈추지 않는다(달 나누기는 호출하는 쪽).
+ * 멈춤: 한 페이지가 pageSize 미만, list_total_count 에 닿음, maxPages(capped: true). CGG_NM 이 다른 행은 버린다.
+ * @returns {{ rows: object[], pages: number, capped: boolean }}
+ */
+export async function fetchYearRows({ fetch, key, gu, year, pageSize = PAGE_SIZE, maxPages = YEAR_MAX_PAGES, timeoutMs, retries, sleep, beforePage }) {
+  const found = [];
+  let pages = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const start = page * pageSize + 1;
+    const end = start + pageSize - 1;
+    beforePage?.();
+    const { rows, totalCount } = await fetchPage({ fetch, key, start, end, year, gu, timeoutMs, retries, sleep });
+    pages++;
+    for (const r of rows) if (r.CGG_NM === gu) found.push(r);
+    if (rows.length < pageSize) return { rows: found, pages, capped: false };
+    if (totalCount !== null && end >= totalCount) return { rows: found, pages, capped: false };
+  }
+  return { rows: found, pages, capped: true };
+}

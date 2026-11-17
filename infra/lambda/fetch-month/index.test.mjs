@@ -561,6 +561,8 @@ describe("작업자 {action: narrate}", () => {
     assert.equal(n.model, "anthropic.claude-haiku-5-5");
     assert.equal(n.generatedAt, new Date(NOW).toISOString());
     assert.equal(Object.keys(n.items).length, 26);
+    assert.equal(Object.keys(n.source).length, 26);
+    assert.ok(Object.values(n.source).every((x) => x === "model"));
     assert.ok(f.deps.converse.calls[0].prompt.includes("강남구"));
     assert.deepEqual(f.invalidations, [{ distributionId: "EDISTTEST", paths: ["/data/202611/narration.json"], callerReference: "job-0001-aaaa" }]);
     assert.ok(f.published.length >= 2);
@@ -581,13 +583,17 @@ describe("작업자 {action: narrate}", () => {
     assert.equal(f.deps.store.puts.some((p) => p.key === INDEX_KEY), false);
   });
 
-  test("일부 생략이면 done 에 사용자 문장으로 알린다", async () => {
+  test("걸린 항목은 틀 문장으로 채우고(생략 없음) done 메시지와 작업 기록에 이유 집계", async () => {
     const converse = fakeConverse((c) => (c.single === null ? bulkReply({ 중구: undefined }) : "JSON 도 문장도 아닌\n두 줄"));
     const f = await narrateJob({ converse });
     const last = f.published.at(-1);
     assert.equal(last.state, "done");
-    assert.match(last.message, /중구/);
-    assert.equal("중구" in JSON.parse(f.deps.store.puts.find((p) => p.key === "data/202611/narration.json").text).items, false);
+    assert.equal(last.message, "모델 문장이 검사를 통과하지 못해 1곳은 데이터로 만든 문장으로 채웠습니다(여러 줄 1): 중구.");
+    assert.deepEqual(f.deps.store.json("data/jobs/job-0001-aaaa.json"), last);
+    const n = JSON.parse(f.deps.store.puts.find((p) => p.key === "data/202611/narration.json").text);
+    assert.equal(Object.keys(n.items).length, 26);
+    assert.equal(n.source["중구"], "template");
+    assert.match(n.items["중구"], /^중구 11월/);
   });
 
   test("모델 권한 없음 → error(kind narration, Bedrock 안내), 파일 안 씀, 잠금 해제", async () => {
@@ -1141,5 +1147,369 @@ describe("final micro: 자동 해설은 잠금을 잡자마자 running 0/26 을 
     const narr = f.published.filter((m) => m.kind === "narration");
     assert.deepEqual({ state: narr[0].state, done: narr[0].done, jobId: narr[0].jobId }, { state: "running", done: 0, jobId: "job-0001-aaaa-narration" });
     assert.equal(narr.at(-1).state, "done");
+  });
+});
+
+// ---- Task 13: 접수연도 한 해를 한 번에 (action fetch-year) ----
+function yearData() {
+  return {
+    강남구: [
+      row({ CTRT_DAY: "20241215", THING_AMT: "300000", ARCH_AREA: 100 }),
+      row({ CTRT_DAY: "20240310", STDG_NM: "논현동", THING_AMT: "90000", ARCH_AREA: 30 }),
+      row({ CTRT_DAY: "20240120", THING_AMT: "200000", ARCH_AREA: 80 }),
+      row({ CTRT_DAY: "20240105", THING_AMT: "100000", ARCH_AREA: 50, RTRCN_DAY: "20240110" }),
+      row({ CTRT_DAY: "20231228", THING_AMT: "1", ARCH_AREA: 1 }), // 전년 12월 계약, 1월 신고: 버림
+    ],
+    서초구: [
+      row({ CGG_NM: "서초구", CTRT_DAY: "20241105", STDG_NM: "반포동", THING_AMT: "400000", ARCH_AREA: 100 }),
+      row({ CGG_NM: "서초구", CTRT_DAY: "20240115", STDG_NM: "반포동", THING_AMT: "200000", ARCH_AREA: 100 }),
+    ],
+  };
+}
+
+function yearSetup(over = {}) {
+  const store = over.store ?? fakeStore({ [INDEX_KEY]: existingIndex() });
+  return fakeDeps({ nowMs: NOW, store, fetch: over.fetch ?? fakeSeoulFetch(yearData()), ...over });
+}
+
+const yearEvent = (over = {}) => ({ action: "fetch-year", year: "2024", jobId: "year-2024-test1", ...over });
+
+describe("fetch-year: 검증과 잠금", () => {
+  test("연도 형식·범위가 틀리면 아무것도 하지 않는다", async () => {
+    for (const year of ["2027", "2005", "24", "abcd", undefined]) {
+      const f = yearSetup();
+      const out = await createHandler(f.deps)(yearEvent({ year }));
+      assert.equal(out.ok, false, String(year));
+      assert.equal(out.error, "bad_year");
+      assert.equal(f.deps.fetch.calls.length, 0);
+      assert.equal(f.deps.store.puts.length, 0);
+      assert.equal(f.published.length, 0);
+    }
+  });
+
+  test("jobId 형식이 틀리면 거절, 없으면 year-YYYY-<ts> 로 만든다", async () => {
+    let f = yearSetup();
+    assert.equal((await createHandler(f.deps)(yearEvent({ jobId: "../x" }))).ok, false);
+    f = yearSetup();
+    const out = await createHandler(f.deps)(yearEvent({ jobId: undefined }));
+    assert.equal(out.jobId, `year-2024-${NOW}`);
+    assert.equal(f.published[0].jobId, `year-2024-${NOW}`);
+  });
+
+  test("다른 작업이 잠금을 잡고 있으면 시작하지 않는다(busy)", async () => {
+    const store = fakeStore({ [INDEX_KEY]: existingIndex(), [LOCK_KEY]: { v: 1, jobId: "busy-1", month: "202610", ts: NOW } });
+    const f = yearSetup({ store });
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.equal(out.ok, false);
+    assert.equal(out.error, "busy");
+    assert.equal(f.deps.fetch.calls.length, 0);
+  });
+
+  test("연도 작업이 잠금을 잡고 있으면 API 409 는 '2024년 한 해 데이터를 가져오는 중입니다'", async () => {
+    const store = fakeStore({ [LOCK_KEY]: { v: 1, jobId: "year-2024-x", month: "202400", kind: "fetch-year", ts: NOW } });
+    const f = fakeDeps({ nowMs: NOW, store });
+    const r = parse(await createHandler(f.deps)(post({ month: "202610" })));
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /^2024년 한 해 데이터를 가져오는 중입니다/);
+  });
+});
+
+describe("fetch-year: 구마다 한 번, 계약 연월로 나눠 쓰기", () => {
+  test("구마다 접수연도 전체를 한 번만 부르고(RCPT_YR=2024), 보인 달마다 25개 파일", async () => {
+    const f = yearSetup();
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.equal(out.ok, true);
+    const calls = f.deps.fetch.calls;
+    assert.equal(calls.length, 25, "구마다 한 페이지(행이 적다)");
+    assert.ok(calls.every((c) => c.year === "2024"));
+    assert.deepEqual(out.months, ["202401", "202403", "202411", "202412"]);
+    for (const m of out.months) {
+      const files = [...f.deps.store.objects.keys()].filter((k) => k.startsWith(`data/${m}/`));
+      assert.equal(files.length, 25, m);
+    }
+    assert.equal([...f.deps.store.objects.keys()].some((k) => k.startsWith("data/202402/")), false, "아무 구에도 없는 달은 만들지 않는다");
+    assert.equal([...f.deps.store.objects.keys()].some((k) => k.startsWith("data/2023")), false, "전년 계약은 버린다");
+    const gn01 = f.deps.store.json("data/202401/강남구.json");
+    assert.deepEqual(gn01, aggregateRows(yearData().강남구.filter((r) => r.CTRT_DAY.startsWith("202401")), { month: "202401", gu: "강남구", generatedAt: new Date(NOW).toISOString() }));
+    assert.equal(gn01.total.n, 1);
+    assert.equal(gn01.total.cancelled, 1);
+    const empty = f.deps.store.json("data/202401/종로구.json");
+    assert.deepEqual(empty, aggregateRows([], { month: "202401", gu: "종로구", generatedAt: new Date(NOW).toISOString() }));
+    const put = f.deps.store.puts.find((p) => p.key === "data/202412/서초구.json");
+    assert.equal(put.opts.cacheControl, "no-cache");
+    for (const p of f.deps.store.puts.filter((x) => x.key.startsWith("data/2024"))) {
+      for (const banned of ["MNO", "SNO", "BLDG_NM", "비밀아파트테스트"]) assert.ok(!p.text.includes(banned), `${p.key} ${banned}`);
+    }
+  });
+
+  test("index: 그 해 달을 모두 추가·정렬, 기존 202611 유지, /data/* 무효화", async () => {
+    const f = yearSetup();
+    await createHandler(f.deps)(yearEvent());
+    const idx = f.deps.store.json(INDEX_KEY);
+    assert.deepEqual(idx.months, ["202401", "202403", "202411", "202412", "202611"]);
+    assert.deepEqual(idx.summary["202611"], existingIndex().summary["202611"]);
+    assert.equal(idx.summary["202401"]["서초구"].n, 1);
+    assert.equal(idx.summary["202401"]["종로구"].n, 0);
+    assert.deepEqual(f.invalidations, [{ distributionId: "EDISTTEST", paths: ["/data/*"], callerReference: "year-2024-test1" }]);
+  });
+
+  test("12달 모두 있으면 index 에 12달", async () => {
+    const all = Array.from({ length: 12 }, (_, i) => row({ CTRT_DAY: `2024${String(i + 1).padStart(2, "0")}10` }));
+    const f = yearSetup({ fetch: fakeSeoulFetch({ 강남구: all }) });
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.equal(out.months.length, 12);
+    const idx = f.deps.store.json(INDEX_KEY);
+    assert.deepEqual(idx.months, [...expectedYearMonths("2024"), "202611"]);
+    for (const m of expectedYearMonths("2024")) assert.equal(Object.keys(idx.summary[m]).length, 25);
+  });
+
+  test("올해(2026)는 한국 시간 이번 달(11월)까지만", async () => {
+    const f = yearSetup({ fetch: fakeSeoulFetch({ 강남구: [row({ CTRT_DAY: "20261110" }), row({ CTRT_DAY: "20261201" })] }) });
+    const out = await createHandler(f.deps)(yearEvent({ year: "2026", jobId: "year-2026-t" }));
+    assert.deepEqual(out.months, ["202611"]);
+  });
+});
+
+function expectedYearMonths(y) {
+  return Array.from({ length: 12 }, (_, i) => `${y}${String(i + 1).padStart(2, "0")}`);
+}
+
+describe("fetch-year: 진행 이벤트", () => {
+  test("kind fetch-year, month YYYY00, running 0/25 → done 1..25 (구 이름) → done, 기록 = 마지막", async () => {
+    const f = yearSetup();
+    await createHandler(f.deps)(yearEvent());
+    const msgs = f.published;
+    assert.ok(msgs.every((m) => m.kind === "fetch-year" && m.month === "202400" && m.total === 25 && m.v === 1 && m.type === "job" && typeof m.ts === "number"));
+    assert.deepEqual({ state: msgs[0].state, done: msgs[0].done }, { state: "running", done: 0 });
+    const running = msgs.slice(1, -1);
+    assert.deepEqual(running.map((m) => m.done), Array.from({ length: 25 }, (_, i) => i + 1));
+    assert.deepEqual(running.map((m) => m.gu), GU_ORDER);
+    assert.equal(msgs.at(-1).state, "done");
+    assert.equal(msgs.at(-1).done, 25);
+    assert.deepEqual(f.deps.store.json("data/jobs/year-2024-test1.json"), msgs.at(-1));
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+    assert.equal(f.deps.store.json(LOCK_KEY).kind, "fetch-year");
+  });
+
+  test("done message: 11·12월이 있으면 다음 해 신고 안내", async () => {
+    const f = yearSetup();
+    await createHandler(f.deps)(yearEvent());
+    assert.match(f.published.at(-1).message, /11·12월은 다음 해에 신고된 거래가 빠질 수 있습니다/);
+  });
+
+  test("서울 API 페이지 수를 로그에 남긴다", async () => {
+    const f = yearSetup();
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.equal(out.pages, 25);
+    assert.ok(f.logs.some((l) => l.level === "info" && l.fields?.pages === 25 && /페이지/.test(l.msg)));
+  });
+});
+
+describe("fetch-year: resume", () => {
+  function completeGu(store, gu, n) {
+    for (const m of expectedYearMonths("2024")) {
+      const data = aggregateRows(Array.from({ length: n }, () => row({ CGG_NM: gu, CTRT_DAY: `${m}10` })), { month: m, gu, generatedAt: "old" });
+      store.objects.set(`data/${m}/${gu}.json`, { text: JSON.stringify(data), etag: `"${m}${gu}"`, opts: {} });
+    }
+  }
+
+  test("기대한 12달 파일이 모두 있는 구는 서울 API 를 부르지 않고 done 으로 센다, index 는 그 파일로", async () => {
+    const store = fakeStore({ [INDEX_KEY]: existingIndex() });
+    completeGu(store, "종로구", 5);
+    const f = yearSetup({ store });
+    const out = await createHandler(f.deps)(yearEvent({ resume: true }));
+    assert.deepEqual(out.skipped, ["종로구"]);
+    assert.equal(f.deps.fetch.calls.filter((c) => c.gu === "종로구").length, 0);
+    assert.equal(f.deps.fetch.calls.length, 24);
+    assert.equal(f.published.filter((m) => m.state === "running" && m.gu === "종로구").length, 1);
+    assert.equal(f.published.at(-1).state, "done");
+    // 건너뛴 구가 12달을 갖고 있으므로 12달 모두 index 에, 그 구 값은 기존 파일에서
+    const idx = f.deps.store.json(INDEX_KEY);
+    assert.deepEqual(idx.months, [...expectedYearMonths("2024"), "202611"]);
+    assert.equal(idx.summary["202405"]["종로구"].n, 5);
+    assert.equal(f.deps.store.json("data/202405/종로구.json").generatedAt, "old", "건너뛴 구 파일은 다시 쓰지 않는다");
+    assert.equal(f.deps.store.json("data/202405/강남구.json").total.n, 0, "다른 구는 빈 파일로 채운다");
+  });
+
+  test("한 달이라도 빠진 구는 다시 받는다, resume 이 아니면 모두 다시 받는다", async () => {
+    const store = fakeStore({ [INDEX_KEY]: existingIndex() });
+    completeGu(store, "종로구", 5);
+    store.objects.delete("data/202407/종로구.json");
+    let f = yearSetup({ store });
+    await createHandler(f.deps)(yearEvent({ resume: true }));
+    assert.equal(f.deps.fetch.calls.filter((c) => c.gu === "종로구").length, 1);
+    const store2 = fakeStore({ [INDEX_KEY]: existingIndex() });
+    completeGu(store2, "종로구", 5);
+    f = yearSetup({ store: store2 });
+    await createHandler(f.deps)(yearEvent({ resume: false }));
+    assert.equal(f.deps.fetch.calls.filter((c) => c.gu === "종로구").length, 1);
+  });
+});
+
+describe("fetch-year: 상한과 할당량", () => {
+  test("60페이지 상한에 닿은 구는 그 구의 모든 달 truncated, done message 에 구 이름", async () => {
+    const huge = Array.from({ length: 61000 }, (_, i) => row({ CTRT_DAY: i % 2 ? "20240510" : "20240610" }));
+    const f = yearSetup({ fetch: fakeSeoulFetch({ ...yearData(), 송파구: huge.map((r) => ({ ...r, CGG_NM: "송파구" })) }), concurrency: 4 });
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.deepEqual(out.capped, ["송파구"]);
+    assert.equal(f.deps.store.json("data/202405/송파구.json").total.truncated, true);
+    assert.equal(f.deps.store.json("data/202406/송파구.json").total.truncated, true);
+    assert.equal(f.deps.store.json("data/202401/강남구.json").total.truncated, false);
+    assert.equal(f.deps.store.json("data/202401/송파구.json").total.truncated, true, "상한 구의 빈 채움 달도 불완전");
+    assert.equal(f.deps.store.json(INDEX_KEY).summary["202405"]["송파구"].truncated, true);
+    assert.match(f.published.at(-1).message, /일부 구는 거래가 많아 끝까지 받지 못했습니다: 송파구/);
+  });
+
+  test("상한에 닿지 않았으면 한 달 1,500건이어도 truncated false (집계 모듈의 1000건 규칙 대신)", async () => {
+    const many = Array.from({ length: 1500 }, () => row({ CTRT_DAY: "20240510" }));
+    const f = yearSetup({ fetch: fakeSeoulFetch({ 강남구: many }) });
+    await createHandler(f.deps)(yearEvent());
+    const g = f.deps.store.json("data/202405/강남구.json");
+    assert.equal(g.total.n, 1500);
+    assert.equal(g.total.truncated, false);
+  });
+
+  test("서울 API 오류 코드(하루 한도 등) → error: 한도 안내 + resume, 키·URL 없음, 잠금 해제, 앞서 끝난 구 파일은 남는다", async () => {
+    const base = fakeSeoulFetch({ 종로구: [row({ CGG_NM: "종로구", CTRT_DAY: "20240301" })] });
+    const fetch = async (url, init) => {
+      const gu = decodeURIComponent(new URL(url).pathname.split("/")[8]);
+      if (gu === "중구") return jsonResponse({ RESULT: { CODE: "ERROR-337", MESSAGE: `일일 트래픽 초과 ${FAKE_KEY}` } });
+      return base(url, init);
+    };
+    const f = yearSetup({ fetch });
+    const out = await createHandler(f.deps)(yearEvent());
+    assert.equal(out.ok, false);
+    const last = f.published.at(-1);
+    assert.equal(last.state, "error");
+    assert.equal(last.kind, "fetch-year");
+    assert.match(last.message, /중구/);
+    assert.match(last.message, /하루 호출 한도/);
+    assert.match(last.message, /resume/);
+    assert.ok(!JSON.stringify([f.published, f.logs]).includes(FAKE_KEY));
+    assert.ok(!JSON.stringify(f.published).includes("openapi.seoul.go.kr"));
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+    assert.ok(f.deps.store.json("data/202403/종로구.json"), "끝난 구는 남아 resume 이 건너뛴다");
+    assert.deepEqual(f.deps.store.json(INDEX_KEY).months, ["202611"], "index 는 건드리지 않는다");
+    assert.ok(f.logs.some((l) => /페이지/.test(l.msg) && typeof l.fields?.pages === "number"));
+  });
+});
+
+describe("fetch-year: narrate", () => {
+  test("narrate true 면 달마다 차례로 해설(kind narration, 달마다 jobId), 기본은 하지 않는다", async () => {
+    let f = yearSetup({ env: NARR_ENV });
+    await createHandler(f.deps)(yearEvent());
+    assert.equal(f.deps.converse.calls.length, 0);
+    f = yearSetup({ env: NARR_ENV });
+    const out = await createHandler(f.deps)(yearEvent({ narrate: true }));
+    for (const m of out.months) {
+      assert.equal(Object.keys(f.deps.store.json(`data/${m}/narration.json`).items).length, 26, m);
+      assert.equal(f.deps.store.json(`data/jobs/year-2024-test1-${m}-narration.json`).state, "done");
+    }
+    assert.equal(f.deps.converse.calls.length, out.months.length);
+    const fetchDone = f.published.findIndex((m) => m.kind === "fetch-year" && m.state === "done");
+    const firstNarr = f.published.findIndex((m) => m.kind === "narration");
+    assert.ok(fetchDone < firstNarr, "연도 작업 done 뒤에 해설");
+  });
+});
+
+describe("Task 13: 운영자가 narrate 를 직접 부르면 스스로 잠금을 잡는다", () => {
+  test("API 없이 {action: narrate} → kind narration 잠금을 잡고 풀며 해설을 만든다", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    let lockDuring = null;
+    f.deps.converse = fakeConverse(() => { lockDuring = f.deps.store.json(LOCK_KEY); return bulkReply(); });
+    const out = await createHandler(f.deps)({ action: "narrate", jobId: "n-202611-op1", month: "202611" });
+    assert.equal(out.ok, true);
+    assert.equal(lockDuring.jobId, "n-202611-op1");
+    assert.equal(lockDuring.kind, "narration");
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+    assert.ok(f.deps.store.json("data/202611/narration.json"));
+  });
+
+  test("다른 작업이 잠금을 잡고 있으면 Bedrock 을 부르지 않고 busy", async () => {
+    const store = storeWith202611();
+    store.objects.set(LOCK_KEY, { text: JSON.stringify({ v: 1, jobId: "year-2024-x", month: "202400", kind: "fetch-year", ts: NOW }), etag: '"y"', opts: {} });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    const out = await createHandler(f.deps)({ action: "narrate", jobId: "n-202611-op2", month: "202611" });
+    assert.equal(out.ok, false);
+    assert.equal(out.error, "busy");
+    assert.equal(f.deps.converse.calls.length, 0);
+    assert.equal(f.deps.store.json(LOCK_KEY).jobId, "year-2024-x");
+  });
+});
+
+
+describe("Task 11b: narrate onlyMissing / refreshTemplates", () => {
+  function putNarration(store, { omit = [], template = [], withSource = true } = {}) {
+    const keys = ["서울 전체", ...GU_ORDER].filter((k) => !omit.includes(k));
+    const n = { v: 1, month: "202611", generatedAt: "old", model: "us.anthropic.claude-haiku-5-5", items: Object.fromEntries(keys.map((k) => [k, `기존 ${k} 문장입니다.`])) };
+    if (withSource) n.source = Object.fromEntries(keys.map((k) => [k, template.includes(k) ? "template" : "model"]));
+    store.objects.set("data/202611/narration.json", { text: JSON.stringify(n), etag: '"n"', opts: {} });
+  }
+  const run = (f, extra) => createHandler(f.deps)({ action: "narrate", jobId: "n-202611-fill1", month: "202611", onlyMissing: true, ...extra });
+
+  test("없는 키만 묻고 기존 문장은 그대로 합친다(26/26)", async () => {
+    const store = storeWith202611();
+    putNarration(store, { omit: ["서울 전체", "중구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    const out = await run(f);
+    assert.equal(out.ok, true);
+    assert.equal(f.deps.converse.calls.length, 1);
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 2개\): 서울 전체, 중구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(Object.keys(n.items).length, 26);
+    assert.deepEqual(Object.keys(n.items), ["서울 전체", ...GU_ORDER]);
+    assert.equal(n.items["강남구"], "기존 강남구 문장입니다.");
+    assert.equal(n.items["중구"], "중구 10월 요약입니다.");
+    assert.equal(n.source["중구"], "model");
+    assert.equal(n.source["강남구"], "model");
+    assert.equal(n.generatedAt, new Date(NOW).toISOString());
+    assert.equal(f.published.at(-1).state, "done");
+  });
+
+  test("refreshTemplates: source 가 template 인 키도 다시 만든다", async () => {
+    const store = storeWith202611();
+    putNarration(store, { template: ["강남구", "송파구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f, { refreshTemplates: true });
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 2개\): 강남구, 송파구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(n.source["강남구"], "model");
+    assert.equal(n.items["강남구"], "강남구 10월 요약입니다.");
+    assert.equal(n.items["종로구"], "기존 종로구 문장입니다.");
+  });
+
+  test("빠진 것이 없으면 Bedrock 을 부르지 않고 done '이미'", async () => {
+    const store = storeWith202611();
+    putNarration(store, { template: ["강남구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f);
+    assert.equal(f.deps.converse.calls.length, 0);
+    assert.equal(f.published.at(-1).state, "done");
+    assert.match(f.published.at(-1).message, /이미/);
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+  });
+
+  test("source 가 없는 옛 파일은 모두 model 로 본다(refreshTemplates 여도 다시 만들지 않음)", async () => {
+    const store = storeWith202611();
+    putNarration(store, { withSource: false, omit: ["용산구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f, { refreshTemplates: true });
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 1개\): 용산구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(n.source["종로구"], "model");
+  });
+
+  test("기존 파일이 없으면 26개 모두 만든다", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    await run(f);
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 26개\)/);
+    assert.equal(Object.keys(f.deps.store.json("data/202611/narration.json").items).length, 26);
+  });
+
+  test("API: narrate-month 본문의 onlyMissing·refreshTemplates 를 작업자에 넘긴다", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    const ev = httpEvent({ path: "/api/narrate-month", headers: { "x-presenter-key": PASS }, body: JSON.stringify({ month: "202611", onlyMissing: true, refreshTemplates: true }) });
+    assert.equal((await createHandler(f.deps)(ev)).statusCode, 202);
+    assert.deepEqual(f.invokes[0].payload, { action: "narrate", jobId: "job-0001-aaaa", month: "202611", onlyMissing: true, refreshTemplates: true });
   });
 });

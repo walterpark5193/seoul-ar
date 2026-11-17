@@ -5,6 +5,7 @@ import type { SeoulScene } from "../scene/seoulScene";
 import type { AppState } from "../state/store";
 import type { GuData } from "../data/types";
 import { mountSheet } from "../ui/sheetDom";
+import { createCityGestures, type CityGestures } from "./arGestures";
 import { describeArTuning, parseArTuning, type ArTuning } from "./arTuning";
 import type { MountView } from "./types";
 import { bindStageFollow, createVoteLine } from "./stageFollow";
@@ -34,6 +35,10 @@ export interface BeginArOptions {
   onFreezeState?(state: FreezeState): void;
   /** 해시 쿼리에서 읽은 조정값(views/arTuning.ts). container와 targetSrc는 덮어쓸 수 없다. */
   tuning?: ArTuning;
+  /** 원위치 애니메이션을 끌지(움직임 줄이기) */
+  reducedMotion?: boolean;
+  /** 손가락으로 돌리거나 키운 상태가 기본(원위치)인지 바뀔 때마다 */
+  onPoseChange?(isDefault: boolean): void;
 }
 
 export interface RunningAr {
@@ -41,6 +46,8 @@ export interface RunningAr {
   city: SeoulScene;
   /** 고정 ↔ 추적. 타깃을 한 번도 못 찾았거나 세션이 고정을 지원하지 않으면 아무 일도 하지 않는다. */
   toggleFreeze(): void;
+  /** 도시 돌리기·키우기(arGestures.ts). 추적 중에도 고정 중에도 된다. */
+  gestures: CityGestures;
   /** 고정 중이면 풀고, 구독을 끊고, 세션을 멈추고, 씬과 렌더러를 반납한다. */
   stop(): void;
 }
@@ -89,7 +96,21 @@ export async function beginAr(o: BeginArOptions): Promise<RunningAr | null> {
     const emitFreeze = () => o.onFreezeState?.({ enabled: freezable && foundOnce, frozen: freezable && s.frozen === true });
 
     s.anchor.add(city.group);
-    s.onFrame((dt) => city.update(dt, s.camera));
+    let lastDefault = true;
+    const gestures = createCityGestures({
+      group: city.group,
+      reducedMotion: o.reducedMotion ?? false,
+      onChange: (_pose, isDefault) => {
+        if (isDefault === lastDefault) return;
+        lastDefault = isDefault;
+        o.onPoseChange?.(isDefault);
+      },
+    });
+    // 렌더 루프는 고정 중에도 돌므로 원위치 애니메이션도 고정 중에 돈다.
+    s.onFrame((dt) => {
+      gestures.tick(dt);
+      city.update(dt, s.camera);
+    });
     s.onFound(() => {
       if (!foundOnce) { foundOnce = true; emitFreeze(); }
       o.onFound();
@@ -101,6 +122,7 @@ export async function beginAr(o: BeginArOptions): Promise<RunningAr | null> {
     return {
       session: s,
       city,
+      gestures,
       toggleFreeze() {
         if (!freezable || !foundOnce) return;
         if (s.frozen) s.unfreeze();
@@ -145,6 +167,7 @@ export const mountArView: MountView = (root, ctx) => {
     `<p class="scan-text" role="status">슬라이드의 그림을 비춰 주세요</p></div>` +
     `<div class="ar-tools" data-tools hidden>` +
     `<p class="freeze-state" data-freeze-state role="status"></p>` +
+    `<button type="button" class="btn-freeze btn-home" data-home hidden>원위치</button>` +
     `<button type="button" class="btn-freeze" data-freeze disabled title="그림을 한 번 인식하면 쓸 수 있습니다">화면 고정</button>` +
     `</div>` +
     `<button type="button" class="stage-banner" data-banner hidden>${STAGE_BANNER_TEXT}</button>` +
@@ -160,6 +183,7 @@ export const mountArView: MountView = (root, ctx) => {
   const tools = root.querySelector<HTMLElement>("[data-tools]")!;
   const freezeBtn = root.querySelector<HTMLButtonElement>("[data-freeze]")!;
   const freezeState = root.querySelector<HTMLElement>("[data-freeze-state]")!;
+  const homeBtn = root.querySelector<HTMLButtonElement>("[data-home]")!;
 
   const tuning = parseArTuning(ctx.query ?? "");
   const sheet = mountSheet(sheetHost, ctx.store, () => ctx.index, {
@@ -187,6 +211,23 @@ export const mountArView: MountView = (root, ctx) => {
     updateScan();
   };
   freezeBtn.addEventListener("click", () => running?.toggleFreeze());
+  homeBtn.addEventListener("click", () => running?.gestures.reset());
+
+  // 손가락으로 돌리기·키우기: 카메라 영역(stage)에서 시작한 포인터만 받는다. 시트·도구·링크는 stage 밖이고,
+  // stage 안에 MindAR가 넣는 버튼 같은 것도 arGestures의 closest 검사로 거른다.
+  const onPointerDown = (ev: PointerEvent) => {
+    if (!running) return;
+    if (!running.gestures.pointerDown(ev.pointerId, ev.clientX, ev.clientY, ev.target as Element | null)) return;
+    try { stage.setPointerCapture(ev.pointerId); } catch { /* 이미 끝난 포인터 */ }
+    ev.preventDefault();
+  };
+  const onPointerMove = (ev: PointerEvent) => running?.gestures.pointerMove(ev.pointerId, ev.clientX, ev.clientY);
+  const onPointerEnd = (ev: PointerEvent) => running?.gestures.pointerUp(ev.pointerId);
+  stage.addEventListener("pointerdown", onPointerDown);
+  stage.addEventListener("pointermove", onPointerMove);
+  stage.addEventListener("pointerup", onPointerEnd);
+  stage.addEventListener("pointercancel", onPointerEnd);
+  stage.addEventListener("lostpointercapture", onPointerEnd);
 
   const unbind = bindViewer({
     store: ctx.store,
@@ -230,6 +271,8 @@ export const mountArView: MountView = (root, ctx) => {
       createArSession: ctx.ar.createArSession,
       createScene: ctx.createScene,
       tuning,
+      reducedMotion: ctx.reducedMotion,
+      onPoseChange: (isDefault) => { homeBtn.hidden = isDefault; },
       onFound: () => { tracking = true; updateScan(); },
       onLost: () => { tracking = false; updateScan(); },
       onFreezeState: applyFreeze,
@@ -258,6 +301,7 @@ export const mountArView: MountView = (root, ctx) => {
     voteLine.dispose();
     unbind();
     sheet.destroy();
+    // 포인터 리스너는 stage 요소와 함께 버려진다(아래 root.innerHTML = ""). 버튼 리스너와 같은 방식이다.
     running?.stop(); // 고정 중이면 먼저 풀고 멈춘다
     running = null;
     root.innerHTML = "";

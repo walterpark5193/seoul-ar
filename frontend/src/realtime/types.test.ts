@@ -68,6 +68,9 @@ describe("isJobMessage", () => {
   it("accepts the optional kind fetch or narration and rejects other kinds", () => {
     expect(isJobMessage({ ...job, kind: "fetch" })).toBe(true);
     expect(isJobMessage({ ...job, kind: "narration" })).toBe(true);
+    // 운영자가 돌리는 연 단위 미리 수집: month는 "YYYY00"
+    expect(isJobMessage({ ...job, kind: "fetch-year", month: "202600" })).toBe(true);
+    expect(isJobMessage({ ...job, kind: "fetch-years" })).toBe(false);
     expect(isJobMessage({ ...job, kind: "poem" })).toBe(false);
     expect(isJobMessage({ ...job, kind: 1 })).toBe(false);
   });
