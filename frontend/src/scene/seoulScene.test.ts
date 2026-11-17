@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  Box3,
   Color,
   DirectionalLight,
   HemisphereLight,
   InstancedMesh,
   Matrix4,
+  LineBasicMaterial,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
   Quaternion,
@@ -16,7 +19,8 @@ import {
 import type { Group, Object3D } from "three";
 import type { Geo, GuShape } from "../geo/types";
 import type { DongStat, GuData, Stat } from "../data/types";
-import { createSeoulScene } from "./seoulScene";
+import { GU_DEPTH, LAYOUT_SECONDS, LIFT_Y, createSeoulScene, easeOutCubic } from "./seoulScene";
+import { spreadLayout } from "./spreadLayout";
 import { PALETTE } from "./colors";
 import { boundsOf, layoutBars } from "./layout";
 import { canvasTextTexture } from "./labels";
@@ -415,6 +419,364 @@ describe("dispose", () => {
       s.setMetric("count");
       s.dispose();
     }).not.toThrow();
+    expect(s.group.children).toHaveLength(0);
+  });
+});
+
+// ── 무대 확장 (CONTRACTS-stage 6.2) ──────────────────────────────────────────
+
+function priceSummary(): Record<string, Stat> {
+  const s: Record<string, Stat> = {};
+  NAMES.forEach((name, i) => (s[name] = stat(1000 + i * 100, 50 - i))); // 강동구 최고가, 종로구 최저가
+  return s;
+}
+function centroidOf(geo: Geo, name: string): [number, number] {
+  return geo.gus.find((g) => g.name === name)!.centroid;
+}
+/** 메시 변환(이동·스케일)을 거친 centroid의 월드 위치 */
+function worldCentroid(m: Mesh, c: [number, number]): Vector3 {
+  m.updateWorldMatrix(true, false);
+  return m.localToWorld(new Vector3(c[0], 0, c[1]));
+}
+/** 메시 지오메트리만의 월드 경계 상자(자식 윤곽선 제외) */
+function worldBox(m: Mesh): Box3 {
+  m.updateWorldMatrix(true, false);
+  m.geometry.computeBoundingBox();
+  return m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld);
+}
+function edgeOf(m: Mesh): number {
+  const o = m.getObjectByName(`${m.name}:outline`) as Mesh | undefined;
+  if (!o) throw new Error(`no outline for ${m.name}`);
+  return (o.material as LineBasicMaterial).color.getHex();
+}
+function shadowOf(group: Group): Mesh {
+  const sh = group.getObjectByName("lift-shadow") as Mesh | undefined;
+  if (!sh) throw new Error("no lift-shadow");
+  return sh;
+}
+/** (x, z) 바로 위 높이 1에서 내려다보는 카메라 */
+function lookDown(x: number, z: number): PerspectiveCamera {
+  const cam = new PerspectiveCamera(40, 1, 0.01, 10);
+  cam.up.set(0, 0, -1);
+  cam.position.set(x, 1, z);
+  cam.lookAt(x, 0, z);
+  return cam;
+}
+function labelFactory(calls?: string[]) {
+  return (text: string) => {
+    calls?.push(text);
+    const t = new Texture();
+    t.image = { width: 256, height: 64 };
+    return t;
+  };
+}
+
+describe("stage: lift", () => {
+  it("exports LIFT_Y 0.12 and LAYOUT_SECONDS 0.8", () => {
+    expect(LIFT_Y).toBe(0.12);
+    expect(LAYOUT_SECONDS).toBe(0.8);
+  });
+
+  it("lift raises to LIFT_Y, dims the rest, and puts a translucent shadow disc under it", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, noText);
+    s.setOverview(priceSummary(), "price");
+    const own = colorOf(guMesh(s.group, "강남구"));
+    s.lift("강남구");
+    const m = guMesh(s.group, "강남구");
+    expect(m.position.y).toBe(0);
+    s.update(0.05, camera);
+    expect(m.position.y).toBeGreaterThan(0);
+    expect(m.position.y).toBeLessThan(LIFT_Y);
+    s.update(1, camera);
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    expect(colorOf(m)).toBe(own); // 들어올린 구는 제 색
+    expect(edgeOf(m)).toBe(hex(PALETTE.text));
+    for (const other of guMeshes(s.group)) {
+      if (other === m) continue;
+      expect(other.position.y).toBe(0);
+      expect(colorOf(other)).toBe(hex(PALETTE.guDim));
+    }
+    const sh = shadowOf(s.group);
+    expect(sh.visible).toBe(true);
+    const mat = sh.material as MeshBasicMaterial;
+    expect(mat.transparent).toBe(true);
+    expect(mat.opacity).toBeGreaterThan(0);
+    expect(mat.opacity).toBeLessThan(1);
+    const c = centroidOf(geo, "강남구");
+    expect(sh.position.x).toBeCloseTo(c[0], 6);
+    expect(sh.position.z).toBeCloseTo(c[1], 6);
+    expect(sh.position.y).toBeLessThan(GU_DEPTH); // 바닥
+  });
+
+  it("lift null restores height, colors and hides the shadow", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.setOverview(priceSummary(), "price");
+    const before = guMeshes(s.group).map(colorOf);
+    s.lift("강남구");
+    s.update(1, camera);
+    s.lift(null);
+    s.update(1, camera);
+    for (const m of guMeshes(s.group)) expect(m.position.y).toBeCloseTo(0, 10);
+    expect(guMeshes(s.group).map(colorOf)).toEqual(before);
+    expect(edgeOf(guMesh(s.group, "강남구"))).toBe(hex(PALETTE.bg));
+    expect(shadowOf(s.group).visible).toBe(false);
+    s.lift("없는구"); // 모르는 이름은 null과 같다
+    expect(guMeshes(s.group).map(colorOf)).toEqual(before);
+  });
+
+  it("lift is absolute over focus and hover; focus bars ride along; release lands on focus + hover", () => {
+    const s = createSeoulScene(fixtureGeo(), { ...noText, reducedMotion: true });
+    s.focus("강남구", gangnam(), "price");
+    s.setHover("강남구");
+    s.lift("강남구");
+    const m = guMesh(s.group, "강남구");
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    expect(instance(bars(s.group), 0).pos.y).toBeCloseTo(LIFT_Y + GU_DEPTH, 6);
+    s.lift(null);
+    expect(m.position.y).toBeCloseTo(0.03 + 0.01, 10); // focus 상승 + hover
+    expect(instance(bars(s.group), 0).pos.y).toBeCloseTo(0.04 + GU_DEPTH, 6);
+  });
+});
+
+describe("stage: setLayout", () => {
+  it("setLayout spread moves each centroid to its slot over LAYOUT_SECONDS and scales height to slot.height", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, noText);
+    const summary = priceSummary();
+    const slots = spreadLayout(summary, "price", NAMES);
+    const slot = slots.find((x) => x.gu === "강남구")!;
+    const c = centroidOf(geo, "강남구");
+    const m = guMesh(s.group, "강남구");
+    s.setLayout("spread", summary, "price");
+    expect(worldCentroid(m, c).x).toBeCloseTo(c[0], 10); // 아직 제자리
+    s.update(LAYOUT_SECONDS / 2, camera);
+    const e = easeOutCubic(0.5);
+    const mid = worldCentroid(m, c);
+    expect(mid.x).toBeCloseTo(c[0] + (slot.x - c[0]) * e, 6);
+    expect(mid.z).toBeCloseTo(c[1] + (slot.z - c[1]) * e, 6);
+    s.update(1, camera);
+    for (const sl of slots) {
+      const mesh = guMesh(s.group, sl.gu);
+      const p = worldCentroid(mesh, centroidOf(geo, sl.gu));
+      expect(Math.abs(p.x - sl.x)).toBeLessThan(1e-3);
+      expect(Math.abs(p.z - sl.z)).toBeLessThan(1e-3);
+      const box = worldBox(mesh);
+      expect(box.min.y).toBeCloseTo(0, 6);
+      expect(box.max.y).toBeCloseTo(sl.height, 6);
+    }
+  });
+
+  it("setLayout map restores position and scale", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, noText);
+    const summary = priceSummary();
+    s.setLayout("spread", summary, "price");
+    s.update(1, camera);
+    s.setLayout("map", summary, "price");
+    const m = guMesh(s.group, "강남구");
+    const c = centroidOf(geo, "강남구");
+    s.update(LAYOUT_SECONDS / 2, camera);
+    expect(Math.abs(worldCentroid(m, c).x - c[0])).toBeGreaterThan(1e-3); // 돌아오는 중
+    s.update(1, camera);
+    for (const mesh of guMeshes(s.group)) {
+      expect(mesh.position.x).toBeCloseTo(0, 10);
+      expect(mesh.position.y).toBeCloseTo(0, 10);
+      expect(mesh.position.z).toBeCloseTo(0, 10);
+      expect(mesh.scale.x).toBeCloseTo(1, 10);
+      expect(mesh.scale.y).toBeCloseTo(1, 10);
+      expect(mesh.scale.z).toBeCloseTo(1, 10);
+    }
+    const box = worldBox(guMesh(s.group, "종로구"));
+    expect(box.min.x).toBeCloseTo(-0.44, 6);
+    expect(box.max.y).toBeCloseTo(GU_DEPTH, 6);
+  });
+
+  it("reducedMotion applies layout and lift instantly", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, { ...noText, reducedMotion: true });
+    const summary = priceSummary();
+    const slot = spreadLayout(summary, "price", NAMES).find((x) => x.gu === "강남구")!;
+    const m = guMesh(s.group, "강남구");
+    s.setLayout("spread", summary, "price");
+    const p = worldCentroid(m, centroidOf(geo, "강남구"));
+    expect(Math.abs(p.x - slot.x)).toBeLessThan(1e-3);
+    expect(Math.abs(p.z - slot.z)).toBeLessThan(1e-3);
+    expect(worldBox(m).max.y).toBeCloseTo(slot.height, 6);
+    s.lift("강남구");
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    expect(shadowOf(s.group).visible).toBe(true);
+    s.lift(null);
+    s.setLayout("map", summary, "price");
+    expect(m.position.x).toBe(0);
+    expect(m.position.y).toBe(0);
+    expect(m.scale.y).toBe(1);
+    expect(shadowOf(s.group).visible).toBe(false);
+  });
+
+  it("repeating setLayout with the same summary and metric does not restart the move", () => {
+    const summary = priceSummary();
+    const a = createSeoulScene(fixtureGeo(), noText);
+    const b = createSeoulScene(fixtureGeo(), noText);
+    a.setLayout("spread", summary, "price");
+    b.setLayout("spread", summary, "price");
+    a.update(0.2, camera);
+    b.update(0.2, camera);
+    a.setLayout("spread", summary, "price");
+    a.setLayout("spread", summary, "price");
+    a.update(0.2, camera);
+    b.update(0.2, camera);
+    expect(guMesh(a.group, "강남구").position.x).toBe(guMesh(b.group, "강남구").position.x);
+    // 지표가 바뀌면 다시 정렬한다
+    a.setLayout("spread", summary, "count");
+    a.update(1, camera);
+    const slot = spreadLayout(summary, "count", NAMES).find((x) => x.gu === "종로구")!;
+    expect(slot.rank).toBe(1);
+    const geo = fixtureGeo();
+    const p = worldCentroid(guMesh(a.group, "종로구"), centroidOf(geo, "종로구"));
+    expect(Math.abs(p.x - slot.x)).toBeLessThan(1e-3);
+  });
+
+  it("spread draws a rank and a name label per gu (no rank for no value), removed on map", () => {
+    const calls: string[] = [];
+    const s = createSeoulScene(fixtureGeo(), { reducedMotion: true, makeTextTexture: labelFactory(calls) });
+    const summary = priceSummary();
+    delete summary["중구"];
+    s.setLayout("spread", summary, "price");
+    const sp = sprites(s.group);
+    expect(sp).toHaveLength(25 + 24);
+    for (const name of NAMES) expect(calls).toContain(name);
+    expect(calls).toContain("1위");
+    expect(calls).toContain("24위");
+    expect(calls).not.toContain("25위");
+    const slots = spreadLayout(summary, "price", NAMES);
+    const first = sp.find((x) => x.name === "label:1위")!;
+    expect(first.position.x).toBeCloseTo(slots[0]!.x, 6);
+    expect(first.position.z).toBeCloseTo(slots[0]!.z, 6);
+    expect(first.position.y).toBeGreaterThan(slots[0]!.height); // 기둥 위
+    expect(first.material.opacity).toBeCloseTo(1, 10);
+    s.setLayout("map", summary, "price");
+    expect(sprites(s.group)).toHaveLength(0);
+  });
+
+  it("spread hides focus bars and dimming; map brings them back", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, { ...noText, reducedMotion: true });
+    const summary = priceSummary();
+    s.setOverview(summary, "price");
+    const data = gangnam();
+    s.focus("강남구", data, "price");
+    s.setLayout("spread", summary, "price");
+    expect(bars(s.group).visible).toBe(false);
+    expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.ramp[0])); // 전체 보기 색
+    expect(guMesh(s.group, "강남구").position.y).toBeCloseTo(0, 10);
+    s.setLayout("map", summary, "price");
+    expect(bars(s.group).visible).toBe(true);
+    expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.guDim));
+    expect(guMesh(s.group, "강남구").position.y).toBeCloseTo(0.03, 10);
+    const ring = geo.gus.find((g) => g.name === "강남구")!.rings;
+    const p0 = layoutBars(data.dongs, boundsOf(ring), "price")[0]!;
+    expect(instance(bars(s.group), 0).pos.x).toBeCloseTo(p0.x, 6);
+    expect(instance(bars(s.group), 0).scale.y).toBeCloseTo(p0.height, 6);
+  });
+});
+
+describe("stage: setHover", () => {
+  it("setHover brightens the outline, raises 0.01, keeps colors, and is idempotent", () => {
+    const summary = priceSummary();
+    const a = createSeoulScene(fixtureGeo(), noText);
+    const b = createSeoulScene(fixtureGeo(), noText);
+    a.setOverview(summary, "price");
+    b.setOverview(summary, "price");
+    const before = guMeshes(a.group).map(colorOf);
+    a.setHover("강남구");
+    b.setHover("강남구");
+    const m = guMesh(a.group, "강남구");
+    expect(edgeOf(m)).toBe(hex(PALETTE.text));
+    expect(edgeOf(guMesh(a.group, "종로구"))).toBe(hex(PALETTE.bg));
+    expect(guMeshes(a.group).map(colorOf)).toEqual(before); // 채움색은 그대로, 다른 구도 어두워지지 않는다
+    a.update(0.02, camera);
+    b.update(0.02, camera);
+    a.setHover("강남구"); // 같은 값 반복(매 프레임 hover): 처음부터 다시 하지 않는다
+    a.setHover("강남구");
+    a.update(0.02, camera);
+    b.update(0.02, camera);
+    expect(m.position.y).toBe(guMesh(b.group, "강남구").position.y);
+    expect(m.position.y).toBeGreaterThan(0);
+    expect(m.position.y).toBeLessThan(0.01);
+    a.update(1, camera);
+    expect(m.position.y).toBeCloseTo(0.01, 10);
+    a.setHover("서초구");
+    a.update(1, camera);
+    expect(m.position.y).toBeCloseTo(0, 10);
+    expect(edgeOf(m)).toBe(hex(PALETTE.bg));
+    expect(guMesh(a.group, "서초구").position.y).toBeCloseTo(0.01, 10);
+    a.setHover(null);
+    a.update(1, camera);
+    expect(guMesh(a.group, "서초구").position.y).toBeCloseTo(0, 10);
+    expect(edgeOf(guMesh(a.group, "서초구"))).toBe(hex(PALETTE.bg));
+  });
+});
+
+describe("stage: pick", () => {
+  it("pick returns gu under ndc", () => {
+    // 픽스처의 강남구는 두 링 사이 틈에 centroid가 있으니 여기서는 한 링으로 바꾼다.
+    const geo = fixtureGeo();
+    const gn = geo.gus.find((g) => g.name === "강남구")!;
+    gn.rings = [[[-0.08, 0.28], [0.08, 0.28], [0.08, 0.44], [-0.08, 0.44]]];
+    const s = createSeoulScene(geo, noText);
+    const cam = lookDown(gn.centroid[0], gn.centroid[1]);
+    expect(s.pick(0, 0, cam)).toBe("강남구");
+    // 같은 카메라로 화면 다른 곳: 서초구 centroid를 투영한 ndc
+    const sc = centroidOf(geo, "서초구");
+    cam.updateMatrixWorld();
+    const ndc = new Vector3(sc[0], GU_DEPTH, sc[1]).project(cam);
+    expect(Math.abs(ndc.x)).toBeGreaterThan(0.1);
+    expect(s.pick(ndc.x, ndc.y, cam)).toBe("서초구");
+    expect(s.pick(0, 0, lookDown(0.9, 0.9))).toBeNull(); // 도시 밖
+    // 들어올린 구도 맞힌다
+    s.lift("서초구");
+    s.update(1, camera);
+    expect(s.pick(0, 0, lookDown(sc[0], sc[1]))).toBe("서초구");
+    s.lift(null);
+    // 펼친 뒤에는 옮겨 간 자리에서 맞힌다
+    const summary = priceSummary();
+    s.setLayout("spread", summary, "price");
+    s.update(1, camera);
+    const slot = spreadLayout(summary, "price", NAMES).find((x) => x.gu === "서초구")!;
+    expect(s.pick(0, 0, lookDown(slot.x, slot.z))).toBe("서초구");
+    expect(s.pick(0, 0, lookDown(sc[0], sc[1]))).not.toBe("서초구");
+  });
+
+  it("pick ignores outlines and labels (and bars, leaders, the shadow); hits faces, not bounding boxes", () => {
+    const geo = fixtureGeo();
+    const s = createSeoulScene(geo, { reducedMotion: true, makeTextTexture: labelFactory() });
+    s.focus("강남구", gangnam(), "price"); // 막대, 법정동 라벨, 지시선, 구 이름 라벨
+    s.lift("서초구"); // 이웃 구 윤곽선이 카메라 가까이 뜬다, 그 아래 그림자 원판
+    expect(sprites(s.group).length).toBeGreaterThan(0);
+    // 강남구 centroid는 두 링 사이 틈이고, 그 위에는 구 이름 라벨만 있다 → 아무 구도 아님
+    const c = centroidOf(geo, "강남구");
+    expect(s.pick(0, 0, lookDown(c[0], c[1]))).toBeNull();
+    // 1위 법정동 막대(그 위 라벨과 지시선) 바로 위: 막대 아래는 강남구 서쪽 링
+    const ring = geo.gus.find((g) => g.name === "강남구")!.rings;
+    const top = layoutBars(gangnam().dongs, boundsOf(ring), "price")[0]!;
+    expect(top.x).toBeGreaterThan(-0.08);
+    expect(top.x).toBeLessThan(-0.01);
+    expect(s.pick(0, 0, lookDown(top.x, top.z))).toBe("강남구");
+    // 들어올린 서초구 위: 그림자 원판이 아니라 구
+    const sc = centroidOf(geo, "서초구");
+    expect(s.pick(0, 0, lookDown(sc[0], sc[1]))).toBe("서초구");
+  });
+
+  it("after dispose the stage methods are quiet no-ops", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.dispose();
+    expect(() => {
+      s.setHover("강남구");
+      s.lift("강남구");
+      s.setLayout("spread", priceSummary(), "price");
+    }).not.toThrow();
+    expect(s.pick(0, 0, lookDown(0, 0))).toBeNull();
     expect(s.group.children).toHaveLength(0);
   });
 });
