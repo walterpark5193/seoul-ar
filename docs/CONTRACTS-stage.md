@@ -98,7 +98,8 @@ export function createGestureMachine(cfg?: Partial<GestureConfig>): GestureMachi
 - `victory`: fist=false, 주 손 `Victory`·≥minScore 확정, 쿨다운 지남 → 한 번, 래치(제스처가 바뀌어야 재발생).
 - 한 손 `Open_Palm`은 이벤트 없음.
 - `ctx.voting`이 true면 이벤트를 내지 않는다. 투표 시작 시 fist가 true였다면 조용히 false로(이벤트 없음). 투표 중 프레임은 확정 횟수에 세지 않고, spread·victory 래치는 투표 뒤 제스처가 한 번 바뀔 때까지 잠긴다(Ruling).
-- 래치 재무장은 제스처 이름이 바뀔 때만(점수가 잠깐 minScore 아래로 내려간 것은 재무장 아님). release가 일어나면 spread 래치를 잠근다(주먹 → 두 손 펴기가 펼치기로 번지지 않게)(Ruling).
+- 래치 재무장은 "그 제스처가 아님"(제스처 이름 기준)이 confirmFrames 연속일 때만. 한 프레임 None이나 점수 하락은 재무장이 아니다. release가 일어나면 spread 래치를 잠근다(주먹 → 두 손 펴기가 펼치기로 번지지 않게)(Ruling).
+- 추적 손 기억: 추적 손목 위치를 releaseAfterMs 동안 기억하고, 그동안은 손목이 TRACK_RADIUS(0.15, 정규 영상 좌표) 안인 손만 primary로 다시 잡는다. 없으면 primary null(다른 손을 대신 잡지 않음). 추적 손이 없는 프레임은 not-fist 확정 횟수에 중립이고, 손 없음 release는 추적 손을 마지막으로 본 시각부터 잰다(Ruling).
 - grab/spread/victory 발생 후 `cooldownMs` 동안 grab/spread/victory 없음.
 
 ### 2.3 `voteCounter.ts`
