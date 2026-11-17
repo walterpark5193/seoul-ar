@@ -98,6 +98,50 @@ describe("aggregateRows", () => {
     expect(out.total.cancelled).toBe(0);
   });
 
+  it("malformed THING_AMT rows are excluded from every statistic and reported", () => {
+    const good = row({ STDG_NM: "대치동", BLDG_USG: "아파트", THING_AMT: "200000", ARCH_AREA: 80 });
+    const alpha = row({ STDG_NM: "대치동", BLDG_USG: "아파트", THING_AMT: "abc", ARCH_AREA: 80 });
+    const missing = row({ STDG_NM: "대치동", BLDG_USG: "오피스텔", ARCH_AREA: 30 });
+    delete missing.THING_AMT;
+    const empty = row({ STDG_NM: "논현동", BLDG_USG: "연립다세대", THING_AMT: "", ARCH_AREA: 50, RTRCN_DAY: "20261112" });
+    const reports = [];
+    const out = aggregateRows([good, alpha, missing, empty], META, { onMalformed: (r) => reports.push(r) });
+
+    // 정상 행 하나만 남고, 그 통계는 단독으로 계산한 값과 같다.
+    expect(out.total).toEqual({ n: 1, cancelled: 0, medPerM2: 2500, medAmt: 200000, maxAmt: 200000, truncated: false });
+    expect(out.dongs).toHaveLength(1); // 논현동은 이상 행만 있어 나타나지 않음
+    const d = out.dongs[0];
+    expect(d.name).toBe("대치동");
+    expect(d.n).toBe(1);
+    expect(d.nApt).toBe(1);
+    expect(d.usage).toEqual({ 아파트: 1 });
+    expect(d.medAmt).toBe(200000);
+    expect(d.maxAmt).toBe(200000);
+    expect(d.medPerM2).toBe(2500);
+    expect(d.medPerM2Apt).toBe(2500);
+
+    // NaN 이나 '우연한 null' 이 출력에 없다.
+    const text = JSON.stringify(out);
+    expect(text).not.toContain("NaN");
+    expect(text).not.toContain("null");
+
+    // 이상 행은 구·월·법정동별로 보고된다.
+    expect(reports).toEqual([{ month: "202611", gu: "강남구", count: 3, byDong: { 대치동: 2, 논현동: 1 } }]);
+  });
+
+  it("malformed rows do not count as cancelled and onMalformed is optional", () => {
+    const bad = row({ THING_AMT: "x", RTRCN_DAY: "20261101" });
+    const out = aggregateRows([bad], META);
+    expect(out.total).toEqual({ n: 0, cancelled: 0, medPerM2: null, medAmt: null, maxAmt: null, truncated: false });
+    expect(out.dongs).toEqual([]);
+  });
+
+  it("well-formed rows never trigger onMalformed", () => {
+    const calls = [];
+    aggregateRows([row(), row({ THING_AMT: "30000", ARCH_AREA: 0 })], META, { onMalformed: () => calls.push(1) });
+    expect(calls).toEqual([]);
+  });
+
   it("output has no forbidden fields", () => {
     const rows = [row({ BLDG_NM: "현대14차(203,204,205,206동)", MNO: "0447", SNO: "0000" })];
     const text = JSON.stringify(aggregateRows(rows, META));
