@@ -8,6 +8,8 @@ export const WASM_PATH = "/mediapipe/wasm";
 export type HandSourceError = "no-camera" | "denied" | "model-missing" | "wasm-failed" | "unsupported";
 export interface HandSource {
   readonly video: HTMLVideoElement; readonly fps: number; readonly loadMs: number | null; readonly delegate: "GPU" | "CPU";
+  /** recognizeForVideo 연속 실패 횟수(성공하면 0). 많이 쌓이면 호출 측이 마우스 입력으로 폴백한다. */
+  readonly errors: number;
   onFrame(cb: (f: HandFrame) => void): () => void; stop(): void;
 }
 export interface RecognizerResultLike {
@@ -50,6 +52,16 @@ function stopTracks(stream: MediaStream): void {
 
 export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: true; source: HandSource } | { ok: false; reason: HandSourceError }> {
   if (typeof WebAssembly === "undefined") return { ok: false, reason: "unsupported" };
+  const modelExists = deps.modelExists
+    ?? (async () => {
+      // SPA 폴백(CloudFront 403/404 → index.html, Vite dev)은 200 + text/html이므로 없는 모델로 본다.
+      const res = await (deps.fetchImpl ?? fetch)(MODEL_PATH, { method: "HEAD" });
+      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+    });
+  let exists = false;
+  try { exists = await modelExists(); } catch { exists = false; }
+  if (!exists) return { ok: false, reason: "model-missing" };
+
   const getUserMedia = deps.getUserMedia
     ?? (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia
       ? (c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c)
@@ -62,16 +74,6 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
   } catch (e) {
     return { ok: false, reason: (e as { name?: string })?.name === "NotAllowedError" ? "denied" : "no-camera" };
   }
-
-  const modelExists = deps.modelExists
-    ?? (async () => {
-      // SPA 폴백(CloudFront 403/404 → index.html, Vite dev)은 200 + text/html이므로 없는 모델로 본다.
-      const res = await (deps.fetchImpl ?? fetch)(MODEL_PATH, { method: "HEAD" });
-      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
-    });
-  let exists = false;
-  try { exists = await modelExists(); } catch { exists = false; }
-  if (!exists) { stopTracks(stream); return { ok: false, reason: "model-missing" }; }
 
   const loadStart = performance.now();
   let recognizer: Awaited<ReturnType<typeof import("@mediapipe/tasks-vision").GestureRecognizer.createFromOptions>>;
@@ -109,20 +111,37 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
       ? video.requestVideoFrameCallback(step)
       : requestAnimationFrame(() => step(performance.now()));
   };
+  let errors = 0;
+  let warnedRecognize = false;
+  const warnedListeners = new WeakSet<(f: HandFrame) => void>();
+  let lastVideoTime = -1;
   const step = (now: number) => {
     if (stopped) return;
-    if (video.readyState >= 2) {
-      const t = now;
+    const fresh = rvfc || video.currentTime !== lastVideoTime;
+    if (video.readyState >= 2 && fresh) {
+      lastVideoTime = video.currentTime;
+      let frame: HandFrame | null = null;
       try {
-        const frame = toHandFrame(recognizer.recognizeForVideo(video, t) as unknown as RecognizerResultLike, t);
-        stamps.push(t);
+        frame = toHandFrame(recognizer.recognizeForVideo(video, now) as unknown as RecognizerResultLike, now);
+        errors = 0;
+      } catch (e) {
+        errors++;
+        if (!warnedRecognize) { warnedRecognize = true; console.warn("[stage] recognizeForVideo 실패", e); }
+      }
+      if (frame) {
+        stamps.push(now);
         if (stamps.length > FPS_WINDOW) stamps.shift();
         if (stamps.length > 1) {
           const span = stamps[stamps.length - 1]! - stamps[0]!;
           fps = span > 0 ? ((stamps.length - 1) * 1000) / span : 0;
         }
-        for (const cb of [...listeners]) cb(frame);
-      } catch { /* 한 프레임 실패는 건너뛴다(타임스탬프 역행 등) */ }
+        for (const cb of [...listeners]) {
+          try { cb(frame); }
+          catch (e) {
+            if (!warnedListeners.has(cb)) { warnedListeners.add(cb); console.warn("[stage] onFrame 리스너 오류", e); }
+          }
+        }
+      }
     }
     schedule();
   };
@@ -131,6 +150,7 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
   const source: HandSource = {
     video, loadMs, delegate,
     get fps() { return fps; },
+    get errors() { return errors; },
     onFrame(cb) { listeners.add(cb); return () => { listeners.delete(cb); }; },
     stop() {
       if (stopped) return;

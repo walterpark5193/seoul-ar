@@ -121,10 +121,14 @@ describe("startHandSource", () => {
     const { d } = deps({ getUserMedia: undefined });
     expect(await startHandSource(d)).toEqual({ ok: false, reason: "no-camera" });
   });
-  it("modelExists false → model-missing, 카메라 트랙 정리", async () => {
-    const { d, s } = deps({ modelExists: async () => false });
+  it("modelExists false → model-missing, 카메라는 열지 않는다", async () => {
+    const { d } = deps({ modelExists: async () => false });
     expect(await startHandSource(d)).toEqual({ ok: false, reason: "model-missing" });
-    expect(s.track.stop).toHaveBeenCalled();
+    expect(d.getUserMedia).not.toHaveBeenCalled();
+  });
+  it("모델이 없고 카메라도 거부될 상황이면 model-missing이 우선", async () => {
+    const { d } = deps({ modelExists: async () => false, getUserMedia: async () => { throw domErr("NotAllowedError"); } });
+    expect(await startHandSource(d)).toEqual({ ok: false, reason: "model-missing" });
   });
   it("modelExists가 던지면 model-missing", async () => {
     const { d } = deps({ modelExists: async () => { throw new Error("net"); } });
@@ -179,6 +183,52 @@ describe("startHandSource", () => {
     v.tick(10); v.tick(20);
     expect(got).toHaveLength(1);
     r.source.stop();
+  });
+  it("연속 실패는 errors로 노출되고 성공하면 0, 경고는 한 번만", async () => {
+    const rec = fakeRecognizer();
+    let fail = true;
+    rec.recognizeForVideo.mockImplementation((() => { if (fail) throw new Error("x"); return { gestures: [], landmarks: [] }; }) as any);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { d, v } = deps({}, rec);
+    const r = await startHandSource(d);
+    if (!r.ok) throw new Error("fail");
+    v.tick(1); v.tick(2); v.tick(3);
+    expect(r.source.errors).toBe(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    fail = false; v.tick(4);
+    expect(r.source.errors).toBe(0);
+    r.source.stop(); warn.mockRestore();
+  });
+  it("리스너 하나가 던져도 다른 리스너는 호출된다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { d, v } = deps();
+    const r = await startHandSource(d);
+    if (!r.ok) throw new Error("fail");
+    const got: any[] = [];
+    r.source.onFrame(() => { throw new Error("bad"); });
+    r.source.onFrame(f => got.push(f));
+    v.tick(1); v.tick(2);
+    expect(got).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    r.source.stop(); warn.mockRestore();
+  });
+  it("rVFC가 없으면 rAF 폴백이고 currentTime이 같은 프레임은 건너뛴다", async () => {
+    let raf: ((t: number) => void) | null = null;
+    vi.stubGlobal("requestAnimationFrame", (c: (t: number) => void) => { raf = c; return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => { raf = null; });
+    try {
+      const { d, v, rec } = deps();
+      v.raw.requestVideoFrameCallback = undefined;
+      v.raw.currentTime = 0;
+      const r = await startHandSource(d);
+      if (!r.ok) throw new Error("fail");
+      const run = (t: number) => { const c = raf; raf = null; c?.(t); };
+      run(10); run(20);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(1);
+      v.raw.currentTime = 0.04; run(30);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(2);
+      r.source.stop();
+    } finally { vi.unstubAllGlobals(); }
   });
   it("기본 modelExists: 200 + text/html(SPA 폴백)이면 model-missing", async () => {
     const { d } = deps({ modelExists: undefined, fetchImpl: (async () => new Response("<html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } })) as typeof fetch });
