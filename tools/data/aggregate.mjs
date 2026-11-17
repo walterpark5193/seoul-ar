@@ -21,8 +21,17 @@ function isValid(row) {
   return String(row.RTRCN_DAY ?? "").trim() === "";
 }
 
+/** 거래금액(만원). 비어 있거나 숫자가 아니면 null (형식 이상 행). */
 function amount(row) {
-  return Number(row.THING_AMT);
+  const raw = row.THING_AMT;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** 형식 이상 행: 금액을 숫자로 읽을 수 없는 행. 모든 통계에서 제외하고 따로 센다. */
+function isWellFormed(row) {
+  return amount(row) !== null;
 }
 
 function area(row) {
@@ -77,21 +86,36 @@ export function compareDongs(a, b) {
   return a.name.localeCompare(b.name, "ko");
 }
 
-/** 한 구·월의 원자료 행 배열 → GuData */
-export function aggregateRows(rows, { month, gu, generatedAt }) {
-  const byDong = new Map();
-  for (const r of rows) {
-    const name = String(r.STDG_NM ?? "").trim() || "(법정동 미상)";
-    if (!byDong.has(name)) byDong.set(name, []);
-    byDong.get(name).push(r);
+function dongName(row) {
+  return String(row.STDG_NM ?? "").trim() || "(법정동 미상)";
+}
+
+/**
+ * 한 구·월의 원자료 행 배열 → GuData.
+ * 금액을 숫자로 읽을 수 없는 행은 모든 통계(n, cancelled, 중앙값, 최고가, nApt, usage)에서 빼고
+ * `onMalformed({ month, gu, count, byDong })` 로 알린다(출력 JSON 스키마에는 넣지 않는다).
+ * `truncated` 는 제외 전 원자료 행 수로 판정한다.
+ */
+export function aggregateRows(rows, { month, gu, generatedAt }, { onMalformed } = {}) {
+  const clean = rows.filter(isWellFormed);
+  if (clean.length !== rows.length && onMalformed) {
+    const byDong = {};
+    for (const r of rows) if (!isWellFormed(r)) byDong[dongName(r)] = (byDong[dongName(r)] ?? 0) + 1;
+    onMalformed({ month, gu, count: rows.length - clean.length, byDong });
   }
-  const dongs = [...byDong.entries()].map(([name, rs]) => dongStat(name, rs)).sort(compareDongs);
+  const groups = new Map();
+  for (const r of clean) {
+    const name = dongName(r);
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(r);
+  }
+  const dongs = [...groups.entries()].map(([name, rs]) => dongStat(name, rs)).sort(compareDongs);
   return {
     v: 1,
     month,
     gu,
     generatedAt,
-    total: { ...baseStats(rows), truncated: rows.length >= PAGE_SIZE },
+    total: { ...baseStats(clean), truncated: rows.length >= PAGE_SIZE },
     dongs,
   };
 }
@@ -156,10 +180,16 @@ function parseArgs(argv) {
 export function runCli(argv) {
   const { raw, out, months } = parseArgs(argv);
   const generatedAt = new Date().toISOString();
+  const malformedByMonth = Object.fromEntries(months.map((m) => [m, 0]));
+  const onMalformed = ({ month, gu, count, byDong }) => {
+    malformedByMonth[month] += count;
+    const detail = Object.entries(byDong).map(([d, n]) => `${d} ${n}`).join(", ");
+    console.warn(`[aggregate] ${month} ${gu}: 금액을 읽을 수 없는 행 ${count}건 제외 (${detail})`);
+  };
   const perGu = months.map((month) => {
     mkdirSync(join(out, month), { recursive: true });
     return GU_ORDER.map((gu) => {
-      const data = aggregateRows(readRows(raw, month, gu), { month, gu, generatedAt });
+      const data = aggregateRows(readRows(raw, month, gu), { month, gu, generatedAt }, { onMalformed });
       writeFileSync(join(out, month, `${gu}.json`), JSON.stringify(data) + "\n");
       return data;
     });
@@ -168,7 +198,7 @@ export function runCli(argv) {
   writeFileSync(join(out, "index.json"), JSON.stringify(index, null, 2) + "\n");
   for (const month of months) {
     const total = GU_ORDER.reduce((s, gu) => s + index.summary[month][gu].n, 0);
-    console.log(`[aggregate] ${month}: 유효 거래 ${total}건 (25구)`);
+    console.log(`[aggregate] ${month}: 유효 거래 ${total}건 (25구), 금액 이상으로 제외한 행 ${malformedByMonth[month]}건`);
   }
 }
 

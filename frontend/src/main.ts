@@ -9,6 +9,7 @@ import { createMockRealtime } from "./realtime/mock";
 import type { RealtimeClient } from "./realtime/types";
 import { redirect, startRouter, type Route } from "./router";
 import { createSeoulScene } from "./scene/seoulScene";
+import { bindRemote } from "./state/remote";
 import { createStore, initialStateFor } from "./state/store";
 import { toast } from "./ui/toast";
 import { mountArView } from "./views/arView";
@@ -83,9 +84,7 @@ async function main(): Promise<void> {
   void connecting.then(() => store.dispatch({ type: "conn", status: realtime.status }));
 
   let route: Route = "landing";
-  realtime.subscribe((msg) => {
-    if (route !== "host") store.dispatch({ type: "remote", msg });
-  });
+  bindRemote({ realtime, store, index, isHost: () => route === "host" });
 
   const geo = loadGeo();
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
