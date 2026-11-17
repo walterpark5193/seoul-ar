@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { FETCH_MONTH_PATH, requestFetchMonth } from "./fetchMonth";
+import { FETCH_MONTH_PATH, NARRATE_MONTH_PATH, requestFetchMonth, requestNarrateMonth } from "./fetchMonth";
 
 const res = (status: number, body: unknown = {}) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
@@ -28,5 +28,17 @@ describe("requestFetchMonth", () => {
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => { throw new TypeError("Failed to fetch"); }))).toEqual({ kind: "network" });
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(502)))).toEqual({ kind: "failed", status: 502 });
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(202, { month: "202610" })))).toEqual({ kind: "failed", status: 202 });
+  });
+
+  it("requestNarrateMonth posts the same way to /api/narrate-month", async () => {
+    const f = vi.fn(async () => res(202, { jobId: "n-1", month: "202611" }));
+    await expect(requestNarrateMonth("202611", "secret", f)).resolves.toEqual({ kind: "started", jobId: "n-1", month: "202611" });
+    expect(NARRATE_MONTH_PATH).toBe("/api/narrate-month");
+    expect(f).toHaveBeenCalledWith("/api/narrate-month", expect.objectContaining({
+      method: "POST",
+      headers: { "content-type": "application/json", "x-presenter-key": "secret" },
+      body: JSON.stringify({ month: "202611" }),
+    }));
+    expect(await requestNarrateMonth("202611", "k", vi.fn(async () => res(401)))).toEqual({ kind: "unauthorized" });
   });
 });

@@ -1,6 +1,8 @@
-// 발표자 화면 "월 가져오기" (CONTRACTS 10.5): 월 입력 → (처음이면 발표자 암호) → POST → 진행 표시 → 완료 시 index 다시 읽기.
+// 발표자 화면 "월 가져오기"(CONTRACTS 10.5)와 "해설 생성"(12.3).
+// 월 입력 → (처음이면 발표자 암호) → POST → 진행 표시 → 완료 시 index(수집) 또는 해설(생성)을 다시 읽는다.
+// 두 작업은 같은 암호·같은 진행 채널(JobMessage, kind로 구분)·같은 폴링 폴백을 쓰고, 한 번에 하나만 돈다.
 // 상태 전이는 createMonthFetch, 화면은 순수 함수 renderMonthFetch. DOM 연결은 hostView가 한다.
-import { requestFetchMonth } from "../data/fetchMonth";
+import { requestFetchMonth, requestNarrateMonth } from "../data/fetchMonth";
 import { MIN_MONTH, currentMonth, inFetchRange, shiftMonth } from "../data/months";
 import type { DataIndex } from "../data/types";
 import { isJobMessage, type JobMessage } from "../realtime/types";
@@ -10,25 +12,35 @@ import { esc } from "../ui/html";
 export const PRESENTER_KEY = "seoul-ar.presenter";
 const TOTAL_GUS = 25;
 
+export type JobKind = "fetch" | "narration";
+
 export type FetchView =
   | { phase: "idle"; note?: string; error?: string }
-  | { phase: "key"; month: string; error?: string }
-  | { phase: "sending"; month: string }
-  | { phase: "running"; month: string; jobId: string; done: number; total: number; gu?: string }
-  | { phase: "loading"; month: string };
+  | { phase: "key"; kind: JobKind; month: string; error?: string }
+  | { phase: "sending"; kind: JobKind; month: string }
+  | { phase: "running"; kind: JobKind; month: string; jobId: string; done: number; total: number; gu?: string }
+  | { phase: "loading"; kind: JobKind; month: string };
+
+/** 호스트가 고른 달의 해설 유무(버튼 활성 판단). */
+export interface NarrationAvailability { month: string; state: "unknown" | "present" | "absent"; }
 
 const MSG = {
   badMonth: "월은 2006년 1월부터 이번 달 사이로 골라 주세요.",
+  narrBadMonth: "이 달의 데이터가 없어 해설을 만들 수 없습니다. 먼저 월을 가져와 주세요.",
   unauthorized: "발표자 암호가 맞지 않습니다. 다시 입력해 주세요.",
   emptyKey: "발표자 암호를 입력해 주세요.",
   busy: "다른 달을 가져오는 중입니다. 끝난 뒤 다시 눌러 주세요.",
   unavailable: "이 배포에서는 월 가져오기를 쓸 수 없습니다.",
+  narrUnavailable: "이 배포에서는 해설 생성을 쓸 수 없습니다.",
   network: "수집 서버에 연결하지 못했습니다. 네트워크를 확인한 뒤 다시 눌러 주세요.",
   failed: (status: number) => `수집 서버에 연결하지 못했습니다(HTTP ${status}). 잠시 뒤 다시 눌러 주세요.`,
   stale: "수집 상태를 받지 못했습니다. 잠시 뒤 다시 눌러 주세요.",
   ready: (m: string) => `${fmtMonth(m)} 데이터가 준비됐습니다`,
   reloadFailed: (m: string) => `${fmtMonth(m)} 데이터는 준비됐지만 월 목록을 새로 읽지 못했습니다. 새로고침해 주세요.`,
   jobError: (m: string, why?: string) => `${fmtMonth(m)} 수집 실패: ${why || "알 수 없는 오류가 났습니다."}`,
+  narrReady: "해설이 준비됐습니다",
+  narrReloadFailed: "해설은 준비됐지만 다시 읽지 못했습니다. 새로고침해 주세요.",
+  narrError: (m: string, why?: string) => `${fmtMonth(m)} 해설 생성 실패: ${why || "알 수 없는 오류가 났습니다."}`,
 };
 
 /** "2026-10"(input type=month) 또는 "202610". 형식이 틀렸거나 200601~이번 달 밖이면 null. */
@@ -57,20 +69,34 @@ export function isBusy(v: FetchView): boolean {
   return v.phase === "sending" || v.phase === "running" || v.phase === "loading";
 }
 
-/** 진행 한 줄. 계약 10.5의 표기 "2026년 10월 수집 중 12/25 · 강서구" 그대로. */
+/** 진행 한 줄. 수집은 계약 10.5 표기 "2026년 10월 수집 중 12/25 · 강서구" 그대로. */
 export function statusLine(v: FetchView): string {
-  switch (v.phase) {
-    case "sending": return `${fmtMonth(v.month)} 수집을 요청하는 중`;
-    case "running":
-      if (v.done === 0 && !v.gu) return `${fmtMonth(v.month)} 수집 시작`;
-      return `${fmtMonth(v.month)} 수집 중 ${v.done}/${v.total}${v.gu ? ` · ${v.gu}` : ""}`;
-    case "loading": return `${fmtMonth(v.month)} 수집 완료, 월 목록을 새로 읽는 중`;
-    case "idle": return v.note ?? "";
-    case "key": return "";
+  if (v.phase === "idle") return v.note ?? "";
+  if (v.phase === "key") return "";
+  const m = fmtMonth(v.month);
+  if (v.kind === "narration") {
+    if (v.phase === "sending") return `${m} 해설 생성을 요청하는 중`;
+    if (v.phase === "loading") return `${m} 해설을 새로 읽는 중`;
+    return v.done > 0 && v.total > 0 ? `${m} 해설 생성 중 ${v.done}/${v.total}` : `${m} 해설 생성 중`;
   }
+  if (v.phase === "sending") return `${m} 수집을 요청하는 중`;
+  if (v.phase === "loading") return `${m} 수집 완료, 월 목록을 새로 읽는 중`;
+  if (v.done === 0 && !v.gu) return `${m} 수집 시작`;
+  return `${m} 수집 중 ${v.done}/${v.total}${v.gu ? ` · ${v.gu}` : ""}`;
 }
 
-export function renderMonthFetch(v: FetchView, o: { value: string; max: string }): string {
+function renderNarrate(n: NarrationAvailability | undefined, locked: boolean): string {
+  if (!n) return "";
+  const enabled = n.state === "absent" && !locked;
+  const hint = n.state === "present" ? `${fmtMonth(n.month)} 해설이 있습니다`
+    : n.state === "absent" ? `${fmtMonth(n.month)} 해설이 아직 없습니다`
+      : `${fmtMonth(n.month)} 해설을 확인하는 중`;
+  return `<div class="fetch-row fetch-narrate">` +
+    `<button type="button" class="chip" data-action="narrate"${enabled ? "" : " disabled"}>해설 생성</button>` +
+    `<span class="fetch-hint">${esc(hint)}</span></div>`;
+}
+
+export function renderMonthFetch(v: FetchView, o: { value: string; max: string; narration?: NarrationAvailability }): string {
   const locked = isBusy(v) || v.phase === "key";
   const keyForm = v.phase !== "key" ? "" :
     `<form class="fetch-key" data-form="key">` +
@@ -91,6 +117,7 @@ export function renderMonthFetch(v: FetchView, o: { value: string; max: string }
     `<input id="fetch-month" type="month" name="month" min="${monthInputValue(MIN_MONTH)}" max="${esc(o.max)}" value="${esc(o.value)}" required data-action="fetch-month">` +
     `<button type="submit" class="chip" data-fetch-submit${locked ? " disabled" : ""}>가져오기</button>` +
     `</form>` +
+    renderNarrate(o.narration, locked) +
     keyForm +
     `<p class="fetch-status" role="status">${esc(statusLine(v))}</p>` +
     error +
@@ -108,6 +135,8 @@ export interface MonthFetchDeps {
   storage: StorageLike | null;
   subscribeJobs(handler: (msg: JobMessage) => void): () => void;
   refreshIndex(): Promise<DataIndex>;
+  /** 해설 생성이 끝나면 그 달 해설을 다시 읽는다(캐시 비우고 다시 확인). */
+  reloadNarration?(month: string): Promise<unknown>;
   toast(message: string): void;
   onChange(view: FetchView): void;
   /** 같은 달을 다시 가져온 경우를 위해 구 데이터 캐시를 비운다. */
@@ -121,7 +150,10 @@ export interface MonthFetchDeps {
 
 export interface MonthFetch {
   readonly view: FetchView;
+  /** 월 가져오기 */
   submit(input: string): Promise<void>;
+  /** 해설 생성(이미 있는 달) */
+  narrate(month: string): Promise<void>;
   submitKey(key: string): Promise<void>;
   cancelKey(): void;
   dispose(): void;
@@ -161,8 +193,8 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   };
 
-  const finish = async (month: string) => {
-    set({ phase: "loading", month });
+  const finishFetch = async (month: string) => {
+    set({ phase: "loading", kind: "fetch", month });
     d.forgetMonth?.(month);
     try {
       await d.refreshIndex();
@@ -179,12 +211,28 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     }
   };
 
+  const finishNarration = async (month: string) => {
+    set({ phase: "loading", kind: "narration", month });
+    try {
+      await d.reloadNarration?.(month);
+      if (!alive) return;
+      d.toast(MSG.narrReady);
+      set({ phase: "idle", note: MSG.narrReady });
+    } catch (err) {
+      console.warn("[host] 해설을 다시 읽지 못함", err);
+      if (!alive) return;
+      d.toast(MSG.narrReloadFailed);
+      set({ phase: "idle", error: MSG.narrReloadFailed });
+    }
+  };
+
   const onJob = (msg: JobMessage) => {
     if (!alive) return;
+    const msgKind: JobKind = msg.kind ?? "fetch";
     // 202 응답보다 진행 이벤트가 먼저 오면 그 작업을 받아들인다.
-    if (view.phase === "sending" && msg.month === view.month && msg.state === "running") {
+    if (view.phase === "sending" && msg.month === view.month && msgKind === view.kind && msg.state === "running") {
       lastProgress = now();
-      set({ phase: "running", month: view.month, jobId: msg.jobId, done: msg.done, total: msg.total || TOTAL_GUS, gu: msg.gu });
+      set({ phase: "running", kind: view.kind, month: view.month, jobId: msg.jobId, done: msg.done, total: msg.total || TOTAL_GUS, gu: msg.gu });
       return;
     }
     if (view.phase !== "running" || msg.jobId !== view.jobId) return;
@@ -195,11 +243,12 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
       return;
     }
     stopPoll();
+    const { kind, month } = view;
     if (msg.state === "error") {
-      set({ phase: "idle", error: MSG.jobError(view.month, msg.message) });
+      set({ phase: "idle", error: kind === "narration" ? MSG.narrError(month, msg.message) : MSG.jobError(month, msg.message) });
       return;
     }
-    void finish(view.month);
+    void (kind === "narration" ? finishNarration(month) : finishFetch(month));
   };
 
   const poll = async (jobId: string) => {
@@ -214,7 +263,7 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
       if (!res.ok) return;
       const body: unknown = await res.json();
       if (isJobMessage(body)) onJob(body);
-    } catch { /* 다음 차례에 다시 */ }
+    } catch { /* 다음 차례에 다시(없는 파일은 SPA 폴백 HTML이라 JSON이 아니다) */ }
   };
 
   const startPoll = (jobId: string) => {
@@ -223,28 +272,35 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     pollTimer = setInterval(() => { void poll(jobId); }, pollMs);
   };
 
-  const send = async (month: string, key: string) => {
+  const send = async (kind: JobKind, month: string, key: string) => {
     offJobs ??= d.subscribeJobs(onJob); // 첫 진행 이벤트 전에 구독이 서도록 요청보다 먼저
-    set({ phase: "sending", month });
-    const r = await requestFetchMonth(month, key, doFetch);
+    set({ phase: "sending", kind, month });
+    const request = kind === "narration" ? requestNarrateMonth : requestFetchMonth;
+    const r = await request(month, key, doFetch);
     if (!alive) return;
     switch (r.kind) {
       case "started":
         if (view.phase !== "running" || view.jobId !== r.jobId) {
-          set({ phase: "running", month: r.month, jobId: r.jobId, done: 0, total: TOTAL_GUS });
+          set({ phase: "running", kind, month: r.month, jobId: r.jobId, done: 0, total: kind === "fetch" ? TOTAL_GUS : 0 });
         }
         startPoll(r.jobId);
         return;
       case "unauthorized":
         clearKey();
-        set({ phase: "key", month, error: MSG.unauthorized });
+        set({ phase: "key", kind, month, error: MSG.unauthorized });
         return;
-      case "bad-month": set({ phase: "idle", error: MSG.badMonth }); return;
+      case "bad-month": set({ phase: "idle", error: kind === "narration" ? MSG.narrBadMonth : MSG.badMonth }); return;
       case "busy": set({ phase: "idle", error: MSG.busy }); return;
-      case "unavailable": set({ phase: "idle", error: MSG.unavailable }); return;
+      case "unavailable": set({ phase: "idle", error: kind === "narration" ? MSG.narrUnavailable : MSG.unavailable }); return;
       case "network": set({ phase: "idle", error: MSG.network }); return;
       case "failed": set({ phase: "idle", error: MSG.failed(r.status) }); return;
     }
+  };
+
+  const start = async (kind: JobKind, month: string) => {
+    const key = readKey();
+    if (!key) { set({ phase: "key", kind, month }); return; }
+    await send(kind, month, key);
   };
 
   return {
@@ -253,15 +309,17 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
       if (!alive || isBusy(view)) return;
       const month = parseMonthInput(input, now());
       if (!month) { set({ phase: "idle", error: MSG.badMonth }); return; }
-      const key = readKey();
-      if (!key) { set({ phase: "key", month }); return; }
-      await send(month, key);
+      await start("fetch", month);
+    },
+    async narrate(month) {
+      if (!alive || isBusy(view) || !/^\d{6}$/.test(month)) return;
+      await start("narration", month);
     },
     async submitKey(key) {
       if (!alive || view.phase !== "key") return;
       if (key.length === 0) { set({ ...view, error: MSG.emptyKey }); return; }
       writeKey(key);
-      await send(view.month, key);
+      await send(view.kind, view.month, key);
     },
     cancelKey() {
       if (view.phase === "key") set({ phase: "idle" });

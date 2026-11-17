@@ -1,4 +1,4 @@
-// 발표자 "월 가져오기" 요청 (CONTRACTS 10.2). 같은 출처의 상대 경로로 보낸다(CloudFront /api/* → Lambda).
+// 발표자 "월 가져오기"(CONTRACTS 10.2)와 "해설 생성"(12.2) 요청. 같은 출처의 상대 경로로 보낸다(CloudFront /api/* → Lambda).
 // 응답 코드를 화면이 다룰 결과로 바꾸기만 한다. 문구는 views/monthFetch.ts가 정한다.
 
 export const FETCH_MONTH_PATH = "/api/fetch-month";
@@ -12,10 +12,21 @@ export type FetchMonthResult =
   | { kind: "network" }        // 요청 자체가 실패
   | { kind: "failed"; status: number };
 
-export async function requestFetchMonth(month: string, passcode: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<FetchMonthResult> {
+export const NARRATE_MONTH_PATH = "/api/narrate-month";
+
+export function requestFetchMonth(month: string, passcode: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<FetchMonthResult> {
+  return requestJob(FETCH_MONTH_PATH, month, passcode, fetchImpl);
+}
+
+/** AI 해설 생성(CONTRACTS 12.2 b). 응답 규칙은 월 수집과 같다. */
+export function requestNarrateMonth(month: string, passcode: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<FetchMonthResult> {
+  return requestJob(NARRATE_MONTH_PATH, month, passcode, fetchImpl);
+}
+
+async function requestJob(path: string, month: string, passcode: string, fetchImpl: typeof fetch): Promise<FetchMonthResult> {
   let res: Response;
   try {
-    res = await fetchImpl(FETCH_MONTH_PATH, {
+    res = await fetchImpl(path, {
       method: "POST",
       headers: { "content-type": "application/json", "x-presenter-key": passcode },
       body: JSON.stringify({ month }),

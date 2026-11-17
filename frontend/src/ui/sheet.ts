@@ -1,5 +1,6 @@
 // 뷰어 바텀시트. 순수 함수: 상태와 데이터를 받아 HTML 문자열을 낸다(테스트 대상).
 // 이벤트 연결은 sheetDom.ts가 맡는다.
+import { modelLabel, narrationText, type Narration } from "../data/narration";
 import type { DataIndex, GuData, Metric, Stat } from "../data/types";
 import type { AppState } from "../state/store";
 import { NO_TRADE, fmtAmt, fmtCount, fmtMonth, fmtNumber, fmtPerM2 } from "./format";
@@ -9,9 +10,11 @@ export interface SheetOptions {
   altView?: { href: string; label: string };
   /** AR 실기 조정값 안내(views/arTuning.ts describeArTuning). 있을 때만 머리 아래 한 줄. */
   tuningNote?: string | null;
+  /** 이 달의 AI 해설(CONTRACTS 12.3). 없거나 고른 키의 문장이 없으면 영역을 숨긴다. */
+  narration?: Narration | null;
 }
 
-interface Figure { label: string; value: string; caption?: string; }
+export interface Figure { label: string; value: string; caption?: string; }
 
 const METRIC_LABEL: Record<Metric, string> = { price: "가격", count: "건수" };
 
@@ -52,8 +55,8 @@ function overviewFigures(entries: Array<[string, Stat]>): Figure[] {
   ];
 }
 
-function renderFigures(figures: Figure[]): string {
-  return `<dl class="figs">${figures
+export function renderFigures(figures: Figure[], cls = "figs"): string {
+  return `<dl class="${cls}">${figures
     .map((f) => `<div class="fig"><dt>${esc(f.label)}</dt><dd>${figure(f.value)}${
       f.caption ? `<span class="fig-caption">${esc(f.caption)}</span>` : ""}</dd></div>`)
     .join("")}</dl>`;
@@ -128,37 +131,56 @@ function renderControls(state: AppState, index: DataIndex | null, opts: SheetOpt
     `</div>`;
 }
 
-export function renderSheet(state: AppState, data: GuData | null, index: DataIndex | null, opts: SheetOptions = {}): string {
-  const monthSummary = index?.summary[state.month] ?? {};
-  let title: string;
-  let figures: Figure[];
-  let notes: string[] = [];
-  let legend: string;
-  let dongs = "";
+export interface Summary {
+  title: string;
+  figures: Figure[];
+  notes: string[];
+  /** 고른 구의 데이터가 이 상태(월·구)와 맞을 때만 */
+  fresh: GuData | null;
+  /** 서울 전체 보기에서 쓰는 (구, 요약) 목록 */
+  entries: Array<[string, Stat]>;
+}
 
+/** 시트와 큰 화면(views/stage.ts)이 함께 쓰는 수치 요약. */
+export function summarize(state: AppState, data: GuData | null, index: DataIndex | null): Summary {
+  const monthSummary = index?.summary[state.month] ?? {};
   if (state.gu) {
     const fresh = data && data.month === state.month && data.gu === state.gu ? data : null;
     const stat = fresh?.total ?? monthSummary[state.gu] ?? null;
-    title = state.gu;
-    ({ figures, notes } = guFigures(stat));
+    const { figures, notes } = guFigures(stat);
     if (stat && stat.n === 0) notes.unshift(`${fmtMonth(state.month)}에는 신고된 매매 거래가 없습니다.`);
-    legend = fresh ? renderLegend("동별", state.metric, fresh.dongs.map((d) => statValue(d, state.metric))) : "";
-    dongs = fresh ? renderDongs(fresh, state.metric) : "";
-  } else {
-    const entries = (index?.gus ?? Object.keys(monthSummary))
-      .map((g): [string, Stat | undefined] => [g, monthSummary[g]])
-      .filter((e): e is [string, Stat] => e[1] !== undefined);
-    title = "서울 전체";
-    figures = overviewFigures(entries);
-    if (entries.length === 0) notes = [`${fmtMonth(state.month)} 자료가 없습니다.`];
-    legend = renderLegend("구별", state.metric, entries.map(([, s]) => statValue(s, state.metric)));
+    return { title: state.gu, figures, notes, fresh, entries: [] };
   }
+  const entries = (index?.gus ?? Object.keys(monthSummary))
+    .map((g): [string, Stat | undefined] => [g, monthSummary[g]])
+    .filter((e): e is [string, Stat] => e[1] !== undefined);
+  const notes = entries.length === 0 ? [`${fmtMonth(state.month)} 자료가 없습니다.`] : [];
+  return { title: "서울 전체", figures: overviewFigures(entries), notes, fresh: null, entries };
+}
+
+/** AI 해설 한 줄과 출처. 문장이 없으면 빈 문자열(영역을 숨긴다). */
+export function renderAiNote(state: AppState, narration: Narration | null | undefined, cls = "ai-note"): string {
+  const text = narrationText(narration, state.month, state.gu);
+  if (!text || !narration) return "";
+  return `<section class="${cls}" aria-label="AI 해설">` +
+    `<p class="ai-text"><span class="ai-label">AI 해설</span> ${esc(text)}</p>` +
+    `<p class="ai-meta">Bedrock · ${esc(modelLabel(narration.model))} · 자동 생성, 참고용</p>` +
+    `</section>`;
+}
+
+export function renderSheet(state: AppState, data: GuData | null, index: DataIndex | null, opts: SheetOptions = {}): string {
+  const { title, figures, notes, fresh, entries } = summarize(state, data, index);
+  const legend = state.gu
+    ? (fresh ? renderLegend("동별", state.metric, fresh.dongs.map((d) => statValue(d, state.metric))) : "")
+    : renderLegend("구별", state.metric, entries.map(([, s]) => statValue(s, state.metric)));
+  const dongs = fresh ? renderDongs(fresh, state.metric) : "";
 
   return `<section class="sheet" aria-label="고른 지역의 실거래 요약">` +
     `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +
     `<p class="sheet-month">${esc(fmtMonth(state.month))} 매매 실거래</p></div>${renderLive(state)}</header>` +
     (opts.tuningNote ? `<p class="sheet-tuning">${esc(opts.tuningNote)}</p>` : "") +
     renderFigures(figures) +
+    renderAiNote(state, opts.narration) +
     dongs +
     (notes.length ? `<p class="sheet-note">${notes.map(esc).join(" ")}</p>` : "") +
     legend +

@@ -65,6 +65,13 @@ describe("isJobMessage", () => {
     }
   });
 
+  it("accepts the optional kind fetch or narration and rejects other kinds", () => {
+    expect(isJobMessage({ ...job, kind: "fetch" })).toBe(true);
+    expect(isJobMessage({ ...job, kind: "narration" })).toBe(true);
+    expect(isJobMessage({ ...job, kind: "poem" })).toBe(false);
+    expect(isJobMessage({ ...job, kind: 1 })).toBe(false);
+  });
+
   it("a state message is not a job message and vice versa", () => {
     expect(isJobMessage(good)).toBe(false);
     expect(isStateMessage(job)).toBe(false);

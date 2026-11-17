@@ -153,6 +153,39 @@ describe("renderSheet", () => {
     });
   });
 
+  describe("AI 해설", () => {
+    const narration = {
+      v: 1 as const, month: "202611", generatedAt: "", model: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      items: { "서울 전체": "11월 서울 매매 46건입니다.", 강남구: "강남구 11월: <b>압구정동</b>이 가장 높습니다." },
+    };
+
+    it("shows the selected gu's line with the attribution, escaped", () => {
+      const html = renderSheet(state(), gangnam, index, { narration });
+      expect(html).toContain('class="ai-note"');
+      expect(text(html)).toContain("AI 해설");
+      expect(text(html)).toContain("강남구 11월:");
+      expect(html).toContain("&lt;b&gt;압구정동&lt;/b&gt;");
+      expect(html).not.toContain("<b>압구정동</b>");
+      expect(text(html)).toContain("Bedrock · claude-haiku-4-5-20251001 · 자동 생성, 참고용");
+    });
+
+    it("uses the 서울 전체 line in the overview", () => {
+      expect(text(renderSheet(state({ gu: null }), null, index, { narration }))).toContain("11월 서울 매매 46건입니다.");
+    });
+
+    it("is placed under the numbers", () => {
+      const html = renderSheet(state(), gangnam, index, { narration });
+      expect(html.indexOf('class="figs"')).toBeLessThan(html.indexOf('class="ai-note"'));
+    });
+
+    it("hides the whole area when there is no narration, no item for the key, or another month", () => {
+      expect(renderSheet(state(), gangnam, index)).not.toContain("ai-note");
+      expect(renderSheet(state(), gangnam, index, { narration: null })).not.toContain("ai-note");
+      expect(renderSheet(state({ gu: "도봉구" }), null, index, { narration })).not.toContain("ai-note");
+      expect(renderSheet(state({ month: "202610" }), null, index, { narration })).not.toContain("ai-note");
+    });
+  });
+
   it("shows the AR tuning note under the header only when given", () => {
     const withNote = renderSheet(state(), gangnam, index, { tuningNote: "조정값 적용 중: cf=0.0001 <b>" });
     expect(withNote).toContain('class="sheet-tuning"');

@@ -191,7 +191,8 @@ export const mountArView: MountView = (root, ctx) => {
       pending = [s, d];
       if (running) drawCity(running.city, ctx.index, s, d);
     },
-    onSheet: (s, d) => sheet.render(s, d),
+    onSheet: (s, d, n) => sheet.render(s, d, n),
+    loadNarration: ctx.loadNarration,
   });
 
   startBtn.addEventListener("click", async () => {

@@ -1,7 +1,8 @@
 // 실시간 메시지 계약 (CONTRACTS 6절 상태, 10.4절 수집 진행).
 
 export interface StateMessage { v: 1; type: "state"; month: string; gu: string | null; metric: "price" | "count"; ts: number; }
-export interface JobMessage { v: 1; type: "job"; jobId: string; month: string; state: "running" | "done" | "error"; done: number; total: number; gu?: string; message?: string; ts: number; }
+/** kind(12.2): 없으면 월 수집. "narration"은 AI 해설 생성. */
+export interface JobMessage { v: 1; type: "job"; kind?: "fetch" | "narration"; jobId: string; month: string; state: "running" | "done" | "error"; done: number; total: number; gu?: string; message?: string; ts: number; }
 export type ConnStatus = "idle" | "connecting" | "open" | "error" | "closed";
 
 export interface RealtimeClient {
@@ -50,6 +51,7 @@ export function isJobMessage(x: unknown): x is JobMessage {
     typeof m.state === "string" && JOB_STATES.has(m.state) &&
     count(m.done) && count(m.total) &&
     optionalString(m.gu) && optionalString(m.message) &&
+    (m.kind === undefined || m.kind === "fetch" || m.kind === "narration") &&
     typeof m.ts === "number" && Number.isFinite(m.ts)
   );
 }

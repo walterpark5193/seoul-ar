@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute, routeQuery } from "./router";
+import { parseRoute, queryFor, routeQuery } from "./router";
+
+describe("queryFor", () => {
+  it("passes the hash query to the AR and 3D views only", () => {
+    expect(queryFor("ar", "cf=0.0001")).toBe("cf=0.0001");
+    expect(queryFor("3d", "stage=1")).toBe("stage=1");
+    expect(queryFor("host", "stage=1")).toBeUndefined();
+    expect(queryFor("landing", "x=1")).toBeUndefined();
+  });
+});
 
 describe("routeQuery", () => {
   it("returns the part after ? in the hash, or an empty string", () => {

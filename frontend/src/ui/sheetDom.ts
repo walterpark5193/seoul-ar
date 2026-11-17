@@ -1,11 +1,12 @@
 // 바텀시트 DOM 연결: renderSheet 결과를 꽂고, 버튼·선택을 local/follow 액션으로 바꾼다.
+import type { Narration } from "../data/narration";
 import type { DataIndex, GuData, Metric } from "../data/types";
 import type { AppState, Store } from "../state/store";
 import { replaceKeepingFocus } from "./patch";
 import { renderSheet, type SheetOptions } from "./sheet";
 
 export interface SheetHandle {
-  render(state: AppState, data: GuData | null): void;
+  render(state: AppState, data: GuData | null, narration?: Narration | null): void;
   destroy(): void;
 }
 
@@ -26,8 +27,8 @@ export function mountSheet(host: HTMLElement, store: Store, getIndex: () => Data
   host.addEventListener("change", onChange);
 
   return {
-    render(state, data) {
-      replaceKeepingFocus(host, renderSheet(state, data, getIndex(), opts));
+    render(state, data, narration) {
+      replaceKeepingFocus(host, renderSheet(state, data, getIndex(), { ...opts, narration }));
     },
     destroy() {
       host.removeEventListener("click", onClick);

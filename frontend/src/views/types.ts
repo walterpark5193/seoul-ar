@@ -2,6 +2,7 @@
 import type { ArSession, ArSessionOptions } from "../ar/session";
 import type { AppConfig } from "../config";
 import type { IndexSource } from "../data/indexSource";
+import type { Narration } from "../data/narration";
 import type { DataIndex, GuData } from "../data/types";
 import type { RealtimeClient } from "../realtime/types";
 import type { SeoulScene } from "../scene/seoulScene";
@@ -21,6 +22,8 @@ export interface ViewContext {
   config: AppConfig;
   realtime: RealtimeClient;
   loadGu(month: string, gu: string): Promise<GuData>;
+  /** 그 달의 AI 해설(없으면 null). 테스트 가짜 문맥에서는 생략할 수 있다. */
+  loadNarration?(month: string): Promise<Narration | null>;
   /** 뷰가 스스로 다른 화면으로 보낼 때(폴백). 기록을 바꿔치기한다. 일반 이동은 링크 href로 한다. */
   navigate(hash: string): void;
   toast(message: string): void;

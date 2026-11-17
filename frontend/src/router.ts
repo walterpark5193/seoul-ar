@@ -17,6 +17,11 @@ export function routeQuery(hash: string): string {
   return i < 0 ? "" : hash.slice(i + 1);
 }
 
+/** 해시 쿼리를 받을 뷰만 받는다: AR(조정 파라미터), 3D(stage=1 큰 화면 모드). */
+export function queryFor(route: Route, query: string): string | undefined {
+  return route === "ar" || route === "3d" ? query : undefined;
+}
+
 export function navigate(hash: string): void {
   if (location.hash === hash) return;
   location.hash = hash;

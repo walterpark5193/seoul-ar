@@ -2,13 +2,13 @@
 import "./app.css";
 import { loadConfig } from "./config";
 import { createIndexSource } from "./data/indexSource";
-import { loadGu, loadIndex, reloadIndex } from "./data/loader";
+import { forgetNarrations, loadGu, loadIndex, loadNarration, reloadIndex } from "./data/loader";
 import { loadGeo, westToEast } from "./geoSource";
 import { createAppSyncRealtime } from "./realtime/appsync";
 import { withFallback } from "./realtime/fallback";
 import { createMockRealtime } from "./realtime/mock";
 import type { RealtimeClient } from "./realtime/types";
-import { redirect, startRouter, type Route } from "./router";
+import { queryFor, redirect, startRouter, type Route } from "./router";
 import { createSeoulScene } from "./scene/seoulScene";
 import { bindRemote } from "./state/remote";
 import { createStore, initialStateFor } from "./state/store";
@@ -86,7 +86,12 @@ async function main(): Promise<void> {
 
   let route: Route = "landing";
   // 새 달을 가져오면(호스트) 또는 원격 상태가 모르는 달을 가리키면(뷰어) index를 no-store로 다시 읽는다.
-  const indexSource = createIndexSource(index, () => reloadIndex());
+  // index를 다시 읽으면 해설 캐시도 비운다(CONTRACTS 12.3).
+  const indexSource = createIndexSource(index, async () => {
+    const next = await reloadIndex();
+    forgetNarrations();
+    return next;
+  });
   bindRemote({
     realtime, store,
     index: () => indexSource.current,
@@ -103,6 +108,7 @@ async function main(): Promise<void> {
     config,
     realtime,
     loadGu: (month, gu) => loadGu(month, gu),
+    loadNarration: (month) => loadNarration(month),
     navigate: redirect,
     toast,
     createScene: () => createSeoulScene(geo, { reducedMotion }),
@@ -133,8 +139,7 @@ async function main(): Promise<void> {
       if (mine !== seq) return; // 기다리는 사이 다른 화면으로 이동했다
       root.innerHTML = "";
     }
-    // 해시 쿼리(조정 파라미터)는 AR 뷰에만 넘긴다.
-    ctx.query = next === "ar" ? query : undefined;
+    ctx.query = queryFor(next, query); // AR(조정값)과 3D(stage=1)만 쿼리를 받는다
     unmount = views[next](root, ctx);
   });
 }
