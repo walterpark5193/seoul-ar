@@ -1,0 +1,29 @@
+/* 투표 패널. 막대 세 줄과 큰 숫자. 카드 없음. */
+.vote-panel { padding: 16px 48px; font-family: var(--font); color: var(--ink); }
+.vote-top { display: flex; align-items: baseline; gap: 24px; min-height: 56px; }
+.vote-head { margin: 0; font-size: 32px; font-weight: 600; }
+.vote-timer { margin-left: auto; font-size: 28px; font-weight: 700; color: var(--amber); font-variant-numeric: tabular-nums; }
+.vote-warn { margin: 0 0 0 auto; font-size: 22px; color: var(--alert); }
+.vote-confirm { margin-left: auto; min-height: var(--tap); padding: 0 24px; font: 700 22px var(--font); color: var(--night); background: var(--amber); border: 0; border-radius: var(--r-btn); cursor: pointer; }
+.vote-top .vote-timer + .vote-confirm { margin-left: 0; }
+
+.vote-row { display: grid; grid-template-columns: 140px minmax(160px, 1fr) 90px 80px auto; align-items: center; gap: 20px; padding: 10px 0; opacity: 0.8; }
+.vote-row.is-now, .vote-row.is-review { opacity: 1; }
+.vote-row.is-future { opacity: 0.55; }
+.vote-row.is-review .vote-gu { color: var(--amber); }
+.vote-gu { font-size: 32px; font-weight: 700; }
+.vote-bar { height: 22px; background: var(--night-raise); border-radius: 11px; overflow: hidden; }
+.vote-fill { display: block; height: 100%; background: var(--ramp-2); }
+.vote-row.is-now .vote-fill { background: var(--ramp-3); }
+.vote-count { font-size: 36px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vote-src { font-size: 18px; color: var(--ink-2); }
+.vote-btns { display: flex; gap: 8px; }
+.vote-n { min-width: var(--tap); min-height: var(--tap); font: 600 22px var(--font); color: var(--ink); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--r-ctl); cursor: pointer; }
+.vote-n[aria-pressed="true"] { color: var(--night); background: var(--amber); border-color: var(--amber); }
+.vote-n:disabled { opacity: 0.35; cursor: default; }
+
+.vote-foot { display: flex; align-items: center; gap: 12px; justify-content: flex-end; padding-top: 12px; font-size: 20px; color: var(--ink-2); }
+.vote-method { min-height: var(--tap); padding: 0 20px; font: 600 20px var(--font); color: var(--ink); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--r-ctl); cursor: pointer; }
+.vote-method[aria-pressed="true"] { color: var(--night); background: var(--ink); border-color: var(--ink); }
+.vote-key { font-size: 18px; }
+.vote-n:focus-visible, .vote-method:focus-visible, .vote-confirm:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
