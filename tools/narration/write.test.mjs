@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPrompt, extractText, speechFromCaption, parseScript, allowedNumbers, validateScript, fallbackScript, writeScripts,
+  planWrite, mergeScripts, parseArgs, parseOnly,
 } from "./write.mjs";
 
 const facts = {
   gu: "강남구", month: "202611", n: 25, cancelled: 2, medPerM2: 2890, rankPrice: 1,
-  maxAmt: 526000, topDong: "압구정동", topDongMedPerM2: 3500, topDongBasis: "min3", totalGus: 25,
+  maxAmt: 526000, topDong: "압구정동", topDongMedPerM2: 3500, topDongBasis: "min3", topDongIsMax: true, totalGus: 25,
 };
 const good = { caption: "강남구는 2026년 11월 거래가 25건이었습니다. ㎡당 중위 2,890만 원으로 25개 구 중 1위입니다.", speech: "강남구는 이천이십육 년 십일 월 거래가 스물다섯 건이었습니다. 제곱미터당 이천팔백구십만 원입니다." };
 const zero = { ...facts, n: 0, cancelled: 0, medPerM2: null, rankPrice: null, maxAmt: null, topDong: null, topDongMedPerM2: null, topDongBasis: null };
@@ -111,6 +112,11 @@ describe("buildPrompt", () => {
     expect(p).toContain('{"caption"');
     expect(p).toContain("90자");
   });
+  it("순위·최상급 규칙을 알려 준다", () => {
+    const p = buildPrompt(facts);
+    expect(p).toContain("1위일 때만");
+    expect(p).toContain("25위일 때만");
+  });
   it("min3이면 3건 이상 단서를 요구한다", () => {
     const p = buildPrompt(facts);
     expect(p).toContain("거래 3건 이상인 동 가운데");
@@ -161,5 +167,115 @@ describe("writeScripts", () => {
     await writeScripts(list, { client, retries: 0 });
     expect(max).toBeLessThanOrEqual(4);
     expect(max).toBeGreaterThan(1);
+  });
+});
+
+describe("validateScript 의미 검사", () => {
+  const ok = (f, caption) => validateScript(f, { caption });
+  it("N위는 rankPrice와 같아야 한다", () => {
+    expect(ok(facts, "강남구는 25개 구 중 1위입니다. 거래는 25건입니다.").ok).toBe(true);
+    const r = ok({ ...facts, cancelled: 3 }, "강남구는 25개 구 중 3위입니다. 거래는 25건입니다.");
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("3위");
+  });
+  it("구에 대한 최상급(가장 비싼·높)은 1위일 때만, 가장 낮·싼은 꼴찌일 때만", () => {
+    expect(ok(facts, "강남구는 서울에서 가장 비쌉니다. 거래는 25건입니다.").ok).toBe(true);
+    expect(ok({ ...facts, rankPrice: 17 }, "강남구는 서울에서 가장 비쌉니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok({ ...facts, rankPrice: 2 }, "강남구는 ㎡당 중위 2,890만 원으로 가장 높습니다.").ok).toBe(false);
+    expect(ok({ ...facts, rankPrice: 2 }, "강남구는 25개 구 중 가장 싼 편입니다.").ok).toBe(false);
+    expect(ok({ ...facts, rankPrice: 25 }, "강남구는 ㎡당 중위 2,890만 원으로 가장 낮습니다.").ok).toBe(true);
+  });
+  it("동에 대한 최상급은 3건 이상 단서가 있거나 그 동이 구 전체 최대일 때만", () => {
+    const noClue = "강남구는 25건이 거래됐습니다. 압구정동이 ㎡당 중위 3,500만 원으로 가장 높았습니다.";
+    const clue = "강남구는 25건이 거래됐습니다. 3건 이상 거래된 동 중 압구정동이 ㎡당 중위 3,500만 원으로 가장 높았습니다.";
+    expect(ok(facts, noClue).ok).toBe(true);
+    const r = ok({ ...facts, topDongIsMax: false }, noClue);
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("압구정동");
+    expect(ok({ ...facts, topDongIsMax: false }, clue).ok).toBe(true);
+  });
+  it("사실표의 동이 아닌 동에 최상급·금액을 붙이면 거절", () => {
+    expect(ok(facts, "3건 이상 거래된 동 중 대치동이 가장 높았습니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok(facts, "대치동은 ㎡당 중위 3,500만 원입니다. 거래는 25건입니다.").ok).toBe(false);
+  });
+  it("동에 대한 가장 낮·싼, 건수 최상급(가장 많·적)은 사실표에 없어 거절", () => {
+    expect(ok(facts, "압구정동이 가장 쌌습니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok(facts, "강남구는 거래가 가장 많았습니다. 모두 25건입니다.").ok).toBe(false);
+  });
+  it("억 숫자는 maxAmt/10000(소수 첫째)과만", () => {
+    expect(ok(facts, "최고 거래가는 52.6억 원이었습니다. 거래는 25건입니다.").ok).toBe(true);
+    const r = ok(facts, "최고 거래가는 25억 원이었습니다. 거래는 25건입니다.");
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("25억");
+    expect(ok({ ...facts, maxAmt: 250000 }, "최고 거래가는 25억 원이었습니다. 거래는 25건입니다.").ok).toBe(true);
+  });
+  it("건 숫자는 거래 n, 취소 문맥이면 cancelled와만", () => {
+    expect(ok(facts, "거래 25건, 취소 2건이었습니다.").ok).toBe(true);
+    expect(ok(facts, "강남구 거래는 25건, 취소는 2건이었습니다.").ok).toBe(true);
+    expect(ok(facts, "취소 2건을 빼고 25건이 거래됐습니다.").ok).toBe(true);
+    expect(ok(facts, "강남구는 2건이 거래됐습니다.").ok).toBe(false);
+    expect(ok(facts, "거래 25건, 취소 25건이었습니다.").ok).toBe(false);
+  });
+  it("3건 이상 단서는 min3일 때만 건 숫자 예외", () => {
+    expect(ok(facts, "3건 이상 거래된 동 중 압구정동이 가장 높습니다. 거래는 25건입니다.").ok).toBe(true);
+    expect(ok({ ...thin, n: 3 }, "3건 이상 거래된 동이 없었습니다. 거래는 3건입니다.").ok).toBe(true);
+    expect(ok(thin, "3건 이상 거래된 동이 없었습니다. 거래는 25건입니다.").ok).toBe(false);
+  });
+  it("만 원 숫자는 동 문맥이면 topDongMedPerM2, 아니면 medPerM2·maxAmt", () => {
+    expect(ok(facts, "강남구는 ㎡당 중위 3,500만 원입니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok(facts, "3건 이상 거래된 동 중 압구정동이 ㎡당 중위 2,890만 원으로 가장 높습니다.").ok).toBe(false);
+    expect(ok(facts, "강남구는 ㎡당 중위 2,890만 원, 3건 이상 거래된 동 중 압구정동은 3,500만 원으로 가장 높습니다.").ok).toBe(true);
+  });
+  it("N개 구는 totalGus와만", () => {
+    expect(ok({ ...facts, n: 17 }, "강남구는 17개 구 중 1위입니다. 거래는 17건입니다.").ok).toBe(false);
+  });
+});
+
+describe("planWrite / mergeScripts", () => {
+  const list = [facts, { ...facts, gu: "서초구" }, { ...facts, gu: "송파구" }];
+  const existing = { v: 1, month: "202611", items: {
+    "gu-202611-강남구": { caption: "사람 문장", speech: "사람 문장", source: "edited" },
+    "gu-202611-서초구": { caption: "옛 문장", speech: "옛 문장", source: "bedrock" },
+  } };
+  it("edited 항목은 --force 없이는 다시 쓰지 않는다", () => {
+    const p = planWrite(list, existing);
+    expect(p.targets.map((f) => f.gu)).toEqual(["서초구", "송파구"]);
+    expect(p.keptEdited).toEqual(["gu-202611-강남구"]);
+    expect(planWrite(list, existing, { force: true }).targets.map((f) => f.gu)).toEqual(["강남구", "서초구", "송파구"]);
+  });
+  it("--only는 고른 구만 다시 쓴다(edited 보호는 그대로)", () => {
+    expect(planWrite(list, existing, { only: ["서초구"] }).targets.map((f) => f.gu)).toEqual(["서초구"]);
+    const p = planWrite(list, existing, { only: ["강남구"] });
+    expect(p.targets).toEqual([]);
+    expect(p.keptEdited).toEqual(["gu-202611-강남구"]);
+    expect(planWrite(list, existing, { only: ["강남구"], force: true }).targets.map((f) => f.gu)).toEqual(["강남구"]);
+  });
+  it("기존 파일이 없으면 전부", () => {
+    expect(planWrite(list, null).targets).toHaveLength(3);
+  });
+  it("mergeScripts는 기존 항목을 남기고 새 항목만 덮되 edited는 force일 때만", () => {
+    const gen = {
+      "gu-202611-강남구": { caption: "새", speech: "새", source: "bedrock" },
+      "gu-202611-송파구": { caption: "새2", speech: "새2", source: "bedrock" },
+    };
+    const m = mergeScripts(existing, gen);
+    expect(m.items["gu-202611-강남구"].source).toBe("edited");
+    expect(m.items["gu-202611-서초구"].caption).toBe("옛 문장");
+    expect(m.items["gu-202611-송파구"].caption).toBe("새2");
+    expect(m.kept).toEqual(["gu-202611-강남구"]);
+    expect(mergeScripts(existing, gen, { force: true }).items["gu-202611-강남구"].caption).toBe("새");
+    expect(mergeScripts(null, gen).items).toEqual(gen);
+  });
+});
+
+describe("CLI 인자", () => {
+  it("--force는 값 없는 플래그, 나머지는 값", () => {
+    expect(parseArgs(["--force", "--only", "강남구,서초구", "--month", "202611"])).toEqual({ force: true, only: "강남구,서초구", month: "202611" });
+    expect(parseArgs(["--month", "202611", "--force"])).toEqual({ month: "202611", force: true });
+  });
+  it("parseOnly는 GU_ORDER 이름만 받는다", () => {
+    expect(parseOnly("강남구, 서초구")).toEqual(["강남구", "서초구"]);
+    expect(() => parseOnly("강남구,없는구")).toThrow(/없는구/);
+    expect(parseOnly(undefined)).toBe(null);
   });
 });

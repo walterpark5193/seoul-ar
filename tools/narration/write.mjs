@@ -1,7 +1,9 @@
-// 구 해설 문장 쓰기: Bedrock Converse로 사실표에서 {caption, speech}를 만들고 검증한다.
-// 실패하면 재시도하고, 그래도 안 되면 템플릿 문장으로 대체한다.
+// 구 해설 문장 쓰기: Bedrock Converse가 사실표로 caption만 쓰고, speech는 caption에서 유도한다.
+// validateScript가 숫자·최상급의 뜻까지 사실표와 맞춰 보고, 실패하면 재시도, 그래도 안 되면 템플릿 문장으로 대체한다.
+// CLI는 기존 scripts.json과 병합한다: source "edited"(사람이 고친 문장)는 --force 없이는 덮지 않고, --only로 일부 구만 다시 쓴다.
 import { pathToFileURL } from "node:url";
 import { TOP_DONG_MIN_N } from "./facts.mjs";
+import { GU_ORDER } from "../data/gu.mjs";
 
 export const MODEL_ID = "global.anthropic.claude-sonnet-5-5";
 export const MAX_CAPTION = 90;
@@ -51,6 +53,7 @@ export function buildPrompt(facts) {
     `- caption은 자막 한 개만 씁니다. 자막용이며 공백 포함 ${MAX_CAPTION}자 이내입니다. 숫자는 아라비아 숫자로 쓰고 금액은 "2,890만 원", "52.6억 원"처럼 씁니다.`,
     "- 사실표에 있는 숫자만 사용합니다. 계산해서 새 숫자를 만들거나 다른 달·다른 구와 비교하는 숫자를 쓰지 않습니다.",
     "- 아파트 이름(단지명), 건물명, 지번, 본번, 부번은 쓰지 않습니다.",
+    `- 순위는 사실표의 순위만 씁니다. 구를 "가장 비싸다·높다"고 하는 것은 1위일 때만, "가장 낮다·싸다"는 ${facts.totalGus}위일 때만 씁니다. 거래 건수로 "가장 많다·적다"고 쓰지 않습니다.`,
     dongSpeakable(facts)
       ? `- 동을 말할 때는 "거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데"라는 단서를 반드시 붙입니다. 거래가 적은 동 중에 더 비싼 곳이 있을 수 있으므로 이 단서 없이 어떤 동이 "가장 높다"고 쓰지 않습니다.`
       : "- 동 이름은 쓰지 않습니다. 이번 달에는 대표로 말할 만큼 거래가 많은 동이 없습니다.",
@@ -120,6 +123,97 @@ export function allowedNumbers(facts) {
   return set;
 }
 
+// ---- 의미 검사(설계 5.6, 최종 리뷰 C-I3) ----
+// 숫자는 "허용 집합에 있다"만으로는 부족하다(중구 취소 1건 → "1위" 통과 같은 구멍). 단위·문맥별로 맞는 사실과만 비교한다.
+const SUPERLATIVE = /(가장|제일)\s*(비싸|비싼|비쌉|비쌌|높|낮|싸|싼|쌉|쌌|저렴|많|적)/g;
+const HIGH = /^(비싸|비싼|비쌉|비쌌|높)/;
+const COUNT_SUP = /^(많|적)/;
+const PARTICLE_AFTER_DONG = "(?=[이가은는을를의에도와과로으만]|[^가-힣]|$)";
+const DONG_TOKEN = new RegExp(`[가-힣]+동(?:\\d+가)?${PARTICLE_AFTER_DONG}`, "g");
+const GU_NAMES = [...GU_ORDER].sort((a, b) => b.length - a.length);
+const num = (t) => Number(String(t).replaceAll(",", ""));
+
+// 문장 단위로 나눈다. 숫자 사이 점(27.5)은 문장 끝이 아니다.
+function sentences(text) {
+  const out = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (/[.!?]/.test(text[i]) && !/\d/.test(text[i + 1] ?? "")) { out.push({ start, text: text.slice(start, i + 1) }); start = i + 1; }
+  }
+  if (start < text.length) out.push({ start, text: text.slice(start) });
+  return out;
+}
+
+// 문장 속 이름(구·동)의 위치. 구 이름을 가린 뒤 "…동", "…동N가"를 동으로 본다.
+function entities(sentence) {
+  const list = [];
+  let masked = sentence;
+  for (const gu of GU_NAMES) {
+    let at = masked.indexOf(gu);
+    while (at >= 0) {
+      list.push({ kind: "gu", name: gu, at });
+      masked = masked.slice(0, at) + "#".repeat(gu.length) + masked.slice(at + gu.length);
+      at = masked.indexOf(gu, at + gu.length);
+    }
+  }
+  for (const m of masked.matchAll(DONG_TOKEN)) list.push({ kind: "dong", name: m[0], at: m.index });
+  return list.sort((a, b) => a.at - b.at);
+}
+// pos 앞에서 가장 가까운 이름(없으면 구 자신으로 본다).
+const subjectAt = (ents, pos) => ents.filter((e) => e.at < pos).at(-1) ?? { kind: "gu", name: null };
+
+function semanticErrors(facts, caption) {
+  const errors = [];
+  const speakable = dongSpeakable(facts);
+  const clue = new RegExp(`${TOP_DONG_MIN_N}건\\s*이상`);
+  const dongOk = (name) => speakable && name === facts.topDong;
+  for (const sen of sentences(caption)) {
+    const t = sen.text;
+    const ents = entities(t);
+    for (const m of t.matchAll(/(?<![\d.,])(\d+)\s*위/g)) {
+      if (facts.rankPrice == null || num(m[1]) !== facts.rankPrice) errors.push(`순위가 사실과 다름: ${m[1]}위(실제 ${facts.rankPrice ?? "없음"})`);
+    }
+    for (const m of t.matchAll(/(?<![\d.,])(\d+)\s*개\s*구/g)) {
+      if (num(m[1]) !== facts.totalGus) errors.push(`구 개수가 사실과 다름: ${m[1]}개 구`);
+    }
+    for (const m of t.matchAll(/(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*억/g)) {
+      if (facts.maxAmt == null || num(m[1]) !== Number(eok(facts.maxAmt))) errors.push(`억 금액이 최고 거래가와 다름: ${m[1]}억(실제 ${facts.maxAmt == null ? "없음" : eok(facts.maxAmt)}억)`);
+    }
+    let from = 0;
+    for (const m of t.matchAll(/(?<![\d.,])(\d[\d,]*)\s*건(\s*이상)?/g)) {
+      const v = num(m[1]);
+      const before = t.slice(Math.max(from, t.lastIndexOf(",", m.index) + 1), m.index);
+      from = m.index + m[0].length;
+      if (m[2] && speakable && v === TOP_DONG_MIN_N) continue; // "3건 이상 거래된 동" 단서
+      if (before.includes("취소")) { if (v !== facts.cancelled) errors.push(`취소 건수가 사실과 다름: ${m[1]}건`); }
+      else if (v !== facts.n) errors.push(`거래 건수가 사실과 다름: ${m[1]}건`);
+    }
+    for (const m of t.matchAll(/(?<![\d.,])(\d[\d,]*)\s*만\s*원/g)) {
+      const v = num(m[1]);
+      const who = subjectAt(ents, m.index);
+      if (who.kind === "dong") {
+        if (!dongOk(who.name)) errors.push(`사실표에 없는 동의 금액: ${who.name}`);
+        else if (v !== Math.round(facts.topDongMedPerM2)) errors.push(`${who.name}의 금액이 사실과 다름: ${m[1]}만 원`);
+      } else if (v !== Math.round(facts.medPerM2 ?? NaN) && v !== Math.round(facts.maxAmt ?? NaN)) {
+        errors.push(`구 금액이 사실과 다름: ${m[1]}만 원`);
+      }
+    }
+    for (const m of t.matchAll(SUPERLATIVE)) {
+      const word = m[2];
+      const who = subjectAt(ents, m.index);
+      if (COUNT_SUP.test(word)) { errors.push(`사실표에 없는 건수 비교: ${m[0]}`); continue; }
+      if (who.kind === "dong") {
+        if (!HIGH.test(word)) errors.push(`사실표에 없는 동 비교: ${who.name} ${m[0]}`);
+        else if (!dongOk(who.name)) errors.push(`사실표에 없는 동의 최상급: ${who.name}`);
+        else if (!clue.test(t) && facts.topDongIsMax !== true) errors.push(`동 최상급에 "${TOP_DONG_MIN_N}건 이상" 단서 필요: ${who.name}(거래가 적은 동 중에 더 비싼 곳이 있음)`);
+      } else if (HIGH.test(word) ? facts.rankPrice !== 1 : facts.rankPrice !== facts.totalGus) {
+        errors.push(`구 최상급이 순위와 다름: ${m[0]}(실제 ${facts.rankPrice ?? "없음"}위)`);
+      }
+    }
+  }
+  return errors;
+}
+
 export function validateScript(facts, script) {
   const errors = [];
   if (!script || typeof script.caption !== "string") {
@@ -146,6 +240,7 @@ export function validateScript(facts, script) {
     if (!allowed.has(t)) errors.push(`사실표에 없는 숫자: ${t}`);
   }
   if (facts.n === 0 && !/거래가 없었/.test(caption)) errors.push("거래가 없는 구인데 없었다는 취지가 아닙니다");
+  errors.push(...semanticErrors(facts, caption));
   return { ok: errors.length === 0, errors };
 }
 
@@ -220,13 +315,50 @@ export async function writeScripts(factsList, { client, modelId = MODEL_ID, retr
   return { items, failures };
 }
 
+// ---- 기존 scripts.json과 병합 ----
+// 다시 쓸 사실표만 고른다. edited 항목은 force일 때만, only가 있으면 그 구만.
+export function planWrite(factsList, existing, { force = false, only = null } = {}) {
+  const prev = existing?.items ?? {};
+  const pick = only ? new Set(only) : null;
+  const targets = [], keptEdited = [];
+  for (const f of factsList) {
+    if (pick && !pick.has(f.gu)) continue;
+    const id = gu_id(f);
+    if (!force && prev[id]?.source === "edited") { keptEdited.push(id); continue; }
+    targets.push(f);
+  }
+  return { targets, keptEdited };
+}
+
+// 기존 항목은 남기고 새로 쓴 항목만 덮는다. edited는 force일 때만 덮는다(planWrite가 이미 거르지만 한 번 더 막는다).
+export function mergeScripts(existing, generated, { force = false } = {}) {
+  const items = { ...(existing?.items ?? {}) };
+  const kept = [];
+  for (const [id, item] of Object.entries(generated)) {
+    if (!force && items[id]?.source === "edited") { kept.push(id); continue; }
+    items[id] = item;
+  }
+  return { items, kept };
+}
+
 // ---- CLI ----
-function parseArgs(argv) {
+const FLAGS = new Set(["force"]);
+export function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith("--")) o[argv[i].slice(2)] = argv[++i];
+    if (!argv[i].startsWith("--")) continue;
+    const key = argv[i].slice(2);
+    o[key] = FLAGS.has(key) ? true : argv[++i];
   }
   return o;
+}
+
+export function parseOnly(value) {
+  if (value == null) return null;
+  const names = String(value).split(",").map((s) => s.trim()).filter(Boolean);
+  const unknown = names.filter((n) => !GU_ORDER.includes(n));
+  if (unknown.length) throw new Error(`--only에 모르는 구: ${unknown.join(", ")}`);
+  return names;
 }
 
 async function main() {
@@ -245,11 +377,34 @@ async function main() {
     } catch { /* 없는 구는 buildFacts가 n 0으로 처리 */ }
   }
   const factsList = buildFacts(index, guDataByName, month);
+  const force = args.force === true;
+  let only;
+  try { only = parseOnly(args.only); } catch (e) { console.error(`[write] ${e.message}`); process.exit(1); }
+  let existing = null;
+  try {
+    existing = JSON.parse(await readFile(out, "utf8"));
+  } catch (e) {
+    if (e?.code !== "ENOENT" && !force) {
+      console.error(`[write] 기존 ${out}를 읽을 수 없습니다(${e.message}). 사람이 고친 문장을 지킬 수 없으니 중단합니다. 새로 쓰려면 --force.`);
+      process.exit(1);
+    }
+  }
+  const { targets, keptEdited } = planWrite(factsList, existing, { force, only });
+  const factsById = Object.fromEntries(factsList.map((f) => [gu_id(f), f]));
+  for (const id of keptEdited) {
+    const v = validateScript(factsById[id], existing.items[id]);
+    console.error(`[write] ${id}: 사람이 고친 문장(edited)이라 그대로 둡니다(--force로 덮어쓰기).${v.ok ? "" : ` 경고: 현재 사실표와 맞지 않음 — ${v.errors.join("; ")}`}`);
+  }
+  if (!targets.length) {
+    console.log("다시 쓸 항목이 없습니다. 파일을 바꾸지 않았습니다.");
+    return;
+  }
   const { BedrockRuntimeClient } = await import("@aws-sdk/client-bedrock-runtime");
   const client = new BedrockRuntimeClient({ region: "us-east-1" });
-  const { items, failures } = await writeScripts(factsList, { client, log: (m) => console.error(m) });
+  const { items: generated, failures } = await writeScripts(targets, { client, log: (m) => console.error(m) });
+  const { items } = mergeScripts(existing, generated, { force });
   await writeFile(out, JSON.stringify({ v: 1, month, modelId: MODEL_ID, items }, null, 2) + "\n");
-  console.log(`${Object.keys(items).length}개 작성, 템플릿 대체 ${failures.length}개${failures.length ? `: ${failures.join(", ")}` : ""}`);
+  console.log(`${targets.length}개 다시 씀(전체 ${Object.keys(items).length}개), edited 유지 ${keptEdited.length}개, 템플릿 대체 ${failures.length}개${failures.length ? `: ${failures.join(", ")}` : ""}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

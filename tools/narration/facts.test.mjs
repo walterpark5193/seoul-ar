@@ -94,4 +94,21 @@ describe("buildFacts", () => {
     expect(by["서초구"]).toMatchObject({ topDong: "방배동", topDongBasis: "min3" });
     for (const f of facts) expect(["min3", "maxN", null]).toContain(f.topDongBasis);
   });
+
+  it("topDongIsMax: 고른 동이 구 전체(거래 1건 동 포함) ㎡당 중위 최대인지", () => {
+    const { index } = load();
+    const mk = (dongs) => buildFacts(index, { 강남구: { total: { n: 20, cancelled: 0, medPerM2: 1000, maxAmt: 2 }, dongs } }, MONTH).find((x) => x.gu === "강남구");
+    expect(mk([{ name: "비싼동", n: 2, medPerM2: 9000 }, { name: "표본동", n: 3, medPerM2: 1200 }]).topDongIsMax).toBe(false);
+    expect(mk([{ name: "싼동", n: 1, medPerM2: 900 }, { name: "표본동", n: 3, medPerM2: 1200 }]).topDongIsMax).toBe(true);
+    expect(mk([{ name: "가동", n: 1, medPerM2: 9000 }, { name: "나동", n: 2, medPerM2: 500 }]).topDongIsMax).toBe(false);
+    expect(mk([]).topDongIsMax).toBe(false);
+  });
+
+  it("실데이터: 서초구는 잠원동(1건)이 더 비싸 false, 성동구 성수동1가는 true", () => {
+    const { index, byName } = load();
+    const by = Object.fromEntries(buildFacts(index, byName, MONTH).map((f) => [f.gu, f]));
+    expect(by["서초구"].topDongIsMax).toBe(false);
+    expect(by["성동구"]).toMatchObject({ topDong: "성수동1가", topDongIsMax: true });
+    for (const f of Object.values(by)) expect(typeof f.topDongIsMax).toBe("boolean");
+  });
 });

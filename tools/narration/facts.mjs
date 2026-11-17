@@ -7,15 +7,22 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 // "maxN": 그런 동이 없어 거래가 가장 많은 동을 고름(대표값이 아니므로 해설에 이름을 쓰지 않는다). null: 동 없음.
 export const TOP_DONG_MIN_N = 3;
 
+// topDongIsMax: 고른 동의 ㎡당 중위가 거래 건수와 상관없이 구의 모든 동 가운데 최대인가(같으면 최대로 본다).
+// 참이면 "3건 이상" 단서 없이 "가장 높다"고 말해도 참이다(validateScript가 쓴다).
 function pickTopDong(dongs) {
   const list = Array.isArray(dongs) ? dongs : [];
-  const strong = list.filter((d) => d && d.n >= TOP_DONG_MIN_N && num(d.medPerM2) !== null);
+  const priced = list.filter((d) => d && d.n > 0 && num(d.medPerM2) !== null);
+  const isMax = (d) => num(d.medPerM2) !== null && priced.every((o) => o.medPerM2 <= d.medPerM2);
+  const strong = priced.filter((d) => d.n >= TOP_DONG_MIN_N);
   if (strong.length) {
     const best = strong.reduce((a, b) => (b.medPerM2 > a.medPerM2 ? b : a));
-    return { dong: best, basis: "min3" };
+    return { dong: best, basis: "min3", isMax: isMax(best) };
   }
   const withN = list.filter((d) => d && d.n > 0);
-  if (withN.length) return { dong: withN.reduce((a, b) => (b.n > a.n ? b : a)), basis: "maxN" };
+  if (withN.length) {
+    const most = withN.reduce((a, b) => (b.n > a.n ? b : a));
+    return { dong: most, basis: "maxN", isMax: isMax(most) };
+  }
   return null;
 }
 
@@ -37,6 +44,7 @@ export function buildFacts(index, guDataByName, month) {
       topDong: top ? top.dong.name : null,
       topDongMedPerM2: top ? num(top.dong.medPerM2) : null,
       topDongBasis: top ? top.basis : null,
+      topDongIsMax: top ? top.isMax : false,
       totalGus: 25,
     };
   });
