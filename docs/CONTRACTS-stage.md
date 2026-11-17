@@ -455,7 +455,7 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 ### 13.4 무대 상태 (`stageState`·`effects`)
 - `grab`: 투표 진행 중·lifted면 지금처럼 무시. `spinning`이면 → spinning=false, rotate="one", 효과 rotate.catch 후 rotate.grabOne(hover와 무관, 들지 않음). 아니면 hover가 있으면 지금처럼 lift, hover가 없고 mode "map"이면 rotate="one" + rotate.grabOne, spread면 무시.
 - `release`: rotate "one"이면 rotate="none" + rotate.release(lift 경로 없음). 아니면 지금처럼.
-- `twoFist`: mode "map", lifted 없음, 투표 진행 중 아님 → rotate="two" + rotate.grabTwo(one이었으면 전환). 그 외 무시.
+- `twoFist`: mode "map", 투표 진행 중 아님 → rotate="two" + rotate.grabTwo(one이었으면 전환). lifted 중이면(같은 프레임의 grab 포함) 들기를 취소(lifted=null, focus 변화 없음)하고 회전을 시작한다 — 두 주먹 = 돌리기 우선. 그 외 무시. 이후 주먹을 놓아도 focus가 되지 않는다.
 - `twoFistEnd`: rotate "two"면 rotate="none" + rotate.release.
 - `spinState`: spinning 갱신(stageView가 회전기 모드 변화 때 보냄).
 - spread로 들어갈 때, victory, voteStart, setInput 변경 → rotate="none", spinning=false, 효과 rotate.reset. (spread·victory는 기존 효과와 함께, 순서는 scene.layout 앞.)
