@@ -31,9 +31,11 @@ export function drawSkeleton(ctx: Ctx2DLike, frame: HandFrame, w: number, h: num
   for (const hand of frame.hands) {
     const lm = hand.landmarks;
     for (const [a, b] of HAND_CONNECTIONS) {
+      const pa = lm[a], pb = lm[b];
+      if (!pa || !pb) continue;
       ctx.beginPath();
-      ctx.moveTo(px(lm[a][0]), lm[a][1] * h);
-      ctx.lineTo(px(lm[b][0]), lm[b][1] * h);
+      ctx.moveTo(px(pa[0]), pa[1] * h);
+      ctx.lineTo(px(pb[0]), pb[1] * h);
       ctx.stroke();
     }
     for (const p of lm) {

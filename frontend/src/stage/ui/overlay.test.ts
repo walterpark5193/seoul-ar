@@ -39,7 +39,7 @@ describe("overlay", () => {
     drawSkeleton(ctx, { t: 0, hands: [hand(0.2), hand(0.6)] } as HandFrame, 200, 100, false);
     expect(calls.filter((c) => c.op === "lineTo")).toHaveLength(42);
     expect(calls.filter((c) => c.op === "arc")).toHaveLength(42);
-    expect(calls[0].op).toBe("clearRect");
+    expect(calls[0]!.op).toBe("clearRect");
   });
   it("drawSkeleton mirror flips x", () => {
     const a = fakeCtx(), b = fakeCtx();
