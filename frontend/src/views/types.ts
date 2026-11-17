@@ -3,6 +3,7 @@ import type { ArSession, ArSessionOptions } from "../ar/session";
 import type { AppConfig } from "../config";
 import type { DataIndex, GuData } from "../data/types";
 import type { RealtimeClient } from "../realtime/types";
+import type { StageChannel } from "../stage/net/stageChannel";
 import type { SeoulScene } from "../scene/seoulScene";
 import type { Store } from "../state/store";
 
@@ -16,6 +17,8 @@ export interface ViewContext {
   index: DataIndex;
   config: AppConfig;
   realtime: RealtimeClient;
+  /** 무대 채널 /seoul/stage (CONTRACTS-stage 9절). main.ts가 makeStageChannel로 만든다. */
+  stageChannel: StageChannel;
   loadGu(month: string, gu: string): Promise<GuData>;
   /** 뷰가 스스로 다른 화면으로 보낼 때(폴백). 기록을 바꿔치기한다. 일반 이동은 링크 href로 한다. */
   navigate(hash: string): void;
