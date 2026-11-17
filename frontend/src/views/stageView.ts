@@ -26,7 +26,7 @@ import {
   VOTE_MAX, VOTE_TIMING, type Effect, type GestureEvent, type GestureOutput, type HandFrame, type HandObs, type InputMode, type Point, type StageEvent, type StageMode, type StageState,
 } from "../stage/types";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
-import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
+import { cursorClass, drawSkeleton, nextPreviewMode, previewVisible, renderDiag, type PreviewMode } from "../stage/ui/overlay";
 import { renderVotePanel } from "../stage/ui/votePanel";
 import { fmtMonth } from "../ui/format";
 import type { MountView, ViewContext } from "./types";
@@ -109,7 +109,8 @@ export function voteTiming(candidates: readonly [string, string, string], clipMs
 
 /**
  * 한글 입력 상태에서는 V가 "ㅍ"로, Windows 한국어 IME에서는 "Process"로 들어온다.
- * 그럴 때는 물리 키(code)로 바꾼다: 글자 키는 영문 소문자, 숫자 키는 숫자, 스페이스는 " ".
+ * 그럴 때는 물리 키(code)로 바꾼다: 글자 키는 영문 소문자, 숫자 키는 숫자, 스페이스는 " ",
+ * Esc·Enter(숫자판 포함)·화살표는 그 이름 그대로(M-5).
  */
 export function normalizeKey(key: string, code: string | undefined): string {
   if (!code || !(key === "Process" || /^[ㄱ-ㅣ]$/.test(key))) return key;
@@ -118,6 +119,9 @@ export function normalizeKey(key: string, code: string | undefined): string {
   const digit = /^Digit([0-9])$/.exec(code);
   if (digit) return digit[1]!;
   if (code === "Space") return " ";
+  if (code === "Escape") return "Escape";
+  if (code === "Enter" || code === "NumpadEnter") return "Enter";
+  if (/^Arrow(Left|Right|Up|Down)$/.test(code)) return code;
   return key;
 }
 
@@ -128,12 +132,13 @@ export function wheelPixels(deltaY: number, deltaMode = 0): number {
 
 /**
  * 이벤트의 클라이언트 좌표 → 무대 화면 좌표(요소 기준 0..1). attachPointer의 pointermove와 같은 환산이다
- * (마우스 좌표는 거울 보정하지 않는다: 거울은 손 영상에만). 요소 크기가 0이면 null.
+ * (마우스 좌표는 거울 보정하지 않는다: 거울은 손 영상에만). 좌표가 수가 아니거나 요소 크기가 0이면 null.
  */
 export function stagePoint(
   el: { getBoundingClientRect(): { left: number; top: number; width: number; height: number } },
   e: { clientX: number; clientY: number },
 ): Point | null {
+  if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return null;
   const r = el.getBoundingClientRect();
   if (!r.width || !r.height) return null;
   return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
@@ -213,6 +218,8 @@ export interface StageControllerDeps {
   rotator?: Rotator;
   /** 움직임 줄이기: 정면 복귀(rotate.reset)를 보간 없이 즉시. */
   reducedMotion?: boolean;
+  /** 안내 줄을 처음에 보일지(기본 true). 좁은 화면(폰)은 false로 시작하고 H로 켠다(Task 14). */
+  hintsDefault?: boolean;
 }
 
 export interface KeyLike { key: string; code?: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; }
@@ -269,7 +276,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let modelReady = true;
   const failed = { state: false, stage: false };
   let reviewRow = 0;
-  let hintsOn = true;
+  let hintsOn = deps.hintsDefault ?? true;
   let diagOn = false;
   let preview: PreviewMode = "video";
   let source: HandSource | null = null;
@@ -707,7 +714,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     deps.toast(message);
   }
   function toggleInput(): void {
-    if (state.input === "hands") { dispatch({ type: "setInput", input: "mouse", now: clock.now() }); return; }
+    if (state.input === "hands") {
+      // G로 마우스로 가면 카메라와 인식기를 끈다(M-4). 다시 G를 누르면 acquireHands가 새로 켠다.
+      detach();
+      gestures.reset();
+      dispatch({ type: "setInput", input: "mouse", now: clock.now() });
+      renderCursor();
+      return;
+    }
     if (source) useHands();
     else void acquireHands();
   }
@@ -756,7 +770,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     syncVisibility(); // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
     if (!renderer) frameTick(VOTE_TICK_MS / 1000);
     const now = clock.now();
-    if (source && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
+    // 손 모드일 때만: 마우스 모드에서 "마우스로 바꿨습니다"를 띄우지 않는다(M-4).
+    if (source && state.input === "hands" && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
     else if (source && state.input === "hands" && now - frameAt > HAND_STALL_MS) fallbackToMouse(HAND_STALL_TOAST);
     if (state.vote) dispatch({ type: "voteTick", now, cameraCount: counter.result() });
     renderVote();
@@ -765,11 +780,21 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   const heartbeat = () => { publishState(); publishStage(); };
 
   /** 렌더 루프 한 번: 관성·정면 복귀를 진행하고 도시 group과 카메라 거리·옆 이동에 적용, 관성 변화를 알리고 큰 화면에 보낸다. */
+  let lastYaw = 0;
+  let lastZoom = 1;
+  let lastPanX = 0;
   function frameTick(dt: number): void {
     const v = rotator.tick(dt);
     scene.group.rotation.y = v.yaw;
     renderer?.setZoom(v.zoom);
     renderer?.setPan(v.panX);
+    // 마우스를 가만히 둔 채 지도가 돌거나(관성·정면 복귀) 확대·옆 이동되면(펼친 화면의 가리키는 곳 기준 휠, 13.8),
+    // 같은 자리 아래 구가 바뀐다. 그 자리에서 다시 고른다(M-1).
+    const moved = v.yaw !== lastYaw || v.zoom !== lastZoom || v.panX !== lastPanX;
+    lastYaw = v.yaw;
+    lastZoom = v.zoom;
+    lastPanX = v.panX;
+    if (moved && phase === "running" && state.input === "mouse" && mousePoint && state.rotate === "none") hoverTo(pickAt(mousePoint));
     syncSpin();
     publishView();
   }
@@ -806,8 +831,10 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       else rotator.move(p, clock.now());
     },
     // 누르기는 지금의 grab 길: 구 위면 들기, 빈 지도면 돌리기, 관성 중이면 잡기(리듀서 13.4).
-    down() {
+    // p: 누른 자리. 터치는 누르기 전에 pointermove가 없을 수 있어, 그 자리로 먼저 옮긴 뒤 잡는다(손가락 아래 구를 들게).
+    down(p) {
       if (phase !== "running") return;
+      if (p) pointer.move(p);
       retryUnlock();
       mouseDown = true;
       dispatch({ type: "grab" }, "mouse");
@@ -916,6 +943,18 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
 // ---------- DOM 껍데기 ----------
 
+/** 폰처럼 좁은 화면(Task 14): 안내 줄은 숨긴 채 시작한다(H로 켬). */
+function narrowScreen(): boolean {
+  try { return window.matchMedia("(max-width: 699px)").matches; } catch { return false; }
+}
+
+/** 미리보기 video에 살아 있는 카메라 영상이 붙어 있나. */
+function streamLive(video: HTMLVideoElement | null): boolean {
+  const s = video?.srcObject;
+  if (!s || typeof (s as MediaStream).getVideoTracks !== "function") return false;
+  return (s as MediaStream).getVideoTracks().some((t) => t.readyState === "live");
+}
+
 const PARTS: readonly UiPart[] = ["top", "hints", "caption", "vote", "live", "diag", "start"];
 
 const LAYOUT = `<div class="stage-view">` +
@@ -953,7 +992,11 @@ function domUi(root: HTMLElement) {
   // 미리보기 상자를 실제 카메라 비율에 맞춘다(1280×720 요청을 못 지킨 4:3 웹캠에서도 골격이 영상과 맞게).
   let fitted: HTMLVideoElement | null = null;
   const fit = () => {
-    if (fitted && fitted.videoWidth > 0 && fitted.videoHeight > 0) previewEl.style.aspectRatio = `${fitted.videoWidth} / ${fitted.videoHeight}`;
+    if (fitted && fitted.videoWidth > 0 && fitted.videoHeight > 0) {
+      previewEl.style.aspectRatio = `${fitted.videoWidth} / ${fitted.videoHeight}`;
+      // 높이가 화면의 25%를 넘지 않게 stage.css가 폭을 이 비율로 줄인다(세로 영상인 폰 전면 카메라 대비).
+      viewEl.style.setProperty("--preview-ar", (fitted.videoWidth / fitted.videoHeight).toFixed(4));
+    }
   };
 
   // 투표 패널 버튼을 누르는 사이(pointerdown~click)에 패널이 바뀌면 click이 사라진다. 누르는 동안에는 미뤄 둔다.
@@ -1012,7 +1055,7 @@ function domUi(root: HTMLElement) {
         video?.addEventListener("loadedmetadata", fit);
         fit();
       }
-      const visible = mode !== "hidden" && video !== null;
+      const visible = previewVisible({ mode, hasVideo: video !== null, streamLive: streamLive(video) });
       previewEl.classList.toggle("is-hidden", !visible);
       previewEl.classList.toggle("is-skeleton", mode === "skeleton");
       viewEl.classList.toggle("has-preview", visible); // 아래 띠(자막·안내)가 오른쪽 미리보기 칸을 비운다
@@ -1112,6 +1155,7 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
       },
       onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
       reducedMotion: ctx.reducedMotion,
+      hintsDefault: !narrowScreen(),
     });
     undo.push(() => controller.dispose());
 

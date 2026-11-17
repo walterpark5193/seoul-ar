@@ -7,6 +7,14 @@ export type PreviewMode = "video" | "skeleton" | "hidden";
 const NEXT: Record<PreviewMode, PreviewMode> = { video: "skeleton", skeleton: "hidden", hidden: "video" };
 export function nextPreviewMode(m: PreviewMode): PreviewMode { return NEXT[m]; }
 
+/**
+ * 미리보기를 보일지(Task 14). 살아 있는 카메라 영상이 없으면(마우스 모드에서 카메라가 꺼짐 등) 보여 줄 것이 없다.
+ * 숨길 때도 video는 렌더 트리에 남긴다(overlay.css .is-hidden: 1px·투명). 여기서는 보임 여부만 정한다.
+ */
+export function previewVisible(o: { mode: PreviewMode; hasVideo: boolean; streamLive: boolean }): boolean {
+  return o.mode !== "hidden" && o.hasVideo && o.streamLive;
+}
+
 /** MediaPipe 손 21점 연결(손바닥 + 다섯 손가락). */
 export const HAND_CONNECTIONS: readonly [number, number][] = [
   [0, 1], [1, 2], [2, 3], [3, 4],

@@ -309,6 +309,16 @@ describe("normalizeKey", () => {
     expect(normalizeKey(" ", "Space")).toBe(" ");
     expect(normalizeKey("ㅍ", undefined)).toBe("ㅍ");
   });
+  it("M-5: also maps Escape, Enter and the arrows under the IME (Task 15)", () => {
+    expect(normalizeKey("Process", "Escape")).toBe("Escape");
+    expect(normalizeKey("Process", "Enter")).toBe("Enter");
+    expect(normalizeKey("Process", "NumpadEnter")).toBe("Enter");
+    expect(normalizeKey("Process", "ArrowLeft")).toBe("ArrowLeft");
+    expect(normalizeKey("Process", "ArrowRight")).toBe("ArrowRight");
+    expect(normalizeKey("Process", "ArrowUp")).toBe("ArrowUp");
+    expect(normalizeKey("Process", "ArrowDown")).toBe("ArrowDown");
+    expect(normalizeKey("Process", "F5")).toBe("Process");
+  });
   it("maps the Windows IME \"Process\" key back to the physical key", () => {
     expect(normalizeKey("Process", "KeyG")).toBe("g");
     expect(normalizeKey("Process", "KeyV")).toBe("v");
@@ -1019,6 +1029,54 @@ describe("stage controller", () => {
     expect(s.c.state.vote).toBeNull();
     expect(s.key("Process", { code: "KeyV" })).toBe(true); // Windows 한국어 IME
     expect(s.c.state.vote?.round).toBe(2);
+  });
+
+  it("a touch press with no pointermove before it lifts the gu under the finger (Task 14)", async () => {
+    const s = setup({ pick: (x) => (x > 0 ? "강남구" : null) });
+    await s.c.start("mouse");
+    s.c.pointer.down({ x: 0.75, y: 0.25 });
+    expect(s.scene.pick).toHaveBeenLastCalledWith(0.5, 0.5, s.renderer.camera);
+    expect(s.c.state.lifted).toBe("강남구");
+    s.c.pointer.up();
+    expect(s.c.state.focus).toBe("강남구");
+  });
+
+  it("a narrow screen starts with the hints line hidden; H still shows it (Task 14)", async () => {
+    const s = setup({ extra: { hintsDefault: false } });
+    await s.c.start("mouse");
+    expect(s.view.parts.hints ?? null).toBeNull();
+    s.key("h");
+    expect(s.view.parts.hints).toContain("누르고 있기");
+  });
+
+  it("M-1: the hover follows the map moving under a still mouse (zoom/spin), not only mouse moves (Task 15)", async () => {
+    let under: string | null = "강남구";
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    expect(s.c.state.hover).toBe("강남구");
+    under = "서초구"; // 지도가 움직이면 같은 자리 아래 구가 바뀐다
+    s.render();
+    expect(s.c.state.hover).toBe("강남구"); // 지도가 그대로면 다시 고르지 않는다
+    s.c.pointer.wheel(-100);
+    s.render();
+    expect(s.c.state.hover).toBe("서초구");
+  });
+
+  it("M-4: G to mouse turns the camera off and the error fallback cannot toast in mouse mode; G again restarts hands (Task 15)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    expect(s.c.state.input).toBe("hands");
+    s.key("g");
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.src.source.stop).toHaveBeenCalled();
+    s.src.source.errors = 999;
+    s.clock.advance(VOTE_TICK_MS * 4);
+    expect(s.toast.mock.calls.some(([m]) => String(m).includes("손 인식이 계속 실패"))).toBe(false);
+    const starts = s.startHands.mock.calls.length;
+    s.key("g");
+    await flush();
+    expect(s.startHands.mock.calls.length).toBe(starts + 1);
   });
 
   it("ui keys toggle hints, diag, preview and mute", async () => {
@@ -1898,11 +1956,26 @@ describe("rotate and zoom (CONTRACTS-stage 13)", () => {
     expect(s.pan()).toBe(0);
   });
 
+  it("merge: spread wheel zoom/pan under a still mouse re-picks the hover there (13.8 + M-1)", async () => {
+    let under: string | null = "종로구";
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    enterSpread(s);
+    s.c.pointer.move({ x: 0.05, y: 0.5 });
+    expect(s.c.state.hover).toBe("종로구");
+    under = "중구"; // 확대·옆 이동하면 같은 자리 아래 막대가 바뀐다
+    s.c.pointer.wheel(-100, 0, { x: 0.05, y: 0.5 });
+    s.render();
+    expect(s.pan()).toBeCloseTo(-0.9 + 0.9 / 1.1, 9);
+    expect(s.c.state.hover).toBe("중구");
+  });
+
   it("stagePoint maps a wheel event like the pointer path (element-relative 0..1, no mirror for the mouse)", () => {
     const el = { getBoundingClientRect: () => ({ left: 100, top: 50, width: 800, height: 400 }) };
     expect(stagePoint(el, { clientX: 140, clientY: 250 })).toEqual({ x: 0.05, y: 0.5 });
     expect(stagePoint(el, { clientX: 900, clientY: 50 })).toEqual({ x: 1, y: 0 });
     expect(stagePoint({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }) }, { clientX: 1, clientY: 1 })).toBeNull();
+    expect(stagePoint(el, { clientX: Number.NaN, clientY: 250 })).toBeNull(); // attachPointer의 pointOf처럼
   });
 
   it("a grab during the reset finishes the reset first", async () => {
