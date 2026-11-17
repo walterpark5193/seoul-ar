@@ -1,5 +1,6 @@
 // #/3d: 같은 씬을 손가락으로 돌려 본다. 천천히 자동 회전(reduced-motion이면 멈춤), 바텀시트.
 // #/3d?stage=1: 큰 화면 모드(CONTRACTS 13). 같은 씬·같은 라이브 따라가기지만 따라가기 고정, 직접 조작 없음,
+// 무대가 살아 있는 동안은 자동 회전을 멈추고 정면에서 무대의 회전·확대를 그대로 보인다(CONTRACTS-stage 13.6),
 // 바텀시트 대신 왼쪽 위 큰 제목·수치·AI 해설(views/stage.ts), 오른쪽 아래 관객용 QR, 잠시 움직임이 없으면 커서를 숨긴다.
 import { PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -28,27 +29,77 @@ export const VIEW_FOLLOW_RATE = 8;
 
 interface ViewTarget { rotation: { y: number }; scale: { setScalar(n: number): unknown } }
 
+const TWO_PI = 2 * Math.PI;
+/** (-π, π] 근처로 감싼다(가까운 쪽 각도 차이). */
+const wrapAngle = (a: number) => a - TWO_PI * Math.round(a / TWO_PI);
+
+export interface ViewFollowerOptions {
+  /** 따라가는 속도(1/초). 기본 VIEW_FOLLOW_RATE. */
+  rate?: number;
+  /** 동작 줄이기: 보간 없이 다음 프레임에 목표 그대로. */
+  reducedMotion?: boolean;
+}
+
 /**
  * 무대가 보낸 yaw·zoom을 도시 group에 부드럽게 적용한다(CONTRACTS-stage 13.6).
  * enabled가 false(일반 관객 폰)면 set은 아무 일도 하지 않아 group은 그대로다.
+ * 새 목표 yaw는 직전 목표 기준으로 이어 붙인다(unwrap): 목표 사이가 180° 미만이면(5Hz 발행이면 900°/s 미만)
+ * 표시가 목표를 늦게 따라가는 중이라도 무대가 돈 방향 그대로 돈다(거꾸로 짧은 쪽으로 돌지 않는다).
  */
-export function createViewFollower(group: ViewTarget, enabled: boolean, rate = VIEW_FOLLOW_RATE) {
-  let yaw = 0, zoom = 1, tYaw = 0, tZoom = 1;
-  const wrap = (a: number) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+export function createViewFollower(group: ViewTarget, enabled: boolean, opts: ViewFollowerOptions = {}) {
+  const rate = opts.rate ?? VIEW_FOLLOW_RATE;
+  // tYaw는 받은 yaw를 이어 붙인 연속 각도, lastYaw는 마지막으로 받은 원래 값.
+  let yaw = 0, zoom = 1, tYaw = 0, tZoom = 1, lastYaw = 0;
   return {
     set(y: number, z: number): void {
       if (!enabled || !Number.isFinite(y) || !Number.isFinite(z)) return;
-      tYaw = y; tZoom = z;
+      tYaw += wrapAngle(y - lastYaw);
+      lastYaw = y;
+      tZoom = z;
     },
-    /** 한 프레임. 각도는 가까운 쪽으로 돈다(π 경계를 넘어도 한 바퀴 되감지 않는다). */
+    /** 한 프레임. 표시 yaw는 연속 목표를 그대로 따라간다(여기서는 감싸지 않는다). */
     step(dt: number): void {
       if (!enabled) return;
-      const k = 1 - Math.exp(-rate * Math.max(dt, 0));
-      const dy = wrap(tYaw - yaw);
+      const k = opts.reducedMotion ? 1 : 1 - Math.exp(-rate * Math.max(dt, 0));
+      const dy = tYaw - yaw;
       yaw = Math.abs(dy) < 1e-4 ? tYaw : yaw + dy * k;
       zoom = Math.abs(tZoom - zoom) < 1e-4 ? tZoom : zoom + (tZoom - zoom) * k;
+      // 여러 바퀴 돌아도 수가 커지지 않게 표시와 목표를 함께 한 바퀴 단위로 되접는다(보이는 각도는 같다).
+      const turns = TWO_PI * Math.round(yaw / TWO_PI);
+      if (turns !== 0) { yaw -= turns; tYaw -= turns; }
       group.rotation.y = yaw;
       group.scale.setScalar(zoom);
+    },
+  };
+}
+
+/** createStageOrbit가 쓰는 OrbitControls 부분. */
+interface OrbitLike {
+  autoRotate: boolean;
+  getAzimuthalAngle(): number;
+  rotateLeft(angle: number): void;
+}
+
+/**
+ * 큰 화면 카메라(CONTRACTS-stage 13.6). 무대 view를 따르는 동안(live: 최근 StageMessage가 살아 있는 동안) 자동 회전을 멈추고
+ * 카메라를 정면(방위 0, 무대 카메라와 같은 +z 쪽)으로 가까운 쪽으로 되돌려, 도시 각도가 무대 yaw 그대로 보이게 한다.
+ * 무대가 끊기면(stale) 자동 회전을 다시 켠다. reduced-motion이면 자동 회전은 늘 꺼져 있고 정면 복귀는 즉시다.
+ * rotateLeft가 바로 반영되도록 감쇠(enableDamping)를 끈 컨트롤에 쓴다(큰 화면은 직접 조작이 없어 감쇠가 필요 없다).
+ */
+export function createStageOrbit(controls: OrbitLike, reducedMotion: boolean, rate = VIEW_FOLLOW_RATE) {
+  let live = false;
+  return {
+    setLive(active: boolean): void {
+      live = active;
+      controls.autoRotate = !active && !reducedMotion;
+    },
+    /** 한 프레임(controls.update 뒤). 따르는 동안에만 남은 방위를 줄인다. */
+    step(dt: number): void {
+      if (!live) return;
+      const a = wrapAngle(controls.getAzimuthalAngle());
+      if (Math.abs(a) < 1e-6) return; // 이미 정면
+      const k = reducedMotion || Math.abs(a) < 1e-4 ? 1 : 1 - Math.exp(-rate * Math.max(dt, 0));
+      controls.rotateLeft(a * k);
     },
   };
 }
@@ -171,7 +222,8 @@ export const mountOrbitView: MountView = (root, ctx) => {
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 0.04, 0);
-  controls.enableDamping = true;
+  // 큰 화면은 직접 조작이 없어 감쇠가 쓸모없고, 정면 복귀(rotateLeft)가 바로 반영돼야 한다(createStageOrbit).
+  controls.enableDamping = !stageMode;
   controls.enablePan = false;
   controls.minDistance = 0.45;
   controls.maxDistance = 2.6;
@@ -199,7 +251,9 @@ export const mountOrbitView: MountView = (root, ctx) => {
   const city = ctx.createScene();
   world.add(city.group);
   // 무대의 회전·확대는 큰 화면만 따른다. 일반 관객 폰은 값을 받아도 무시한다.
-  const view = createViewFollower(city.group, stageMode);
+  const view = createViewFollower(city.group, stageMode, { reducedMotion: ctx.reducedMotion });
+  // 큰 화면은 무대가 살아 있는 동안 자동 회전을 멈추고 정면에서 무대 각도를 그대로 보인다(일반 #/3d는 없음).
+  const orbit = stageMode ? createStageOrbit(controls, ctx.reducedMotion) : null;
 
   // 정보 면(바텀시트나 큰 화면 패널)을 피해, 보이는 영역 가운데에 도시가 오도록 시야를 옮긴다.
   const resize = () => {
@@ -221,6 +275,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     const dt = Math.min(Math.max((t - last) / 1000, 0), 0.1);
     last = t;
     controls.update(dt);
+    orbit?.step(dt);
     view.step(dt);
     city.update(dt, camera);
     renderer.render(world, camera);
@@ -240,6 +295,8 @@ export const mountOrbitView: MountView = (root, ctx) => {
     onLift: (gu) => city.lift(gu),
     onVote: (text) => voteLine.show(text),
     onView: stageMode ? (yaw, zoom) => view.set(yaw, zoom) : undefined,
+    // StageMessage마다 true, 30초 무소식(stale)이면 false: 그동안 자동 회전을 멈춘다.
+    onStage: orbit ? (active) => orbit.setLive(active) : undefined,
   });
 
   return () => {
