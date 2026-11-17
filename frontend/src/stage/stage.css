@@ -2,7 +2,12 @@
    토큰은 app.css. 카드·반복 그림자·페이드인 없음. 본체 .stage(뷰어 캔버스)와 겹치지 않게 stage-view 아래 이름만 쓴다. */
 body[data-route="stage"] { overflow: hidden; overscroll-behavior: none; }
 
-.stage-view { position: fixed; inset: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--font); }
+.stage-view {
+  --preview-w: clamp(200px, 18vw, 320px);   /* 1280 폭 프로젝터에서 230px, 1920 폭에서 320px */
+  --diag-w: 220px;
+  --edge: 16px;
+  position: fixed; inset: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--font);
+}
 
 .stage-3d { position: absolute; inset: 0; }
 .stage-3d canvas { display: block; }
@@ -12,17 +17,23 @@ body[data-route="stage"] { overflow: hidden; overscroll-behavior: none; }
 .stage-ui button { pointer-events: auto; }
 .stage-top { background: linear-gradient(rgb(11 16 32 / 0.9), rgb(11 16 32 / 0)); }
 
-/* 투표: 상단 줄 아래 가로 띠(카드 아님). */
+/* 투표: 상단 줄 아래 가로 띠(카드 아님). 실시간 손 개수 줄도 같은 띠 바탕 위에 둬 amber 글자 대비를 지킨다
+   (#fbbf24 on 0.82 #0b1020: 아래가 가장 밝은 램프여도 약 8:1). */
 .stage-vote-host { background: rgb(11 16 32 / 0.82); border-block: 1px solid var(--line); }
-.stage-live-host { padding: 6px 48px 0; }
-.vote-live { margin: 0; font-size: 24px; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px var(--night); }
+.stage-live-host { padding: 8px 48px 10px; background: rgb(11 16 32 / 0.82); border-bottom: 1px solid var(--line); }
+.vote-live { margin: 0; font-size: 24px; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
 
+/* 아래 띠: 자막과 안내 줄. 미리보기(오른쪽 아래)·진단(왼쪽 아래)이 보이면 그 칸을 비워 자막이 깔리지 않게 한다.
+   1280 폭에서 미리보기만 켜면 자막 폭은 약 950px(40px 글자 약 23자/줄, 90자 자막이면 4줄 안). */
 .stage-bottom { margin-top: auto; padding-bottom: 6px; background: linear-gradient(rgb(11 16 32 / 0), rgb(11 16 32 / 0.85) 45%); }
-.stage-bottom .stage-hints { padding-right: 360px; } /* 오른쪽 아래 미리보기와 겹치지 않게 */
+.stage-view .stage-caption { padding-inline: 32px; }
+.stage-view.has-preview .stage-bottom { padding-right: calc(var(--preview-w) + 2 * var(--edge)); }
+.stage-view.has-diag .stage-bottom { padding-left: calc(var(--diag-w) + 2 * var(--edge)); }
 
-/* 카메라는 1280×720이라 미리보기도 16:9로 둔다(골격 canvas 좌표가 잘린 영상과 어긋나지 않게). */
-.stage-view .stage-preview { width: 320px; aspect-ratio: 16 / 9; bottom: 64px; z-index: 20; }
-.stage-view .stage-diag { bottom: 64px; z-index: 20; }
+/* 미리보기·진단은 보기만 한다: 포인터를 가로채면 마우스로 들고 있던 구가 그 위를 지날 때 떨어진다.
+   비율은 실제 카메라 영상 크기로 stageView가 맞춘다(기본 16:9). */
+.stage-view .stage-preview { width: var(--preview-w); aspect-ratio: 16 / 9; right: var(--edge); bottom: var(--edge); z-index: 20; pointer-events: none; }
+.stage-view .stage-diag { width: var(--diag-w); left: var(--edge); bottom: var(--edge); z-index: 20; pointer-events: none; }
 .stage-view .stage-fail { inset: 0; font-size: 22px; }
 
 /* 시작 화면은 3D 지도를 어둡게 덮는다. */

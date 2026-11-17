@@ -93,6 +93,8 @@ export interface StageClock { now(): number; every(ms: number, fn: () => void): 
 export interface StageControllerDeps {
   index: DataIndex;
   month: string;
+  /** 시작 지표(호스트에서 고른 값을 이어받는다). 없으면 "price". */
+  metric?: Metric;
   loadGu(month: string, gu: string): Promise<GuData>;
   realtime: Pick<RealtimeClient, "publish" | "status" | "onStatus">;
   stageChannel: Pick<StageChannel, "publish" | "status" | "onStatus">;
@@ -144,7 +146,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   const counter = deps.counter ?? createVoteCounter();
   const { scene, renderer, narrator, ui, index } = deps;
 
-  let state = initialStageState(deps.month, "mouse");
+  let state: StageState = { ...initialStageState(deps.month, "mouse"), metric: deps.metric ?? "price" };
   let phase: "idle" | "starting" | "running" | "disposed" = "idle";
   let modelReady = true;
   const failed = { state: false, stage: false };
@@ -310,7 +312,9 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     const p = out.primary === null ? undefined : f.hands[out.primary];
     gesture = p ? { name: p.gesture, score: p.score } : { name: "None", score: 0 };
     if (p) {
-      if (handLost) { cursor.reset(); handLost = false; } // 진짜로 놓쳤다가 다시 잡으면 필터를 새로 시작
+      // 진짜로 놓쳤다가 다시 잡으면 필터를 새로 시작한다. gestureMachine은 간격이 releaseAfterMs에 닿는 프레임에
+      // 곧바로 다른(가장 큰) 손을 주 손으로 잡으므로, 그 경우도 간격으로 판정한다.
+      if (handLost || (handSeenAt !== null && f.t - handSeenAt >= CURSOR_GAP_MS)) { cursor.reset(); handLost = false; }
       handPoint = cursor.map(p.landmarks, f.t);
       handSeenAt = f.t;
       hoverTo(pickAt(handPoint));
@@ -542,7 +546,13 @@ function domUi(root: HTMLElement) {
   const canvas = root.querySelector<HTMLCanvasElement>("[data-skeleton]")!;
   const ctx2d = canvas.getContext("2d");
   const cursorEl = root.querySelector<HTMLElement>("[data-cursor]")!;
+  const viewEl = root.querySelector<HTMLElement>(".stage-view")!;
   const voteEl = parts.vote;
+  // 미리보기 상자를 실제 카메라 비율에 맞춘다(1280×720 요청을 못 지킨 4:3 웹캠에서도 골격이 영상과 맞게).
+  let fitted: HTMLVideoElement | null = null;
+  const fit = () => {
+    if (fitted && fitted.videoWidth > 0 && fitted.videoHeight > 0) previewEl.style.aspectRatio = `${fitted.videoWidth} / ${fitted.videoHeight}`;
+  };
 
   // 투표 패널 버튼을 누르는 사이(pointerdown~click)에 패널이 바뀌면 click이 사라진다. 누르는 동안에는 미뤄 둔다.
   let held = false;
@@ -550,6 +560,7 @@ function domUi(root: HTMLElement) {
   const write = (part: UiPart, html: string | null) => {
     const el = parts[part];
     el.hidden = html === null;
+    if (part === "diag") viewEl.classList.toggle("has-diag", html !== null); // 아래 띠가 왼쪽 진단 칸을 비운다
     if (part !== "vote") { el.innerHTML = html ?? ""; return; }
     const active = document.activeElement;
     const key = active && el.contains(active) ? voteFocusKey(active) : null;
@@ -593,8 +604,16 @@ function domUi(root: HTMLElement) {
         video.setAttribute("aria-hidden", "true");
         previewEl.prepend(video);
       }
-      previewEl.classList.toggle("is-hidden", mode === "hidden" || !video);
+      if (video !== fitted) {
+        fitted?.removeEventListener("loadedmetadata", fit);
+        fitted = video;
+        video?.addEventListener("loadedmetadata", fit);
+        fit();
+      }
+      const visible = mode !== "hidden" && video !== null;
+      previewEl.classList.toggle("is-hidden", !visible);
       previewEl.classList.toggle("is-skeleton", mode === "skeleton");
+      viewEl.classList.toggle("has-preview", visible); // 아래 띠(자막·안내)가 오른쪽 미리보기 칸을 비운다
     },
     skeleton(frame) {
       if (!ctx2d) return;
@@ -606,6 +625,7 @@ function domUi(root: HTMLElement) {
     },
   };
   const dispose = () => {
+    fitted?.removeEventListener("loadedmetadata", fit);
     voteEl.removeEventListener("pointerdown", hold);
     window.removeEventListener("pointerup", unhold);
     window.removeEventListener("pointercancel", unhold);
@@ -628,73 +648,95 @@ function tryWebGL(): WebGLRenderer | null {
   }
 }
 
+function renderBuildError(root: HTMLElement): void {
+  root.innerHTML = `<main class="boot boot--fail"><h1>무대 화면을 준비하지 못했습니다</h1>` +
+    `<p>새로 고침하거나 발표자 화면으로 돌아가 주세요.</p>` +
+    `<button type="button" class="btn btn-primary" data-retry>다시 시도</button></main>`;
+  root.querySelector("[data-retry]")?.addEventListener("click", () => location.reload());
+}
+
+/**
+ * 무대 화면을 만든다. 만든 것마다 해제 함수를 쌓아 두고, 중간에 던지면 쌓인 것을 거꾸로 풀고 실패 문구를 그린다
+ * ("준비하는 중"에서 멈추거나 렌더 루프·WebGL 컨텍스트·카메라가 남지 않게).
+ */
 function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest | null): () => void {
-  root.innerHTML = LAYOUT;
-  const layer = root.querySelector<HTMLElement>("[data-3d]")!;
-  const dom = domUi(root);
+  const undo: (() => void)[] = [];
+  const teardown = () => {
+    for (const fn of undo.splice(0).reverse()) {
+      try { fn(); } catch (err) { console.warn("[stage] 해제 실패", err); }
+    }
+  };
+  try {
+    root.innerHTML = LAYOUT;
+    const layer = root.querySelector<HTMLElement>("[data-3d]")!;
+    const dom = domUi(root);
+    undo.push(dom.dispose);
 
-  // WebGLRenderer를 여기서 만들어 넘긴다: 떠날 때 forceContextLoss로 컨텍스트를 바로 반납하려고.
-  const gl = tryWebGL();
-  const renderer = gl ? createStageRenderer(layer, { reducedMotion: ctx.reducedMotion, makeRenderer: () => gl }) : null;
-  const city = ctx.createScene();
-  let offRender = () => {};
-  if (renderer) {
-    renderer.world.add(city.group); // 씬 group이 조명을 들고 있다
-    offRender = renderer.onFrame((dt) => city.update(dt, renderer.camera));
-  } else {
-    layer.innerHTML = `<p class="stage-fail">이 기기에서는 3D를 그릴 수 없습니다. 투표와 해설은 그대로 진행할 수 있습니다.</p>`;
+    // WebGLRenderer를 여기서 만들어 넘긴다: 떠날 때 forceContextLoss로 컨텍스트를 바로 반납하려고(orbitView와 같다).
+    const gl = tryWebGL();
+    if (gl) undo.push(() => gl.forceContextLoss());
+    const renderer = gl ? createStageRenderer(layer, { reducedMotion: ctx.reducedMotion, makeRenderer: () => gl }) : null;
+    if (renderer) undo.push(() => renderer.dispose());
+    const city = ctx.createScene();
+    undo.push(() => city.dispose());
+    if (renderer) {
+      renderer.world.add(city.group); // 씬 group이 조명을 들고 있다
+      undo.push(renderer.onFrame((dt) => city.update(dt, renderer.camera)));
+    } else {
+      layer.innerHTML = `<p class="stage-fail">이 기기에서는 3D를 그릴 수 없습니다. 투표와 해설은 그대로 진행할 수 있습니다.</p>`;
+    }
+
+    const narrator = createNarrator(manifest, { createAudio: () => new Audio() as unknown as AudioLike });
+    const { month, metric } = ctx.store.getState();
+    const controller = createStageController({
+      index: ctx.index,
+      month: month || (ctx.index.months.at(-1) ?? ""),
+      metric, // 호스트에서 고른 지표를 이어받아, 시작 발행이 관객 지표를 바꾸지 않게
+      loadGu: ctx.loadGu,
+      realtime: ctx.realtime,
+      stageChannel: ctx.stageChannel,
+      scene: city,
+      renderer,
+      narrator,
+      ui: dom.ui,
+      toast: ctx.toast,
+      startHands: () => startHandSource(),
+      hash: () => location.hash,
+      modelReady: modelOnServer,
+      onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
+    });
+    undo.push(() => controller.dispose());
+
+    const onStart = (ev: Event) => {
+      const btn = (ev.target as Element).closest<HTMLElement>("[data-start]");
+      if (btn) void controller.start(btn.dataset.start === "hands" ? "hands" : "mouse");
+    };
+    const onVote = (ev: Event) => {
+      const btn = (ev.target as Element).closest<HTMLButtonElement>("button");
+      if (!btn || btn.disabled) return;
+      controller.panel({ set: btn.dataset.voteSet ?? null, confirm: btn.hasAttribute("data-vote-confirm"), method: btn.dataset.voteMethod ?? null });
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      const tag = (ev.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (controller.key(ev)) ev.preventDefault();
+    };
+    dom.parts.start.addEventListener("click", onStart);
+    dom.parts.vote.addEventListener("click", onVote);
+    document.addEventListener("keydown", onKey);
+    undo.push(() => {
+      document.removeEventListener("keydown", onKey);
+      dom.parts.start.removeEventListener("click", onStart);
+      dom.parts.vote.removeEventListener("click", onVote);
+    });
+    undo.push(attachPointer(layer, controller.pointer));
+    return teardown;
+  } catch (err) {
+    console.error("[stage] 무대 화면을 만들지 못함", err);
+    teardown();
+    renderBuildError(root);
+    return () => {};
   }
-
-  const narrator = createNarrator(manifest, { createAudio: () => new Audio() as unknown as AudioLike });
-  const controller = createStageController({
-    index: ctx.index,
-    month: ctx.store.getState().month || (ctx.index.months.at(-1) ?? ""),
-    loadGu: ctx.loadGu,
-    realtime: ctx.realtime,
-    stageChannel: ctx.stageChannel,
-    scene: city,
-    renderer,
-    narrator,
-    ui: dom.ui,
-    toast: ctx.toast,
-    startHands: () => startHandSource(),
-    hash: () => location.hash,
-    modelReady: modelOnServer,
-    onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
-  });
-
-  const onStart = (ev: Event) => {
-    const btn = (ev.target as Element).closest<HTMLElement>("[data-start]");
-    if (btn) void controller.start(btn.dataset.start === "hands" ? "hands" : "mouse");
-  };
-  const onVote = (ev: Event) => {
-    const btn = (ev.target as Element).closest<HTMLButtonElement>("button");
-    if (!btn || btn.disabled) return;
-    controller.panel({ set: btn.dataset.voteSet ?? null, confirm: btn.hasAttribute("data-vote-confirm"), method: btn.dataset.voteMethod ?? null });
-  };
-  const onKey = (ev: KeyboardEvent) => {
-    const tag = (ev.target as HTMLElement | null)?.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-    if (controller.key(ev)) ev.preventDefault();
-  };
-  dom.parts.start.addEventListener("click", onStart);
-  dom.parts.vote.addEventListener("click", onVote);
-  document.addEventListener("keydown", onKey);
-  const offPointer = attachPointer(layer, controller.pointer);
-
-  return () => {
-    controller.dispose();
-    offPointer();
-    document.removeEventListener("keydown", onKey);
-    dom.parts.start.removeEventListener("click", onStart);
-    dom.parts.vote.removeEventListener("click", onVote);
-    dom.dispose();
-    offRender();
-    city.dispose();
-    renderer?.dispose();
-    // 화면을 여러 번 오가도 WebGL 컨텍스트 상한에 걸리지 않게 즉시 반납한다(orbitView와 같다).
-    gl?.forceContextLoss();
-  };
 }
 
 export const mountStageView: MountView = (root, ctx) => {

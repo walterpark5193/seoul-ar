@@ -4,6 +4,7 @@ import { GU_ORDER } from "../data/gu";
 import type { DataIndex, GuData, Stat } from "../data/types";
 import type { StateMessage } from "../realtime/types";
 import type { HandSource } from "../stage/hands/recognizer";
+import { createCursorMapper } from "../stage/hands/cursor";
 import { createVoteCounter } from "../stage/hands/voteCounter";
 import { ALLOWED_KEYS, type StageChannelMessage } from "../stage/net/messages";
 import { createMockStageChannel } from "../stage/net/stageChannel";
@@ -22,10 +23,10 @@ function stat(medPerM2: number | null, n = 10): Stat {
   return { n, cancelled: 0, medPerM2, medAmt: null, maxAmt: null, truncated: false };
 }
 
-/** GU_ORDER 순으로 비싸다: 1위 종로구, 13위 서대문구, 25위 강동구. */
+/** 가격은 GU_ORDER 순으로 비싸다(1위 종로구, 13위 서대문구, 25위 강동구). 건수는 거꾸로(1위 강동구). */
 function makeIndex(months: string[] = [MONTH]): DataIndex {
   const summary: DataIndex["summary"] = {};
-  for (const m of months) summary[m] = Object.fromEntries(GU_ORDER.map((g, i) => [g, stat(3000 - i * 50 + (m === MONTH ? 0 : 1))]));
+  for (const m of months) summary[m] = Object.fromEntries(GU_ORDER.map((g, i) => [g, stat(3000 - i * 50 + (m === MONTH ? 0 : 1), i + 1)]));
   return { v: 1, generatedAt: "", source: "", months, gus: [...GU_ORDER], summary };
 }
 
@@ -57,7 +58,8 @@ function fakeClock(start = 1_000_000) {
 
 type Wire = { channel: "state"; msg: StateMessage } | { channel: "stage"; msg: StageChannelMessage };
 
-/** 본체 채널: 모양·키를 검사하며 기록. 무대 채널: 실제 모의 채널(toWire 검사)을 쓰고 전달된 사본을 기록. */
+/** 본체 채널: 기록만 한다(검사는 테스트에서). 무대 채널: 실제 모의 채널(toWire 검사)을 쓰고 전달된 사본을 기록.
+ *  모의 채널이 거절한 메시지는 wire에 없고 publishFailed로 드러난다. */
 function channels() {
   const wire: Wire[] = [];
   const flags = { failStage: false, failState: false };
@@ -66,7 +68,6 @@ function channels() {
     onStatus: () => () => {},
     publish: vi.fn(async (m: StateMessage) => {
       if (flags.failState) throw new Error("state down");
-      expect(Object.keys(m).sort()).toEqual([...STATE_KEYS].sort());
       wire.push({ channel: "state", msg: JSON.parse(JSON.stringify(m)) as StateMessage });
     }),
   };
@@ -136,7 +137,7 @@ function hand(gesture: GestureName, cx = 0.5, cy = 0.5, score = 0.9): HandObs {
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function setup(o: { months?: string[]; hash?: string; start?: () => Promise<StartResult>; narrator?: Narrator; pick?: (x: number, y: number) => string | null } = {}) {
+function setup(o: { months?: string[]; hash?: string; start?: () => Promise<StartResult>; narrator?: Narrator; pick?: (x: number, y: number) => string | null; extra?: Partial<StageControllerDeps> } = {}) {
   const clock = fakeClock();
   const ch = channels();
   const scene = fakeScene(o.pick);
@@ -153,7 +154,7 @@ function setup(o: { months?: string[]; hash?: string; start?: () => Promise<Star
     index, month: index.months.at(-1)!, loadGu,
     realtime: ch.realtime, stageChannel: ch.stageChannel,
     scene, renderer, narrator: o.narrator ?? narr.narrator, ui: view.ui, toast,
-    startHands, hash: () => o.hash ?? "#/stage", clock,
+    startHands, hash: () => o.hash ?? "#/stage", clock, ...o.extra,
   };
   const c = createStageController(deps);
   let t = 5000;
@@ -273,7 +274,10 @@ describe("stage controller", () => {
     expect(s.c.state.vote?.phase).toBe("result");
     expect(s.c.state.vote?.counts).toEqual([2, 2, 2]);
     s.clock.advance(HEARTBEAT_MS);
+    await flush();
+    expect(s.c.publishFailed).toBe(false); // 모의 채널(toWire)이 거절한 메시지가 하나도 없다
     expect(s.wire.filter((w) => w.msg.type === "vote")).toHaveLength(1);
+    expect(s.wire.filter((w) => w.channel === "state").length).toBeGreaterThanOrEqual(4); // 시작·release·투표 확정·하트비트
     expect(s.wire.length).toBeGreaterThan(5);
     for (const w of s.wire) {
       const json = JSON.stringify(w.msg);
@@ -486,6 +490,67 @@ describe("stage controller", () => {
     s.frames(10, []); // 300ms를 넘기면 진짜로 놓침
     expect(s.c.state.hover).toBeNull();
     expect(s.view.cursors.at(-1)!.cls).toContain("is-hidden");
+  });
+
+  it("reacquiring a hand after a real loss resets the cursor filter", async () => {
+    const cursor = createCursorMapper();
+    const reset = vi.spyOn(cursor, "reset");
+    const s = setup({ extra: { cursor } });
+    await s.c.start("hands");
+    s.frames(3, [hand("Open_Palm", 0.3, 0.5)]);
+    const base = reset.mock.calls.length;
+    s.frames(12, []); // 300ms 넘게 없음 → 놓침
+    expect(reset.mock.calls.length).toBe(base);
+    s.frame([hand("Open_Palm", 0.3, 0.5)]);
+    expect(reset.mock.calls.length).toBe(base + 1);
+    s.frames(3, [hand("Open_Palm", 0.3, 0.5)]);
+    expect(reset.mock.calls.length).toBe(base + 1);
+  });
+
+  it("a different hand taking over at the 300ms boundary resets the cursor filter", async () => {
+    const cursor = createCursorMapper();
+    const reset = vi.spyOn(cursor, "reset");
+    const s = setup({ extra: { cursor } });
+    await s.c.start("hands");
+    s.frames(5, [hand("Open_Palm", 0.3, 0.5)]);
+    const base = reset.mock.calls.length;
+    s.frames(9, []); // 297ms: 아직 기억 중, 커서 유지
+    expect(s.view.cursors.at(-1)!.cls).not.toContain("is-hidden");
+    s.frame([hand("Open_Palm", 0.8, 0.5)]); // 330ms: gestureMachine이 먼 손을 바로 주 손으로 잡는다
+    expect(reset.mock.calls.length).toBe(base + 1);
+    // 필터를 새로 시작했으므로 커서는 옛 손에서 미끄러지지 않고 새 손 위치(거울·가장자리 매핑)에 바로 선다.
+    const p = s.view.cursors.at(-1)!.p!;
+    expect(p.x).toBeCloseTo(0.125, 6);
+    expect(p.y).toBeCloseTo(0.5, 6);
+  });
+
+  it("starts with the metric chosen on the host", async () => {
+    const s = setup({ extra: { metric: "count" } });
+    expect(s.scene.setOverview).toHaveBeenCalledWith(s.index.summary[MONTH], "count");
+    expect(s.view.parts.top).toContain("거래 건수");
+    await s.c.start("mouse");
+    expect(s.wire[0]!.msg).toMatchObject({ type: "state", metric: "count" });
+    s.key("v");
+    expect(s.c.state.vote?.candidates).toEqual(["강동구", "서대문구", "종로구"]); // 건수 1·13·25위
+  });
+
+  it("vote panel redraws only when its text changes, not on every tick or frame", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    s.key("v");
+    s.clock.advance(1500 + VOTE_TICK_MS);
+    expect(s.c.state.vote?.phase).toBe("counting");
+    const votes = () => s.view.ui.set.mock.calls.filter(([part]) => part === "vote").length;
+    const lives = () => s.view.ui.set.mock.calls.filter(([part]) => part === "live").length;
+    const v0 = votes();
+    const l0 = lives();
+    for (let i = 0; i < 16; i++) { // 4초 = 틱 16번, 그 사이 손 개수가 계속 바뀐다
+      s.frames(3, i % 2 ? [hand("Open_Palm", 0.3), hand("Open_Palm", 0.7)] : [hand("Open_Palm")]);
+      s.clock.advance(VOTE_TICK_MS);
+    }
+    expect(votes() - v0).toBe(4); // 남은 초가 바뀔 때만(초당 1번)
+    expect(lives() - l0).toBeGreaterThan(4); // 실시간 손 개수는 따로 갱신
+    expect(s.view.parts.live).toMatch(/카메라: 지금 [12]손/);
   });
 
   it("camera counting pushes every frame including zero hands", async () => {
