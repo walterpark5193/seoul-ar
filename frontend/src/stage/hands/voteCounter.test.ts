@@ -61,4 +61,55 @@ describe("voteCounter", () => {
     c.push(499, 3);
     expect(c.result()).toBeNull();
   });
+
+  describe("short dropouts do not split a segment", () => {
+    it("2 hands 400ms + one frame of 1 hand + 2 hands 400ms → 2", () => {
+      const c = createVoteCounter();
+      let t = hold(c, 0, 400, 2);
+      c.push(t, 1);
+      t += 33;
+      hold(c, t, 400, 2);
+      expect(c.result()).toBe(2);
+    });
+    it("a dropout of up to 120ms is bridged, the dropped value never counts", () => {
+      const c = createVoteCounter();
+      let t = hold(c, 0, 300, 2);
+      for (const dt of [0, 40, 80]) c.push(t + dt, 0); // 0손 3프레임, 2손이 120ms 뒤에 돌아온다
+      t += 120;
+      hold(c, t, 300, 2);
+      expect(c.result()).toBe(2);
+    });
+    it("review probe: 1 hand 600ms, then 2 hands for 4s with one frame dropped every 430ms → 2", () => {
+      const c = createVoteCounter();
+      let t = hold(c, 0, 600, 1);
+      const end = t + 4000;
+      let nextDrop = t + 430;
+      for (; t <= end; t += 33) {
+        if (t >= nextDrop) { c.push(t, 1); nextDrop += 430; } else c.push(t, 2);
+      }
+      expect(c.result()).toBe(2);
+    });
+    it("a change longer than 120ms still splits the segment", () => {
+      const c = createVoteCounter();
+      let t = hold(c, 0, 300, 2);
+      t = hold(c, t, 160, 1); // 1손이 160ms 넘게 이어진다
+      hold(c, t, 300, 2);
+      expect(c.result()).toBeNull(); // 어느 2손 구간도 500ms가 안 된다
+    });
+    it("a one-frame spike above the held value is not counted", () => {
+      const c = createVoteCounter();
+      let t = hold(c, 0, 400, 1);
+      c.push(t, 3);
+      t += 33;
+      hold(c, t, 400, 1);
+      expect(c.result()).toBe(1);
+    });
+    it("a frame gap longer than 120ms around the dropout splits the segment", () => {
+      const c = createVoteCounter();
+      const t = hold(c, 0, 400, 2);
+      c.push(t, 1);
+      hold(c, t + 200, 400, 2); // 다음 프레임이 200ms 뒤에 와서 끼어든 값이 얼마나 이어졌는지 모른다
+      expect(c.result()).toBeNull();
+    });
+  });
 });
