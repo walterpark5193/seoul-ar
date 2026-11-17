@@ -13,7 +13,7 @@
 - 순수 모듈은 DOM·three·MediaPipe를 import하지 않는다(테스트 가능성). DOM이 필요한 부분은 주입.
 - 화면 문자열은 한국어. 글꼴은 본체 `FONT_STACK`. ALL CAPS 금지.
 - 공유 타입은 `frontend/src/stage/types.ts`(컨트롤러가 미리 만듦, 작업자는 수정 금지, 1절 그대로).
-- 작업자는 `git add`/`git commit` 하지 않는다. 의존성 추가 금지(필요한 것은 컨트롤러가 미리 설치함: 프론트 `@mediapipe/tasks-vision@1.2.3`, 도구 `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-polly`).
+- 작업자는 `git add`/`git commit` 하지 않는다. 의존성 추가 금지(필요한 것은 컨트롤러가 미리 설치함: 프론트 `@mediapipe/tasks-vision@0.10.35`(최종 리뷰 후 고정, 11절), 도구 `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-polly`).
 
 ## 1. 공유 타입 (`frontend/src/stage/types.ts`)
 
@@ -385,3 +385,19 @@ export function voteLine(m: VoteMessage): string;                      // "투�
 ```
 - `orbitView.ts`: bindStageFollow 연결 → `city.setLayout(mode, index.summary[month], metric)`, `city.lift(gu)`, 바텀시트 위 한 줄 6초.
 - `arView.ts`: StageMessage를 처음 받으면 "무대 진행 중 · 3D로 따라가기" 배너(탭 → `ctx.navigate("#/3d")`), 투표 결과 한 줄은 같음.
+
+## 11. 최종 리뷰 수정 반영 (2026-11-17, fix wave)
+
+위 절과 다르면 이 절이 우선한다.
+
+- 의존성: `@mediapipe/tasks-vision`을 **0.10.35로 고정**. 1.x(1.0.0~1.2.3)는 `createFromOptions` 안에서 사용 통계 로거를 항상 만들고 60초마다 Google 엔드포인트로 POST하며 끄는 공개 API가 없다. 0.10.35에는 없다(mind-ar와 같은 tarball). nosimd wasm도 복사. `frontend/scripts/check-bundle.mjs`(postbuild)가 dist에 사용 통계 엔드포인트 문자열이 있으면 빌드를 실패시킨다.
+- 1절 타입: `VoteState.promptMs?: [n,n,n]`; `voteStart`에 `promptMs?: [n,n,n]`, `introMs?: number`; `Effect`에 `{ type: "narrate.stop" }`(재생 중·대기 중 해설을 모두 비움).
+- 3.1: voteStart의 endsAt = now + (introMs ?? 0) + promptMs[0]; 다음 후보 안내는 promptMs[index]. 각 값은 유한수만, 최소 1500, 없으면 VOTE_TIMING.promptMs. promptMs[i] = 안내 클립 ms + 300(stageView가 manifest ms로 계산, 없으면 글자 수 × 150).
+- 3.2: narrate.stop은 결과가 아닌 투표가 사라질 때(취소) 내고, 결과 진입 때는 vote-result 해설 앞에 낸다.
+- 2.2: 정지 가드 — 주먹을 쥔 상태에서 기억이 만료된 프레임이라도 마지막 추적 손목 TRACK_RADIUS 안의 손이 있으면 같은 손으로 본다. 2.3: 같은 값 구간 사이에 120ms 이하 다른 값이 끼면 잇는다(직전 값이 120ms 이상 이어진 경우만).
+- 5.1 narrator: `clipMs(id): number | null`, `onBlocked(cb)`, `readonly blocked`. 실패 자막 시간 = max(ms, 글자 수 × 150, 2500). unlock은 짧은 무음 data URI를 재생. manifest 항목에 `ms`(MP3 프레임 헤더로 계산)가 채워져 있다.
+- 5.3 도구: `tools/narration/mp3.mjs` `mp3DurationMs(bytes)`; synth `--backfill-ms`; write.mjs는 기존 scripts.json과 병합(`source: "edited"`는 `--force` 없이는 보존, `--only <구,...>`); validateScript 의미 검사("N위"=rankPrice, 구 최상급은 rankPrice 1일 때만, 동 최상급은 min3 단서 또는 `topDongIsMax`일 때만, "억"=maxAmt/10000, "건"=n·cancelled); facts에 `topDongIsMax`; 실린 scripts.json 회귀 테스트.
+- 7 렌더러: `spreadPoseFor(aspect)`, `mapPoseFor(aspect)`(SPREAD_FIT_ASPECT 2.0, MAP_FIT_ASPECT 4/3) — 1위·25위 기둥과 라벨이 16:9·16:10·4:3에서 NDC ±0.95 안. resize 때 다시 계산.
+- 4.2 채널: AppSync 구현에 본체 7f62e57의 재시도(gen 가드, 첫 연결 실패 후 3s→30s 백오프, close 뒤 늦게 열린 채널 닫기) 이식.
+- 9 stageView: `HAND_START_TIMEOUT_MS = 20000`(초과 시 마우스 모드, 준비 덮개에 "마우스로 계속"), `HAND_STALL_MS = 1500`(마지막 인식 프레임 후 초과 시 errors 폴백과 같은 경로: 마우스 모드 + 토스트 + 들고 있던 구 내려놓기; `deps.hidden?`로 페이지 숨김 중 일시 정지), `RESULT_GUARD_MS = 1500`(결과 진입 직후 손짓 무시), `normalizeKey`가 key "Process"·한글 자모를 code로, dispose 때 시작된 무대면 최종 `StageMessage {mode:"map", lifted:null}`, `SPREAD_METRIC = "price"`(펼치기 배치는 항상 ㎡당 가격), 기본 투표 후보는 지표와 무관하게 `defaultCandidates(summary, "price", GU_ORDER)`, 들어올릴 때·투표 시작 때 구 데이터 미리 받기.
+- 10 관객: `StageFollowOptions.onStage?(active)`, `STAGE_STALE_MS = 30000`(마지막 StageMessage 후 초과 시 map·lift null·AR 배너 숨김), `followLayout`/`SPREAD_METRIC`, 따라가는 중 재배치는 월 변경 때만(지표는 항상 price).

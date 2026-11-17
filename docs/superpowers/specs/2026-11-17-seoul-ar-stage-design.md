@@ -50,7 +50,7 @@
 - 본체 제약 전부 계승: us-east-1, 외부 CDN·폰트 금지, 데이터 규칙(만원·㎡·법정동까지), Bash 명령문에 URL 금지(세션 가드), 이 머신에 브라우저 없음.
 - 다른 세션이 main에서 본체 Task 1, 3, 4, 5를 병렬 구현 중이다(06:58 기준 Task 2, 6 완료). 이 작업은 워크트리 `feat/stage`에서 하고, 본체 파일을 고쳐야 하는 부분은 본체 해당 Task가 main에 커밋된 뒤 rebase해서 진행한다. 병합은 본체 Task 7(통합·배포) 전후로 사용자와 맞춘다.
 - 본체 컨트롤러가 배포 직후 Task 8(Lambda 권한 부여자 + 발표자 암호)로 publish를 잠글 예정이다. `#/stage`는 publish를 본체 `RealtimeClient` 하나로만 하므로 Task 8이 들어오면 같은 경로로 따라간다. 이 작업이 권한 체계를 따로 만들지 않는다.
-- MediaPipe: `@mediapipe/tasks-vision` 1.2.3(npm, wasm 포함). 모델 `gesture_recognizer.task`(float16)는 npm에 없어 사용자가 `frontend/public/models/gesture_recognizer.task`에 직접 내려받는다(git 제외, README에 받는 법). wasm은 빌드 전에 `node_modules`에서 `frontend/public/mediapipe/wasm/`으로 복사(git 제외).
+- MediaPipe: `@mediapipe/tasks-vision` 0.10.35(npm, wasm 포함. 최종 리뷰에서 1.x가 실행 중 Google로 사용 통계를 보내는 것이 확인되어 고정, 계약 11절). 모델 `gesture_recognizer.task`(float16)는 npm에 없어 사용자가 `frontend/public/models/gesture_recognizer.task`에 직접 내려받는다(git 제외, README에 받는 법). wasm은 빌드 전에 `node_modules`에서 `frontend/public/mediapipe/wasm/`으로 복사(git 제외).
 - 확인됨(2026-11-17): Bedrock `global.anthropic.claude-sonnet-5-5` Converse 호출 가능(응답 첫 블록이 reasoningContent이므로 text 블록을 골라야 함). Polly `Seoyeon` neural·generative 모두 ko-KR MP3 합성 가능. 자격 증명은 이 EC2 인스턴스 역할.
 - 브라우저 오토플레이와 카메라 권한: 첫 화면에 "무대 시작" 버튼을 두고, 그 클릭 안에서 카메라 시작과 오디오 잠금 해제를 한다.
 
