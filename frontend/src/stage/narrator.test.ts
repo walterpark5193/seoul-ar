@@ -133,6 +133,9 @@ describe("narrator", () => {
     expect(n.clipMs("a")).toBe(300); // "에이" 2자
     expect(n.clipMs("zzz")).toBeNull();
     expect(setup(null).n.clipMs("a")).toBeNull();
+    const odd = { ...manifest, items: { s: { file: "s.mp3", caption: "에이", ms: "2690" as unknown as number }, z: { file: "z.mp3", caption: "에이", ms: -1 } } };
+    expect(setup(odd).n.clipMs("s")).toBe(300); // 숫자가 아닌 ms는 쓰지 않는다
+    expect(setup(odd).n.clipMs("z")).toBe(300);
   });
 });
 

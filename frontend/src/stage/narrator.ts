@@ -26,6 +26,9 @@ export const CHAR_MS = 150;
 export const SILENT_WAV = "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
 
 const captionMs = (item: NarrationItem): number => [...item.caption].length * CHAR_MS;
+/** manifest의 ms가 쓸 만한 숫자일 때만(손으로 고친 manifest의 문자열·음수를 거른다). */
+const itemMs = (item: NarrationItem): number | null =>
+  typeof item.ms === "number" && Number.isFinite(item.ms) && item.ms > 0 ? item.ms : null;
 const isNotAllowed = (err: unknown): boolean =>
   typeof err === "object" && err !== null && (err as { name?: unknown }).name === "NotAllowedError";
 
@@ -89,7 +92,7 @@ export function createNarrator(
       if (my !== token) return;
       a.onended = null; a.onerror = null;
       stepTimer = timers.set(() => { stepTimer = null; if (my === token) finish(false); },
-        Math.max(entry.item.ms ?? 0, captionMs(entry.item), MISSING_MIN_MS));
+        Math.max(itemMs(entry.item) ?? 0, captionMs(entry.item), MISSING_MIN_MS));
     };
     const rejected = (err: unknown) => {
       if (my === token && isNotAllowed(err)) markBlocked();
@@ -147,7 +150,7 @@ export function createNarrator(
     clipMs(id) {
       const item = manifest?.items[id];
       if (!item) return null;
-      return item.ms ?? captionMs(item);
+      return itemMs(item) ?? captionMs(item);
     },
     onBlocked(cb) { blockedListeners.add(cb); return () => { blockedListeners.delete(cb); }; },
     get blocked() { return blocked; },
