@@ -122,6 +122,8 @@ export const mountOrbitView: MountView = (root, ctx) => {
     controls.dispose();
     city.dispose();
     renderer.dispose();
+    // #/ar ↔ #/3d를 여러 번 오가도 브라우저의 WebGL 컨텍스트 상한에 걸리지 않게 즉시 반납한다.
+    renderer.forceContextLoss();
     root.innerHTML = "";
   };
 };

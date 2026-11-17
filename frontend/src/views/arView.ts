@@ -32,6 +32,19 @@ export interface BeginArOptions {
 export interface RunningAr { session: ArSession; city: SeoulScene; stop(): void; }
 
 /**
+ * 세션은 이 뷰가 만들고 끝내므로 세션의 WebGL 렌더러도 여기서 반납한다.
+ * #/ar ↔ #/3d를 여러 번 오가도 브라우저의 WebGL 컨텍스트 상한에 걸리지 않게 한다.
+ */
+function releaseRenderer(session: ArSession): void {
+  try {
+    session.renderer.dispose();
+    session.renderer.forceContextLoss();
+  } catch (err) {
+    console.warn("[ar] 렌더러 반납 실패", err);
+  }
+}
+
+/**
  * 씬 그룹을 세션 앵커에 그대로 붙인다. 좌표 변환(XZ 씬 → MindAR XY 그림, X축 +90°)은
  * CONTRACTS 5절 보강대로 ArSession.anchor가 이미 하고 있다.
  */
@@ -52,10 +65,12 @@ export async function beginAr(o: BeginArOptions): Promise<RunningAr | null> {
       stop() {
         s.stop();
         city.dispose();
+        releaseRenderer(s);
       },
     };
   } catch (err) {
     try { session?.stop(); } catch { /* 시작 전 실패면 멈출 것이 없다 */ }
+    if (session) releaseRenderer(session);
     city.dispose();
     o.onFail(err);
     return null;

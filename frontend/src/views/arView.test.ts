@@ -19,7 +19,7 @@ function fakeSession(start: () => Promise<void>) {
     anchor: new Group(),
     scene: new Scene(),
     camera: new PerspectiveCamera(),
-    renderer: {} as ArSession["renderer"],
+    renderer: { dispose: vi.fn(), forceContextLoss: vi.fn() } as unknown as ArSession["renderer"],
     start: vi.fn(start),
     stop: vi.fn(),
     onFound: (cb) => { hooks.found = cb; },
@@ -83,6 +83,11 @@ describe("arView", () => {
     expect(onFound).toHaveBeenCalled();
     expect(onLost).toHaveBeenCalled();
     expect(onFail).not.toHaveBeenCalled();
+    running?.stop();
+    expect(session.stop).toHaveBeenCalled();
+    expect(scene.dispose).toHaveBeenCalled();
+    expect(session.renderer.dispose).toHaveBeenCalled();
+    expect(session.renderer.forceContextLoss).toHaveBeenCalled();
   });
 
   it("reports failure and cleans up when the camera is refused", async () => {
@@ -100,6 +105,7 @@ describe("arView", () => {
     expect(onFail).toHaveBeenCalledWith(denied);
     expect(session.stop).toHaveBeenCalled();
     expect(scene.dispose).toHaveBeenCalled();
+    expect(session.renderer.forceContextLoss).toHaveBeenCalled();
   });
 
   it("explains the fallback in plain words", () => {
