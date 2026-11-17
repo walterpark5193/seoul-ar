@@ -3,6 +3,8 @@
 폰 카메라로 발표 화면의 그림을 비추면 그림 위에 서울 25개 자치구와 법정동 실거래 막대가 3D로 서고,
 발표자의 선택이 모든 폰에 실시간으로 반영되는 웹앱. AWS 캡스톤 자유 프로젝트.
 
+- **처음부터 배포하기(새 AWS 계정)**: `docs/SETUP-AWS.md`
+- 사용 가이드: `docs/GUIDE.md`, Slack용 요약: `docs/GUIDE-slack.md`
 - 설계: `docs/superpowers/specs/2026-11-17-seoul-ar-design.md`
 - 모듈 계약: `docs/CONTRACTS.md`
 - 계획: `docs/superpowers/plans/2026-11-17-seoul-ar.md`
