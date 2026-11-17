@@ -189,6 +189,18 @@ describe("spread", () => {
     expect(types(d.run(60, twoOpen()))).toEqual([]);
   });
 
+  it("fist released by two open palms does not also spread", () => {
+    const m = createGestureMachine();
+    const d = driver(m);
+    expect(types(d.run(6, [fist()]))).toEqual(["grab"]);
+    // 두 손을 1500ms 펴 둔다: release 한 번, spread 없음
+    expect(types(d.run(Math.ceil(1500 / DT), twoOpen()))).toEqual(["release"]);
+    expect(m.fist).toBe(false);
+    // 손 모양이 한 번 바뀌면 다시 spread 가능
+    d.run(1, [open()]);
+    expect(types(d.run(6, twoOpen()))).toEqual(["spread"]);
+  });
+
   it("three open palms are not a spread", () => {
     const d = driver(createGestureMachine());
     const three = [...twoOpen(), hand("Open_Palm", 0.9, [0.5, 0.2])];

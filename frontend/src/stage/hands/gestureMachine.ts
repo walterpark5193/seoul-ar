@@ -98,7 +98,12 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
 
     if (fist) {
       const lost = hands.length === 0 && lastHandT !== null && t - lastHandT >= c.releaseAfterMs;
-      if (confirmed(notFistRun) || lost) { fist = false; fire({ type: "release" }); }   // 쿨다운 무시, 쿨다운 시작
+      if (confirmed(notFistRun) || lost) {
+        // 쿨다운 무시, 쿨다운 시작. 주먹을 두 손 펴기로 놓았을 때 이어서 spread가 나지 않게 spread 래치를 잠근다.
+        fist = false;
+        spreadArmed = false;
+        fire({ type: "release" });
+      }
     }
     if (ready() && confirmed(fistRun)) { fist = true; fire({ type: "grab" }); }
     if (ready() && spreadArmed && confirmed(spreadRun)) { spreadArmed = false; fire({ type: "spread" }); }
