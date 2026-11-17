@@ -54,6 +54,8 @@ export const FILTER_DEFAULTS = { filterMinCF: 0.0001, filterBeta: 0.01, warmupTo
 /** Longest dt handed to onFrame; after a hidden tab or a stall, animations resume instead of jumping. */
 const MAX_DT = 0.1;
 
+/** The .mind preflight fetch must answer within this (it usually finished long before the tap). */
+export const PREFLIGHT_TIMEOUT_MS = 15_000;
 /**
  * Once the camera stream is live, MindAR's start() must settle within this. In mind-ar 1.2.5
  * `_startAR`/`addImageTargets` are `new Promise(async …)` wrappers that never reject: a truncated
@@ -82,16 +84,18 @@ interface VideoLike {
 
 interface Deadline {
   promise: Promise<never>;
+  error: Error;
   clear(): void;
 }
 
 function deadline(ms: number, message: string): Deadline {
+  const error = new Error(message);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const promise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
+    timer = setTimeout(() => reject(error), ms);
   });
   promise.catch(noop);
-  return { promise, clear: () => clearTimeout(timer) };
+  return { promise, error, clear: () => clearTimeout(timer) };
 }
 
 /** Resolves when a camera stream lands on the video element (srcObject set / metadata / playing). */
@@ -136,10 +140,26 @@ function manualRelease(video: VideoLike | undefined): void {
   }
 }
 
+/**
+ * One MindAR `start()` in flight. MindAR keeps `this.video` / `this.controller` as instance fields and
+ * its getUserMedia handler writes the stream to the *current* `this.video`, so two overlapping starts
+ * would orphan a stream and leak a controller. We therefore never call `mindar.start()` while an
+ * earlier one is unsettled: a retry adopts the pending start (fresh deadlines) or, if we already
+ * killed its stream, waits (bounded) for it to settle before starting anew.
+ */
+interface PendingStart {
+  promise: Promise<void>;
+  video: VideoLike | undefined; // MindAR's <video> for this start
+  settled: boolean;
+  adopter: number | null; // seq of the attempt currently waiting on it; null = abandoned
+  killed: boolean; // we stopped its stream / detached its element; cannot be adopted any more
+  watch: AbortController | null; // late-stream watcher while abandoned and stream-less
+}
+
 interface Attempt {
   generation: number; // stop() count when the attempt began
   seq: number; // monotonically increasing attempt id
-  video: VideoLike | undefined; // the <video> MindAR created for this attempt
+  pending: PendingStart | null; // the MindAR start this attempt is waiting on
   abort: AbortController; // aborted by stop() and when the attempt settles
   promise: Promise<void>;
 }
@@ -186,6 +206,7 @@ export function createArSession(opts: ArSessionOptions): ArSession {
   let generation = 0; // bumped by stop(); attempts compare against it
   let attemptSeq = 0;
   let attempt: Attempt | null = null;
+  let pendingStart: PendingStart | null = null;
   let lastTime: number | null = null;
   let followerState: FollowerState = INITIAL_FOLLOWER;
   let announcedFound = false;
@@ -199,6 +220,7 @@ export function createArSession(opts: ArSessionOptions): ArSession {
     mindarAnchor.group.matrix.decompose(tmpPos, tmpQuat, tmpScale);
     const scale = tmpScale.x;
     if (!Number.isFinite(scale) || scale <= 0) return null; // MindAR's all-zero "invisible" matrix
+    tmpQuat.normalize();
     return {
       pose: { position: [tmpPos.x, tmpPos.y, tmpPos.z], quaternion: [tmpQuat.x, tmpQuat.y, tmpQuat.z, tmpQuat.w] },
       scale,
@@ -216,6 +238,12 @@ export function createArSession(opts: ArSessionOptions): ArSession {
     followerState = INITIAL_FOLLOWER;
     follower.visible = false;
     announcedFound = false;
+  };
+  /** MindAR's stop() leaves the anchor flags and matrix as they were; a fresh start must not replay them. */
+  const resetMindArAnchor = (): void => {
+    mindarAnchor.visible = false;
+    mindarAnchor.group.visible = false;
+    mindarAnchor.group.matrix.identity();
   };
 
   const tick = (time: number): void => {
@@ -239,42 +267,86 @@ export function createArSession(opts: ArSessionOptions): ArSession {
     renderer.render(scene, camera);
   };
 
-  // ---- camera release ----
-  /** Release an attempt's camera. For an older attempt's element never call mindar.stop() (that would kill the live one). */
-  const releaseAttempt = (video: VideoLike | undefined): void => {
-    const current = videoOf();
-    if (video && current && video !== current) {
-      manualRelease(video);
-      return;
-    }
+  // ---- camera / MindAR start bookkeeping ----
+  /** Full release of whatever MindAR currently holds (processing loop, stream tracks, <video>). */
+  const releaseCamera = (): void => {
     try {
-      mindar.stop(); // stops processing, camera tracks, removes the <video>
+      mindar.stop();
     } catch {
-      manualRelease(video ?? current); // MindAR throws when its controller or stream never came up
+      manualRelease(videoOf()); // MindAR throws when its controller or stream never came up
     }
   };
-  /** After a failed attempt, a stream granted late must not stay live on the detached element. */
-  const watchLateStream = (video: VideoLike | undefined): void => {
-    if (!video) return;
+
+  const createPendingStart = (): PendingStart => {
+    const promise = mindar.start();
+    const ps: PendingStart = { promise, video: videoOf(), settled: false, adopter: null, killed: false, watch: null };
+    const settle = (ok: boolean): void => {
+      ps.settled = true;
+      ps.watch?.abort();
+      ps.watch = null;
+      if (pendingStart === ps) pendingStart = null;
+      if (ps.adopter !== null || running) return; // somebody is using it
+      if (ok) releaseCamera(); // landed with nobody waiting: camera off
+      else manualRelease(ps.video); // denied: just drop the element
+    };
+    promise.then(() => settle(true), () => settle(false));
+    pendingStart = ps;
+    return ps;
+  };
+
+  const adopt = (ps: PendingStart, seq: number): void => {
+    ps.adopter = seq;
+    ps.watch?.abort();
+    ps.watch = null;
+  };
+
+  /** Stop the stream of an abandoned, still-unsettled start; it can no longer be adopted. */
+  const kill = (ps: PendingStart): void => {
+    ps.killed = true;
+    ps.watch?.abort();
+    ps.watch = null;
+    try {
+      mindar.stop();
+    } catch {
+      manualRelease(ps.video);
+    }
+  };
+
+  /** Attempt `seq` gives up on `ps`: release now if there is a stream, otherwise catch a late one. */
+  const abandon = (ps: PendingStart, seq: number): void => {
+    if (ps.adopter !== seq) return; // not ours (already abandoned or re-adopted by a newer attempt)
+    ps.adopter = null;
+    if (ps.settled) {
+      if (!running) releaseCamera();
+      return;
+    }
+    if (ps.video?.srcObject) {
+      kill(ps); // stream live, start unsettled (user left or _startAR hangs): camera off now
+      return;
+    }
+    // Permission prompt still open: a stream granted later must not stay live with nobody using it.
+    const ctrl = new AbortController();
+    ps.watch = ctrl;
     const until = Date.now() + LATE_STREAM_WATCH_MS;
     const timer = setInterval(() => {
-      if (videoOf() === video && running) {
-        clearInterval(timer); // it is the live session's element after all
+      if (ctrl.signal.aborted || ps.settled) {
+        clearInterval(timer);
         return;
       }
-      if (video.srcObject) {
+      if (ps.video?.srcObject) {
         clearInterval(timer);
-        manualRelease(video);
+        kill(ps);
         return;
       }
       if (Date.now() > until) clearInterval(timer);
     }, LATE_STREAM_POLL_MS);
+    ctrl.signal.addEventListener("abort", () => clearInterval(timer), { once: true });
     (timer as unknown as { unref?: () => void }).unref?.();
   };
 
   // ---- target preflight (starts at construction so it is usually done before the tap) ----
   let preflight: { promise: Promise<void>; abort: AbortController } | null = null;
-  const ensurePreflight = (): Promise<void> => {
+  const ensurePreflight = (): { promise: Promise<void>; abort: AbortController } => {
     if (!preflight) {
       const abort = new AbortController();
       const rec = { promise: assertTargetReadable(opts.targetSrc, abort.signal), abort };
@@ -283,62 +355,81 @@ export function createArSession(opts: ArSessionOptions): ArSession {
       });
       preflight = rec;
     }
-    return preflight.promise;
+    return preflight;
   };
   ensurePreflight();
+
+  const AR_TIMEOUT_MESSAGE = `AR을 ${START_TIMEOUT_MS / 1000}초 안에 시작하지 못했습니다. 타깃 파일(${opts.targetSrc})을 읽지 못한 것일 수 있습니다.`;
 
   // ---- start attempt ----
   const runAttempt = async (rec: Attempt): Promise<void> => {
     const g = rec.generation;
-    try {
-      await ensurePreflight(); // MindAR's own loader never rejects on a bad file; check it before the camera
-    } catch (err) {
-      if (generation !== g) return; // stop() aborted the preflight: settle quietly
-      throw err;
-    }
-    if (generation !== g) return; // stopped between the preflight and the camera
-
-    const mindarStart = mindar.start();
-    mindarStart.catch(noop); // observed through the races below
-    const video = (rec.video = videoOf());
+    const isStopped = (): boolean => generation !== g;
     const stopped = new Promise<never>((_, reject) => {
       rec.abort.signal.addEventListener("abort", () => reject(STOPPED), { once: true });
     });
     stopped.catch(noop);
+
+    // 1. Target preflight, bounded. MindAR's own loader never rejects on a bad file.
+    const pf = ensurePreflight();
+    const pfDeadline = deadline(PREFLIGHT_TIMEOUT_MS, `타깃 파일을 ${PREFLIGHT_TIMEOUT_MS / 1000}초 안에 가져오지 못했습니다: ${opts.targetSrc}`);
+    try {
+      await Promise.race([pf.promise, pfDeadline.promise, stopped]);
+    } catch (err) {
+      if (err === STOPPED || isStopped()) return; // stop() during the preflight: settle quietly
+      if (err === pfDeadline.error) {
+        pf.abort.abort(); // drop the stalled fetch so a retry can start a fresh one
+        if (preflight === pf) preflight = null;
+      }
+      throw err;
+    } finally {
+      pfDeadline.clear();
+    }
+    if (isStopped()) return; // stopped between the preflight and the camera
+
+    // 2. MindAR start: never two in flight.
+    let ps = pendingStart;
+    if (ps && !ps.settled && ps.killed) {
+      // Its stream is dead but MindAR is still inside start(); wait (bounded) for it to settle.
+      const wait = deadline(START_TIMEOUT_MS, AR_TIMEOUT_MESSAGE);
+      try {
+        await Promise.race([ps.promise.then(noop, noop), wait.promise, stopped]);
+      } catch (err) {
+        if (err === STOPPED || isStopped()) return;
+        throw err;
+      } finally {
+        wait.clear();
+      }
+      if (isStopped()) return;
+    }
+    ps = pendingStart && !pendingStart.settled ? pendingStart : createPendingStart(); // adopt or start fresh
+    adopt(ps, rec.seq);
+    rec.pending = ps;
+    const video = ps.video;
+
+    // 3. Permission deadline until the stream is live, then the AR-start deadline.
     const permission = deadline(
       PERMISSION_TIMEOUT_MS,
       `카메라 권한 응답을 ${PERMISSION_TIMEOUT_MS / 1000}초 동안 받지 못했습니다. 브라우저의 카메라 허용 요청에 응답했는지 확인해 주세요.`,
     );
     let arDeadline: Deadline | null = null;
-    const onLateSettle = (): void => {
-      // MindAR's start() landed after we gave up on this attempt (timeout or stop()).
-      const superseded = attemptSeq !== rec.seq || running;
-      if (superseded) manualRelease(video); // only this attempt's orphan stream, never the live session
-      else releaseAttempt(video);
-    };
     try {
-      const first = await Promise.race([
-        mindarStart.then(() => "done" as const),
-        waitForStream(video, rec.abort.signal).then(() => "stream" as const),
-        permission.promise,
-        stopped,
-      ]);
-      if (first === "stream") {
+      const phase = video?.srcObject
+        ? ("stream" as const) // adopted a start whose camera is already live
+        : await Promise.race([
+            ps.promise.then(() => "done" as const),
+            waitForStream(video, rec.abort.signal).then(() => "stream" as const),
+            permission.promise,
+            stopped,
+          ]);
+      if (phase === "stream") {
         permission.clear();
-        arDeadline = deadline(
-          START_TIMEOUT_MS,
-          `AR을 ${START_TIMEOUT_MS / 1000}초 안에 시작하지 못했습니다. 타깃 파일(${opts.targetSrc})을 읽지 못한 것일 수 있습니다.`,
-        );
-        await Promise.race([mindarStart, arDeadline.promise, stopped]);
+        arDeadline = deadline(START_TIMEOUT_MS, AR_TIMEOUT_MESSAGE);
+        await Promise.race([ps.promise, arDeadline.promise, stopped]);
       }
     } catch (err) {
-      if (err === STOPPED || generation !== g) {
-        mindarStart.then(onLateSettle, noop); // stop() released what existed; release again if the stream lands later
-        return;
-      }
-      releaseAttempt(video); // on a deadline the stream may already be live
-      mindarStart.then(onLateSettle, noop);
-      watchLateStream(video);
+      abandon(ps, rec.seq); // kills a live stream now, or when it lands; the settle handler finishes the job
+      if (err === STOPPED || isStopped()) return;
       // MindAR rejects with `undefined` when getUserMedia is missing or denied.
       throw err instanceof Error ? err : new Error("카메라를 시작할 수 없습니다. 카메라 권한을 허용했는지, HTTPS로 열었는지 확인해 주세요.");
     } finally {
@@ -346,10 +437,11 @@ export function createArSession(opts: ArSessionOptions): ArSession {
       arDeadline?.clear();
       rec.abort.abort(); // tears down waitForStream and the `stopped` promise
     }
-    if (generation !== g) {
-      releaseAttempt(video); // stop() ran while MindAR was finishing (permission prompt case)
+    if (isStopped()) {
+      abandon(ps, rec.seq); // stop() ran while MindAR was finishing: release what it acquired
       return;
     }
+    resetMindArAnchor();
     running = true;
     lastTime = null;
     resetFollower();
@@ -368,7 +460,7 @@ export function createArSession(opts: ArSessionOptions): ArSession {
     start() {
       if (running) return Promise.resolve();
       if (attempt && attempt.generation === generation) return attempt.promise; // share the in-flight attempt
-      const rec: Attempt = { generation, seq: ++attemptSeq, video: undefined, abort: new AbortController(), promise: Promise.resolve() };
+      const rec: Attempt = { generation, seq: ++attemptSeq, pending: null, abort: new AbortController(), promise: Promise.resolve() };
       attempt = rec;
       rec.promise = runAttempt(rec).finally(() => {
         if (attempt === rec) attempt = null;
@@ -387,21 +479,25 @@ export function createArSession(opts: ArSessionOptions): ArSession {
       rec?.abort.abort();
       const wasRunning = running;
       running = false;
-      frozen = false; // a stopped session is not frozen; the view resets its own UI
+      if (wasRunning) releaseCamera();
+      else if (rec?.pending) abandon(rec.pending, rec.seq); // prompt open or MindAR finishing: release now or when the stream lands
       resetFollower();
-      if (wasRunning) releaseAttempt(undefined);
-      else if (rec?.video) releaseAttempt(rec.video); // camera prompt may be open: release what exists now
+      resetMindArAnchor();
+      if (frozen) {
+        frozen = false; // a stopped session is not frozen
+        emitFreeze(false);
+      }
     },
     onFound(cb) { foundCbs.push(cb); },
     onLost(cb) { lostCbs.push(cb); },
     onFrame(cb) { frameCbs.push(cb); },
     freeze() {
-      if (frozen) return;
+      if (frozen || !running) return; // nothing to freeze before the camera runs
       frozen = true;
       try {
         videoOf()?.pause?.();
       } catch {
-        // no video yet
+        // no video
       }
       emitFreeze(true);
     },
@@ -413,7 +509,7 @@ export function createArSession(opts: ArSessionOptions): ArSession {
         const played = videoOf()?.play?.();
         if (played && typeof (played as Promise<void>).catch === "function") (played as Promise<void>).catch(noop);
       } catch {
-        // no video yet
+        // no video
       }
       emitFreeze(false);
     },

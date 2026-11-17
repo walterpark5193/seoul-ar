@@ -1,18 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The real bundle touches `window` at import time and needs WebGL; replace it with a
-// scriptable fake so the wrapper's wiring can be verified in Node.
+// scriptable fake so the wrapper's wiring can be verified in Node. The fake mirrors the
+// MindAR 1.2.5 behaviours the wrapper depends on: start() creates a fresh <video> and asks for
+// the camera (one getUserMedia per start()), a granted stream is written to `this.video.srcObject`
+// (the *instance* field, whatever element that currently is), _startAR completing = one controller
+// start, stop() stops the stream's tracks and removes the element but leaves anchor state untouched.
 const fake = vi.hoisted(() => {
   const state = {
     ctorArgs: [] as unknown[],
     instances: [] as FakeMindAR[],
+    makeMatrix: null as (() => unknown) | null, // set after `three` is imported
+  };
+  type Track = { stop: () => void };
+  type FakeVideo = {
+    srcObject: { getTracks(): Track[] } | null;
+    pause: () => void; // vi.fn() at runtime; typed plainly so the fake can call them
+    play: () => Promise<void>;
+    remove: () => void;
   };
   class FakeAnchor {
     // Duck-typed stand-in for MindAR's THREE.Group: carries the pose matrix MindAR writes each update.
     group = {
       kind: "group",
       visible: false,
-      matrix: null as unknown, // set to a THREE.Matrix4 by the test helper (three cannot be imported here)
+      matrix: state.makeMatrix?.() as unknown,
       children: [] as unknown[],
       add(obj: unknown) {
         this.children.push(obj);
@@ -43,11 +55,10 @@ const fake = vi.hoisted(() => {
       }),
       render: vi.fn(),
     };
-    video:
-      | { srcObject: unknown; pause: ReturnType<typeof vi.fn>; play: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> }
-      | undefined = undefined;
+    video: FakeVideo | undefined = undefined;
     anchors: FakeAnchor[] = [];
-    started = 0;
+    started = 0; // getUserMedia requests
+    controllerStarts = 0; // _startAR completions (controller created and processing)
     stopped = 0;
     startImpl: () => Promise<void> = async () => {};
     constructor(opts: unknown) {
@@ -61,13 +72,18 @@ const fake = vi.hoisted(() => {
     }
     async start() {
       this.started++;
-      // MindAR creates a fresh <video> (no stream yet) before asking for the camera; a granted
-      // stream shows up as video.srcObject.
       this.video = { srcObject: null, pause: vi.fn(), play: vi.fn(() => Promise.resolve()), remove: vi.fn() };
       await this.startImpl();
+      this.controllerStarts++;
+    }
+    /** MindAR's getUserMedia handler: `this.video.srcObject = stream` on the current element. */
+    grantStream(tracks: Track[] = []) {
+      this.video!.srcObject = { getTracks: () => tracks };
     }
     stop() {
       this.stopped++;
+      this.video?.srcObject?.getTracks().forEach((t) => t.stop());
+      this.video?.remove();
     }
   }
   return { state, FakeMindAR };
@@ -76,7 +92,16 @@ const fake = vi.hoisted(() => {
 vi.mock("mind-ar/dist/mindar-image-three.prod.js", () => ({ MindARThree: fake.FakeMindAR }));
 
 import { Group, Matrix4, Quaternion, Vector3 } from "three";
-import { arSupported, createArSession, START_TIMEOUT_MS, PERMISSION_TIMEOUT_MS, FILTER_DEFAULTS } from "./session";
+import {
+  arSupported,
+  createArSession,
+  START_TIMEOUT_MS,
+  PERMISSION_TIMEOUT_MS,
+  PREFLIGHT_TIMEOUT_MS,
+  FILTER_DEFAULTS,
+} from "./session";
+
+fake.state.makeMatrix = () => new Matrix4();
 
 type GL = { kind: string } | null;
 function env(opts: { gum?: boolean; gl?: GL | "throw"; nav?: boolean }) {
@@ -148,6 +173,17 @@ function observe(inst: Inst, o: { visible: boolean; position?: [number, number, 
   }
 }
 
+/** A fetch that never answers but honours AbortSignal like the real one. */
+function stalledFetch(onSignal?: (s: AbortSignal) => void) {
+  return (_url: string, init: { signal: AbortSignal }) =>
+    new Promise<never>((_, reject) => {
+      onSignal?.(init.signal);
+      init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    });
+}
+
+const flushMicrotasks = () => new Promise<void>((r) => setTimeout(r, 0));
+
 describe("createArSession wiring", () => {
   const fetchMock = vi.fn();
   beforeEach(() => {
@@ -164,6 +200,7 @@ describe("createArSession wiring", () => {
 
   const container = { tagName: "DIV" } as unknown as HTMLElement;
   const make = (extra: Record<string, unknown> = {}) => createArSession({ container, targetSrc: "/marker/target.mind", ...extra });
+  const hang = () => new Promise<void>(() => {});
 
   it("constructs MindARThree with the container and targetSrc, exposes scene/camera/renderer", () => {
     const s = make();
@@ -322,6 +359,29 @@ describe("createArSession wiring", () => {
       expect(follower.visible).toBe(true);
       expect(follower.position.x).toBe(300); // snap, no slide from the stale pose
     });
+
+    it("3: stale MindAR anchor state after stop() -> start() does not resurrect the follower or fire onFound", async () => {
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      const found = vi.fn();
+      s.onFound(found);
+      await s.start();
+      observe(inst, { visible: true, position: [100, 0, -1500] });
+      inst.renderer.loop!(0);
+      expect(found).toHaveBeenCalledTimes(1);
+      expect(s.anchor.parent!.visible).toBe(true);
+      s.stop(); // MindAR's own stop() leaves anchors[0].visible and group.matrix as they were
+      await s.start();
+      const loop = inst.renderer.loop!;
+      loop(1000); // the new controller has not reported anything yet
+      expect(s.anchor.parent!.visible).toBe(false);
+      expect(found).toHaveBeenCalledTimes(1);
+      observe(inst, { visible: true, position: [200, 0, -1500] }); // the new controller really sees it
+      loop(1016);
+      expect(s.anchor.parent!.visible).toBe(true);
+      expect(s.anchor.parent!.position.x).toBe(200);
+      expect(found).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("onFound / onLost", () => {
@@ -452,17 +512,22 @@ describe("createArSession wiring", () => {
       expect(found).toHaveBeenCalledTimes(2);
     });
 
-    it("freeze before start() is harmless, and stop() works while frozen (and clears frozen)", async () => {
+    it("freeze() before start() is a no-op; stop() while frozen clears frozen and notifies onFreeze(false)", async () => {
       const s = make();
       const inst = fake.state.instances[0]!;
-      expect(() => s.freeze()).not.toThrow();
-      expect(s.frozen).toBe(true);
-      s.unfreeze();
+      const onFreeze = vi.fn();
+      s.onFreeze(onFreeze);
+      s.freeze(); // nothing to freeze yet
+      expect(s.frozen).toBe(false);
+      expect(onFreeze).not.toHaveBeenCalled();
       await s.start();
       s.freeze();
+      expect(s.frozen).toBe(true);
       s.stop();
       expect(inst.stopped).toBe(1);
       expect(s.frozen).toBe(false);
+      expect(onFreeze).toHaveBeenLastCalledWith(false);
+      expect(onFreeze).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -479,7 +544,7 @@ describe("createArSession wiring", () => {
     expect(order).toEqual(["loop:null", "stop"]);
   });
 
-  it("stop() during a pending start() releases the camera at once and again when start lands; the loop never starts", async () => {
+  it("stop() while MindAR is waiting on the permission prompt: nothing to release yet, released when the start lands; the loop never starts", async () => {
     const s = make();
     const inst = fake.state.instances[0]!;
     let resolveStart: () => void = () => {};
@@ -489,13 +554,33 @@ describe("createArSession wiring", () => {
     const pending = s.start();
     await mindarStarted; // target check passed, MindAR's start() is now waiting on the camera
     s.stop(); // user left the AR view while the permission prompt was open
-    expect(inst.stopped).toBe(1); // released immediately, even though we were never "running"
+    expect(inst.stopped).toBe(0); // no stream yet: nothing to release now
+    inst.grantStream();
     resolveStart();
     await pending;
     expect(inst.started).toBe(1);
-    expect(inst.stopped).toBe(2); // MindAR acquired the stream after our stop(); released again
+    expect(inst.stopped).toBe(1); // MindAR acquired the stream after our stop(): released on landing
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledWith(null);
+    expect(inst.renderer.loop).toBeNull();
+  });
+
+  it("stop() while MindAR is finishing with a live stream releases the stream at once", async () => {
+    const s = make();
+    const inst = fake.state.instances[0]!;
+    let resolveStart: () => void = () => {};
+    const mindarStarted = new Promise<void>((started) => {
+      inst.startImpl = () => new Promise<void>((r) => { resolveStart = r; started(); });
+    });
+    const pending = s.start();
+    await mindarStarted;
+    const track = { stop: vi.fn() };
+    inst.grantStream([track]); // camera granted, _startAR still running
+    s.stop();
+    expect(track.stop).toHaveBeenCalledTimes(1); // killed immediately
+    expect(inst.stopped).toBe(1);
+    resolveStart();
+    await pending;
     expect(inst.renderer.loop).toBeNull();
   });
 
@@ -544,41 +629,52 @@ describe("createArSession wiring", () => {
     expect(fake.state.instances[0]!.started).toBe(0);
   });
 
-  it("start() times out when MindAR never settles (bad target decode) and releases the live camera", async () => {
+  it("start() times out when MindAR never settles after the stream is live (bad target decode) and releases the live camera", async () => {
     vi.useFakeTimers();
     const s = make();
     const inst = fake.state.instances[0]!;
-    inst.startImpl = () => new Promise<void>(() => {}); // _startAR hangs forever, camera already on
+    inst.startImpl = hang; // _startAR hangs forever, camera already on
     const attempt = s.start();
     const rejection = expect(attempt).rejects.toThrow(new RegExp(`${START_TIMEOUT_MS / 1000}초`));
     await vi.advanceTimersByTimeAsync(10);
-    inst.video!.srcObject = { getTracks: () => [] }; // camera granted: the 15 s AR deadline is armed from here
+    const track = { stop: vi.fn() };
+    inst.grantStream([track]); // camera granted: the 15 s AR deadline is armed from here
     await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + 300);
     await rejection;
     expect(inst.started).toBe(1);
     expect(inst.stopped).toBe(1); // camera released despite never reaching "running"
+    expect(track.stop).toHaveBeenCalledTimes(1);
     expect(inst.renderer.setAnimationLoop).not.toHaveBeenCalled();
     expect(() => s.stop()).not.toThrow(); // and a later unmount is harmless (clears the loop with null)
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
     expect(inst.renderer.setAnimationLoop).toHaveBeenLastCalledWith(null);
-    // a start() after the failure is allowed again (not stuck on the dead attempt)
-    inst.startImpl = async () => {};
-    await s.start();
-    expect(inst.started).toBe(2);
-    expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(2);
-    expect(inst.renderer.loop).toEqual(expect.any(Function));
   });
 
-  describe("start() lifecycle: preflight, permission and AR deadlines, retries (review follow-ups A/B/C)", () => {
-    const hang = () => new Promise<void>(() => {});
-    const stream = (tracks: Array<{ stop: () => void }> = []) => ({ getTracks: () => tracks });
+  describe("start() lifecycle: preflight, permission and AR deadlines, retries (review follow-ups)", () => {
+    it("1: a stalled preflight fetch is bounded: rejects after PREFLIGHT_TIMEOUT_MS, aborts the fetch, never opens the camera; a retry re-fetches", async () => {
+      vi.useFakeTimers();
+      let signal: AbortSignal | undefined;
+      fetchMock.mockImplementation(stalledFetch((s) => { signal = s; }));
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      const attempt = s.start();
+      const rejection = expect(attempt).rejects.toThrow(new RegExp(`타깃 파일.*${PREFLIGHT_TIMEOUT_MS / 1000}초`));
+      await vi.advanceTimersByTimeAsync(PREFLIGHT_TIMEOUT_MS - 100);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      await rejection;
+      expect(signal?.aborted).toBe(true);
+      expect(inst.started).toBe(0);
+      fetchMock.mockImplementation(async () => mindResponse());
+      await s.start();
+      expect(fetchMock).toHaveBeenCalledTimes(2); // the stalled promise was dropped from the cache
+      expect(inst.started).toBe(1);
+      expect(inst.renderer.loop).toEqual(expect.any(Function));
+    });
 
     it("A: stop() during the preflight aborts the fetch, never opens the camera, start() settles cleanly, and a later start() re-fetches", async () => {
       let signal: AbortSignal | undefined;
-      fetchMock.mockImplementation((_url: string, init: { signal: AbortSignal }) => new Promise((_, reject) => {
-        signal = init.signal;
-        init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
-      }));
+      fetchMock.mockImplementation(stalledFetch((s) => { signal = s; }));
       const s = make(); // the preflight begins here
       const inst = fake.state.instances[0]!;
       const attempt = s.start();
@@ -591,6 +687,17 @@ describe("createArSession wiring", () => {
       await s.start();
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(inst.started).toBe(1);
+    });
+
+    it("A: stop() right after start() with an already-resolved preflight still never calls mindar.start()", async () => {
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      await flushMicrotasks(); // construction-time preflight has resolved and is cached
+      const attempt = s.start();
+      s.stop(); // synchronous, before the attempt's first continuation runs
+      await expect(attempt).resolves.toBeUndefined();
+      expect(inst.started).toBe(0);
+      expect(inst.stopped).toBe(0);
     });
 
     it("B: the preflight fetch runs at createArSession() time so it is usually done before the tap", () => {
@@ -608,31 +715,34 @@ describe("createArSession wiring", () => {
       await vi.advanceTimersByTimeAsync(20_000); // user is reading the prompt
       expect(inst.started).toBe(1);
       expect(inst.stopped).toBe(0);
-      inst.video!.srcObject = stream(); // 허용 tapped: the stream is live
+      inst.grantStream(); // 허용 tapped: the stream is live
       grant(); // MindAR finishes _startAR
       await attempt;
       expect(inst.stopped).toBe(0);
       expect(inst.renderer.loop).toEqual(expect.any(Function));
     });
 
-    it("B: AR start stalling 15 s after the stream is live rejects with the target message and releases the camera", async () => {
+    it("B: the 15 s AR deadline counts from the live stream (granted at 30 s), not from the tap", async () => {
       vi.useFakeTimers();
       const s = make();
       const inst = fake.state.instances[0]!;
       inst.startImpl = hang;
       const attempt = s.start();
       const rejection = expect(attempt).rejects.toThrow(new RegExp(`${START_TIMEOUT_MS / 1000}초`));
-      await vi.advanceTimersByTimeAsync(10);
-      inst.video!.srcObject = stream(); // camera granted right away
+      await vi.advanceTimersByTimeAsync(30_000); // tap-relative 15 s would already have failed here
+      expect(inst.stopped).toBe(0);
+      const track = { stop: vi.fn() };
+      inst.grantStream([track]); // camera granted at ~30 s, _startAR then stalls
       await vi.advanceTimersByTimeAsync(14_800);
-      expect(inst.stopped).toBe(0); // the 15 s count from the live stream, not from the tap
+      expect(inst.stopped).toBe(0);
       await vi.advanceTimersByTimeAsync(500);
       await rejection;
       expect(inst.stopped).toBe(1);
+      expect(track.stop).toHaveBeenCalledTimes(1);
       expect(inst.renderer.setAnimationLoop).not.toHaveBeenCalled();
     });
 
-    it("B: a prompt never answered for 60 s rejects with the permission message; a stream landing later on the detached <video> is stopped", async () => {
+    it("B: a prompt never answered for 60 s rejects with the permission message; a stream landing later on MindAR's element is stopped", async () => {
       vi.useFakeTimers();
       const s = make();
       const inst = fake.state.instances[0]!;
@@ -643,15 +753,45 @@ describe("createArSession wiring", () => {
       expect(inst.stopped).toBe(0);
       await vi.advanceTimersByTimeAsync(1100);
       await rejection;
-      expect(inst.stopped).toBe(1);
+      expect(inst.started).toBe(1);
+      expect(inst.stopped).toBe(0); // no stream existed: nothing to release yet
       const track = { stop: vi.fn() };
-      inst.video!.srcObject = stream([track]); // 허용 tapped long after we gave up
+      inst.grantStream([track]); // 허용 tapped long after we gave up: lands on this.video like MindAR does
       await vi.advanceTimersByTimeAsync(600);
       expect(track.stop).toHaveBeenCalledTimes(1);
       expect(inst.video!.remove).toHaveBeenCalled();
+      expect(inst.stopped).toBe(1);
     });
 
-    it("C: a retry after a timed-out attempt succeeds with exactly one live camera, even when the old attempt lands late", async () => {
+    it("2: a retry during a pending permission prompt adopts the pending MindAR start: one getUserMedia, one controller, one live stream", async () => {
+      vi.useFakeTimers();
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      let finishFirst: () => void = () => {};
+      inst.startImpl = () => new Promise<void>((r) => { finishFirst = r; });
+      const first = s.start();
+      const rejection = expect(first).rejects.toThrow(/권한/);
+      await vi.advanceTimersByTimeAsync(PERMISSION_TIMEOUT_MS + 100);
+      await rejection;
+      expect(inst.started).toBe(1);
+      const second = s.start(); // user taps "다시 시도" while the browser prompt is still open
+      await vi.advanceTimersByTimeAsync(100);
+      expect(inst.started).toBe(1); // no second getUserMedia, no second <video>
+      const track = { stop: vi.fn() };
+      inst.grantStream([track]); // Allow: the one stream lands on this.video
+      await vi.advanceTimersByTimeAsync(200);
+      finishFirst(); // _startAR completes once
+      await second;
+      expect(inst.controllerStarts).toBe(1);
+      expect(inst.started).toBe(1);
+      expect(inst.stopped).toBe(0);
+      expect(track.stop).not.toHaveBeenCalled(); // the adopted stream stays live
+      expect(inst.renderer.loop).toEqual(expect.any(Function));
+      s.stop();
+      expect(track.stop).toHaveBeenCalledTimes(1); // and exactly this one stream is released at the end
+    });
+
+    it("2: a retry after a 15 s AR stall waits for the stalled start to settle, then starts anew (never two mindar.start() in flight)", async () => {
       vi.useFakeTimers();
       const s = make();
       const inst = fake.state.instances[0]!;
@@ -660,51 +800,64 @@ describe("createArSession wiring", () => {
       const first = s.start();
       const rejection = expect(first).rejects.toThrow(new RegExp(`${START_TIMEOUT_MS / 1000}초`));
       await vi.advanceTimersByTimeAsync(10);
-      const video1 = inst.video!;
       const track1 = { stop: vi.fn() };
-      video1.srcObject = stream([track1]);
+      inst.grantStream([track1]);
       await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + 300);
       await rejection;
       expect(inst.stopped).toBe(1);
-      inst.startImpl = async () => {};
-      await s.start(); // retry on the same session
-      const video2 = inst.video!;
-      expect(video2).not.toBe(video1);
-      expect(inst.started).toBe(2);
-      expect(inst.stopped).toBe(1); // the retry's camera is untouched
+      expect(track1.stop).toHaveBeenCalledTimes(1); // the stalled start's stream was killed
+      inst.startImpl = async () => {}; // the eventual fresh start will succeed
+      const second = s.start();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(inst.started).toBe(1); // waiting for the stalled start to settle
+      finishFirst(); // the stalled _startAR finally lands on a dead stream
+      await vi.advanceTimersByTimeAsync(10);
+      await second;
+      expect(inst.started).toBe(2); // then a fresh getUserMedia
+      expect(inst.controllerStarts).toBe(2);
       expect(inst.renderer.loop).toEqual(expect.any(Function));
-      finishFirst(); // the old attempt's MindAR start lands late
-      await vi.advanceTimersByTimeAsync(0);
-      expect(inst.stopped).toBe(1); // must not call mindar.stop() on the live retry
-      expect(track1.stop).toHaveBeenCalled(); // only its own orphan stream is stopped
-      expect(video1.remove).toHaveBeenCalled();
-      expect(inst.renderer.loop).toEqual(expect.any(Function));
+      expect(inst.video!.srcObject).toBeNull(); // the fake granted no stream to the retry; nothing dangling
     });
 
-    it("C: start() -> stop() -> start() while the first attempt is pending creates a fresh attempt instead of returning the doomed one", async () => {
+    it("2: a retry after a 15 s AR stall whose stalled start never lands fails again after the bounded wait, without a second getUserMedia", async () => {
+      vi.useFakeTimers();
       const s = make();
       const inst = fake.state.instances[0]!;
-      const resolvers: Array<() => void> = [];
-      const startedWaiters: Array<() => void> = [];
-      const nextStart = () => new Promise<void>((r) => startedWaiters.push(r));
-      inst.startImpl = () => new Promise<void>((r) => { resolvers.push(r); startedWaiters.shift()?.(); });
-      const firstStarted = nextStart();
+      inst.startImpl = hang;
+      const first = s.start();
+      const rejection = expect(first).rejects.toThrow(/15초/);
+      await vi.advanceTimersByTimeAsync(10);
+      inst.grantStream([{ stop: vi.fn() }]);
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + 300);
+      await rejection;
+      const second = s.start();
+      const rejection2 = expect(second).rejects.toThrow(/15초/);
+      await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS + 300);
+      await rejection2;
+      expect(inst.started).toBe(1);
+    });
+
+    it("C: start() -> stop() -> start() while the first attempt is pending creates a fresh attempt that adopts the pending MindAR start", async () => {
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      let finish: () => void = () => {};
+      const mindarStarted = new Promise<void>((started) => {
+        inst.startImpl = () => new Promise<void>((r) => { finish = r; started(); });
+      });
       const a = s.start();
-      await firstStarted;
+      await mindarStarted;
       s.stop();
-      expect(inst.stopped).toBe(1);
-      const secondStarted = nextStart();
+      expect(inst.stopped).toBe(0); // prompt open, nothing to release
       const b = s.start();
       expect(b).not.toBe(a);
-      await secondStarted;
-      expect(inst.started).toBe(2);
-      resolvers[1]!(); // the new attempt completes
-      await b;
-      expect(inst.renderer.loop).toEqual(expect.any(Function));
-      resolvers[0]!(); // the doomed attempt lands late
+      await flushMicrotasks();
+      expect(inst.started).toBe(1); // adopted, no second getUserMedia
+      inst.grantStream();
+      finish(); // the single MindAR start completes: the doomed attempt settles quietly, the new one succeeds
       await a;
-      await Promise.resolve();
-      expect(inst.stopped).toBe(1); // did not kill the live session
+      await b;
+      expect(inst.controllerStarts).toBe(1);
+      expect(inst.stopped).toBe(0); // the live session was not killed by the doomed attempt
       expect(inst.renderer.loop).toEqual(expect.any(Function));
     });
   });
