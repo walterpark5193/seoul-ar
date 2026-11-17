@@ -1,15 +1,17 @@
 // 바텀시트 DOM 연결: renderSheet 결과를 꽂고, 버튼·선택을 local/follow 액션으로 바꾼다.
+import type { Narration } from "../data/narration";
 import type { DataIndex, GuData, Metric } from "../data/types";
 import type { AppState, Store } from "../state/store";
 import { replaceKeepingFocus } from "./patch";
 import { renderSheet, type SheetOptions } from "./sheet";
 
 export interface SheetHandle {
-  render(state: AppState, data: GuData | null): void;
+  render(state: AppState, data: GuData | null, narration?: Narration | null): void;
   destroy(): void;
 }
 
-export function mountSheet(host: HTMLElement, store: Store, index: DataIndex, opts: SheetOptions = {}): SheetHandle {
+/** getIndex: 새 달을 가져오면 index가 바뀌므로 그릴 때마다 읽는다. */
+export function mountSheet(host: HTMLElement, store: Store, getIndex: () => DataIndex | null, opts: SheetOptions = {}): SheetHandle {
   const onClick = (ev: Event) => {
     const btn = (ev.target as Element).closest<HTMLElement>("button[data-action]");
     if (!btn || !host.contains(btn)) return;
@@ -25,8 +27,8 @@ export function mountSheet(host: HTMLElement, store: Store, index: DataIndex, op
   host.addEventListener("change", onChange);
 
   return {
-    render(state, data) {
-      replaceKeepingFocus(host, renderSheet(state, data, index, opts));
+    render(state, data, narration) {
+      replaceKeepingFocus(host, renderSheet(state, data, getIndex(), { ...opts, narration }));
     },
     destroy() {
       host.removeEventListener("click", onClick);

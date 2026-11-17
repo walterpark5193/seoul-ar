@@ -1,13 +1,14 @@
 // 앱 셸: 설정 → 실시간(없으면 모의)·무대 채널 → 연결(기다리지 않음) → 데이터 인덱스 → 라우터.
 import "./app.css";
 import { loadConfig } from "./config";
-import { loadGu, loadIndex } from "./data/loader";
+import { createIndexSource } from "./data/indexSource";
+import { forgetNarration, forgetNarrations, loadGu, loadIndex, loadNarration, reloadIndex } from "./data/loader";
 import { loadGeo, westToEast } from "./geoSource";
 import { createAppSyncRealtime } from "./realtime/appsync";
 import { withFallback } from "./realtime/fallback";
 import { createMockRealtime } from "./realtime/mock";
 import type { RealtimeClient } from "./realtime/types";
-import { redirect, startRouter, type Route } from "./router";
+import { queryFor, redirect, startRouter, type Route } from "./router";
 import { createSeoulScene } from "./scene/seoulScene";
 import { makeStageChannel } from "./stage/net/stageChannel";
 import { bindRemote } from "./state/remote";
@@ -108,18 +109,33 @@ async function main(): Promise<void> {
   void connecting.then(() => store.dispatch({ type: "conn", status: realtime.status }));
 
   let route: Route = "landing";
-  // 발표자 화면(호스트·무대)은 원본이라 원격 상태를 따라가지 않는다.
-  bindRemote({ realtime, store, index, isHost: () => route === "host" || route === "stage" });
+  // 새 달을 가져오면(호스트) 또는 원격 상태가 모르는 달을 가리키면(뷰어) index를 no-store로 다시 읽는다.
+  // index를 다시 읽으면 해설 캐시도 비운다(CONTRACTS 12.3).
+  const indexSource = createIndexSource(index, async () => {
+    const next = await reloadIndex();
+    forgetNarrations();
+    return next;
+  });
+  // 발표자 화면(호스트·무대)은 원본이라 원격 상태를 따라가지 않는다(CONTRACTS-stage 9).
+  bindRemote({
+    realtime, store,
+    index: () => indexSource.current,
+    refreshIndex: () => indexSource.refresh(),
+    isHost: () => route === "host" || route === "stage",
+  });
 
   const geo = loadGeo();
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ctx: ViewContext = {
     store,
-    index,
+    get index() { return indexSource.current; },
+    indexSource,
     config,
     realtime,
     stageChannel,
     loadGu: (month, gu) => loadGu(month, gu),
+    loadNarration: (month) => loadNarration(month),
+    forgetNarration: (month) => forgetNarration(month),
     navigate: redirect,
     toast,
     createScene: () => createSeoulScene(geo, { reducedMotion }),
@@ -136,7 +152,7 @@ async function main(): Promise<void> {
 
   let unmount: () => void = () => {};
   let seq = 0;
-  startRouter(async (next) => {
+  startRouter(async (next, query) => {
     const mine = ++seq;
     unmount();
     unmount = () => {};
@@ -150,6 +166,9 @@ async function main(): Promise<void> {
       if (mine !== seq) return; // 기다리는 사이 다른 화면으로 이동했다
       root.innerHTML = "";
     }
+    // AR(조정값)과 3D(stage=1 큰 화면 모드)만 쿼리를 받는다. #/stage(손짓 무대)는 받지 않고
+    // ?vote=를 location.hash에서 직접 읽는다(stageView). 이름만 겹칠 뿐 서로 다른 기능이다.
+    ctx.query = queryFor(next, query);
     if (next === "stage") {
       root.innerHTML = `<p class="boot" role="status">무대 화면을 준비하는 중</p>`;
       const mountStage = await loadStage();

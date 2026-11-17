@@ -24,7 +24,11 @@ export function mindArThreeCompat(): Plugin {
     transform(code, id) {
       if (!MINDAR_THREE_BUNDLE.test(id)) return null;
       const match = SRGB_IMPORT.exec(code);
-      if (!match) return null;
+      if (!match) {
+        // The bundle we are patching changed shape: fail the build instead of silently shipping
+        // whatever three/mind-ar combination this is.
+        this.error(`[mindar-three-compat] ${id} does not import sRGBEncoding from three any more; check the mind-ar/three versions and update or remove this plugin.`);
+      }
       const local = match[1];
       return {
         code: `const ${local} = ${LEGACY_SRGB_ENCODING};\n${code.replace(SRGB_IMPORT, "")}`,

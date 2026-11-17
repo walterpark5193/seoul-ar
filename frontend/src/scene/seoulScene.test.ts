@@ -295,9 +295,9 @@ describe("animation", () => {
     expect(instance(b, 0).scale.y).toBeCloseTo(mid, 10);
     s.update(0.3, camera);
     expect(instance(b, 0).scale.y).toBeCloseTo(0.35, 6);
-    // 새 데이터 객체(다른 달)는 다시 자란다
+    // 새 데이터 객체(다른 달, 값은 같음)는 0부터 다시 자라지 않고 지금 높이에서 보간한다(CONTRACTS 11)
     s.focus("강남구", gangnam(), "price");
-    expect(instance(b, 0).scale.y).toBeLessThan(0.001);
+    expect(instance(b, 0).scale.y).toBeCloseTo(0.35, 6);
   });
 
   it("ignores bad dt values", () => {
@@ -316,6 +316,7 @@ describe("setOverview / setMetric", () => {
     NAMES.forEach((name, i) => (summary[name] = stat(1000 + i * 100, 50 - i)));
     delete summary["중구"];
     s.setOverview(summary, "price");
+    s.update(0.6, camera); // 구 색은 보간된다(CONTRACTS 11)
     const jongno = colorOf(guMesh(s.group, "종로구"));
     const gangdong = colorOf(guMesh(s.group, "강동구"));
     expect(jongno).not.toBe(gangdong);
@@ -324,6 +325,7 @@ describe("setOverview / setMetric", () => {
     expect(colorOf(guMesh(s.group, "중구"))).toBe(hex(PALETTE.noData));
 
     s.setMetric("count"); // n은 종로구가 최대
+    s.update(0.6, camera);
     expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.ramp[4]));
     expect(colorOf(guMesh(s.group, "강동구"))).toBe(hex(PALETTE.ramp[0]));
   });
@@ -331,6 +333,7 @@ describe("setOverview / setMetric", () => {
   it("price null in summary shows noData", () => {
     const s = createSeoulScene(fixtureGeo(), noText);
     s.setOverview({ 종로구: stat(null, 0), 중구: stat(2000, 3), 용산구: stat(4000, 1) }, "price");
+    s.update(0.6, camera);
     expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.noData));
     expect(colorOf(guMesh(s.group, "중구"))).toBe(hex(PALETTE.ramp[0]));
   });
@@ -361,6 +364,301 @@ describe("setOverview / setMetric", () => {
       expect(pos.z).toBeCloseTo(p.z, 6);
       expect(scale.y).toBeCloseTo(p.height, 6);
     });
+  });
+});
+
+describe("time travel morph (CONTRACTS 11)", () => {
+  // 10월: 개포동 있음. 11월: 개포동 사라짐, 세곡동 새로 생김, 대치동이 3위 → 1위(칸 이동).
+  const october = (): GuData => ({
+    ...gangnam([
+      dong("압구정동", 4200, 3),
+      dong("청담동", 3900, 4),
+      dong("대치동", 3300, 7),
+      dong("삼성동", 2800, 5),
+      dong("역삼동", 2500, 12),
+      dong("개포동", 2200, 2),
+    ]),
+    month: "202610",
+  });
+  const november = (): GuData =>
+    gangnam([
+      dong("대치동", 4400, 9),
+      dong("압구정동", 4000, 2),
+      dong("청담동", 3600, 4),
+      dong("삼성동", 2900, 6),
+      dong("역삼동", 2600, 10),
+      dong("세곡동", 2000, 3),
+    ]);
+  const gangnamRings = () => fixtureGeo().gus.find((g) => g.name === "강남구")!.rings;
+  const slot = (data: GuData, name: string) =>
+    layoutBars(data.dongs, boundsOf(gangnamRings()), "price").find((p) => p.name === name)!;
+
+  function names(b: InstancedMesh): string[] {
+    return (b.userData.names as string[]).slice(0, b.count);
+  }
+  function byName(b: InstancedMesh, name: string): { pos: Vector3; scale: Vector3; color: Color } {
+    const i = names(b).indexOf(name);
+    if (i < 0) throw new Error(`no bar ${name}`);
+    const color = new Color();
+    b.getColorAt(i, color);
+    return { ...instance(b, i), color };
+  }
+  function settled() {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.focus("강남구", october(), "price");
+    s.update(0.6, camera);
+    return s;
+  }
+
+  it("bars expose instance → dong name in userData.names", () => {
+    const s = settled();
+    const b = bars(s.group);
+    expect(names(b)).toEqual(layoutBars(october().dongs, boundsOf(gangnamRings()), "price").map((p) => p.name));
+  });
+
+  it("month switch interpolates a matched dong's height and slides it to its new slot", () => {
+    const s = settled();
+    const b = bars(s.group);
+    const from = slot(october(), "대치동");
+    const to = slot(november(), "대치동");
+    expect(to.height).toBeGreaterThan(from.height);
+    expect(to.x).not.toBeCloseTo(from.x, 3); // 칸이 바뀐다
+    expect(byName(b, "대치동").scale.y).toBeCloseTo(from.height, 6);
+
+    s.focus("강남구", november(), "price");
+    // 0으로 돌아가지 않는다: 같은 동은 지금 높이에서 출발
+    expect(byName(b, "대치동").scale.y).toBeCloseTo(from.height, 6);
+    expect(byName(b, "대치동").pos.x).toBeCloseTo(from.x, 6);
+
+    s.update(0.3, camera); // e = 0.875
+    const mid = byName(b, "대치동");
+    expect(mid.scale.y).toBeCloseTo(from.height + (to.height - from.height) * 0.875, 6);
+    expect(mid.scale.y).toBeGreaterThan(from.height);
+    expect(mid.scale.y).toBeLessThan(to.height);
+    expect(mid.pos.x).toBeCloseTo(from.x + (to.x - from.x) * 0.875, 6);
+
+    s.update(0.3, camera);
+    const end = byName(b, "대치동");
+    expect(end.scale.y).toBeCloseTo(to.height, 6);
+    expect(end.pos.x).toBeCloseTo(to.x, 6);
+    expect(end.pos.z).toBeCloseTo(to.z, 6);
+    expect(end.scale.x).toBeCloseTo(to.size, 6);
+    // 구는 그대로 떠 있다(구가 바뀐 것이 아님)
+    expect(guMesh(s.group, "강남구").position.y).toBeCloseTo(0.03, 10);
+  });
+
+  it("a dong missing from the new month shrinks to 0.02, then leaves the instanced set", () => {
+    const s = settled();
+    const b = bars(s.group);
+    const start = slot(october(), "개포동").height;
+    s.focus("강남구", november(), "price");
+    expect(b.count).toBe(7); // 대상 6 + 떠나는 1
+    expect(names(b)[6]).toBe("개포동");
+    expect(byName(b, "개포동").scale.y).toBeCloseTo(start, 6);
+    s.update(0.3, camera);
+    expect(byName(b, "개포동").scale.y).toBeCloseTo(start + (0.02 - start) * 0.875, 6);
+    s.update(0.3, camera);
+    expect(b.count).toBe(6);
+    expect(names(b)).not.toContain("개포동");
+    expect(names(b)).toEqual(layoutBars(november().dongs, boundsOf(gangnamRings()), "price").map((p) => p.name));
+  });
+
+  it("a dong new in the target starts near 0.02 (noData) and grows", () => {
+    const s = settled();
+    const b = bars(s.group);
+    s.focus("강남구", november(), "price");
+    const born = byName(b, "세곡동");
+    expect(born.scale.y).toBeCloseTo(0.02, 6);
+    expect(born.color.getHex()).toBe(hex(PALETTE.noData));
+    s.update(0.6, camera);
+    expect(byName(b, "세곡동").scale.y).toBeCloseTo(slot(november(), "세곡동").height, 6);
+  });
+
+  it("bar colors change gradually", () => {
+    const s = settled();
+    const b = bars(s.group);
+    const c0 = byName(b, "대치동").color; // 10월: 램프 중간
+    s.focus("강남구", november(), "price");
+    s.update(0.15, camera);
+    const cMid = byName(b, "대치동").color;
+    s.update(0.45, camera);
+    const c1 = byName(b, "대치동").color; // 11월: 최댓값 → 램프 끝
+    expect(c1.getHex()).toBe(hex(PALETTE.ramp[4]));
+    expect(cMid.getHex()).not.toBe(c0.getHex());
+    expect(cMid.getHex()).not.toBe(c1.getHex());
+    for (const k of ["r", "g", "b"] as const) {
+      expect(cMid[k]).toBeGreaterThanOrEqual(Math.min(c0[k], c1[k]) - 1e-6);
+      expect(cMid[k]).toBeLessThanOrEqual(Math.max(c0[k], c1[k]) + 1e-6);
+    }
+  });
+
+  it("reducedMotion applies the new month immediately (no leaving bars)", () => {
+    const s = createSeoulScene(fixtureGeo(), { ...noText, reducedMotion: true });
+    s.focus("강남구", october(), "price");
+    s.focus("강남구", november(), "price");
+    const b = bars(s.group);
+    const expected = layoutBars(november().dongs, boundsOf(gangnamRings()), "price");
+    expect(b.count).toBe(6);
+    expect(names(b)).toEqual(expected.map((p) => p.name));
+    expected.forEach((p, i) => {
+      const { pos, scale } = instance(b, i);
+      expect(pos.x).toBeCloseTo(p.x, 6);
+      expect(scale.y).toBeCloseTo(p.height, 6);
+    });
+    const c = new Color();
+    b.getColorAt(0, c);
+    expect(c.getHex()).toBe(hex(PALETTE.ramp[4]));
+  });
+
+  it("a gu change still rises/falls and regrows from zero", () => {
+    const s = settled();
+    const seocho: GuData = { ...gangnam([dong("서초동", 3000, 5), dong("반포동", 5000, 8)]), gu: "서초구" };
+    s.focus("서초구", seocho, "price");
+    const b = bars(s.group);
+    expect(b.count).toBe(2);
+    expect(names(b)).toEqual(["반포동", "서초동"]);
+    expect(instance(b, 0).scale.y).toBeLessThan(0.001);
+    s.update(0.3, camera);
+    expect(guMesh(s.group, "서초구").position.y).toBeCloseTo(0.03 * 0.875, 10);
+    expect(guMesh(s.group, "강남구").position.y).toBeCloseTo(0.03 * 0.125, 10);
+    expect(instance(b, 0).scale.y).toBeCloseTo(0.35 * 0.875, 6);
+  });
+
+  it("losing the data for the same gu shrinks every bar out", () => {
+    const s = settled();
+    const b = bars(s.group);
+    s.focus("강남구", null, "price"); // 다음 달 로드 실패
+    expect(b.count).toBe(6);
+    s.update(0.6, camera);
+    expect(b.count).toBe(0);
+  });
+
+  it("picking a gu then receiving its data (focus(gu,null) → focus(gu,data)) is a fresh growth, not a grey morph", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.focus("강남구", null, "price"); // 뷰어: 구를 고르면 먼저 data 없이
+    s.update(0.2, camera);
+    s.focus("강남구", october(), "price"); // 로드 완료
+    const b = bars(s.group);
+    expect(b.count).toBe(6);
+    const top = byName(b, "압구정동"); // 10월 최댓값
+    expect(top.scale.y).toBeLessThan(0.001); // 0.02 바탕선 아래, 0에서 시작
+    expect(top.color.getHex()).toBe(hex(PALETTE.ramp[4])); // 회색(noData)이 아니라 대상 색을 바로
+    s.update(0.3, camera);
+    expect(byName(b, "압구정동").scale.y).toBeCloseTo(0.35 * 0.875, 6);
+    expect(byName(b, "압구정동").color.getHex()).toBe(hex(PALETTE.ramp[4]));
+  });
+
+  it("the gu name label survives focus(gu,null) → focus(gu,data) without blinking", () => {
+    const s = createSeoulScene(fixtureGeo(), {
+      makeTextTexture: () => {
+        const t = new Texture();
+        t.image = { width: 256, height: 64 };
+        return t;
+      },
+    });
+    s.focus("강남구", null, "price");
+    s.update(0.6, camera);
+    const guLabel = sprites(s.group).find((sp) => sp.name === "label:강남구")!;
+    expect(guLabel.material.opacity).toBe(1);
+    s.focus("강남구", october(), "price");
+    expect(sprites(s.group).find((sp) => sp.name === "label:강남구")).toBe(guLabel);
+    expect(guLabel.material.opacity).toBe(1);
+    const dongLabels = sprites(s.group).filter((sp) => sp !== guLabel);
+    expect(dongLabels).toHaveLength(5);
+    expect(dongLabels.every((sp) => sp.material.opacity === 0)).toBe(true); // 새 라벨만 나타난다
+  });
+
+  it("time travel keeps labels of dongs that stay in the top 5 (same sprite, opacity 1); only leavers fade out, newcomers fade in", () => {
+    const calls: string[] = [];
+    const s = createSeoulScene(fixtureGeo(), {
+      makeTextTexture: (text) => {
+        calls.push(text);
+        const t = new Texture();
+        t.image = { width: 256, height: 64 };
+        return t;
+      },
+    });
+    s.focus("강남구", october(), "price");
+    s.update(0.6, camera);
+    const label = (name: string) => sprites(s.group).find((sp) => sp.name.startsWith(`label:${name}`));
+    // 10월 상위 5: 압구정 청담 대치 삼성 역삼. 11월(변형) 상위 5: 대치 세곡 압구정 청담 삼성
+    const daechi = label("대치동")!;
+    const cheongdam = label("청담동")!;
+    const yeoksam = label("역삼동")!;
+    const guLabel = label("강남구")!;
+    const cheongdamTex = cheongdam.material.map;
+    expect(daechi.material.opacity).toBe(1);
+    expect(label("세곡동")).toBeUndefined();
+    const before = calls.length;
+
+    s.focus(
+      "강남구",
+      gangnam([
+        dong("대치동", 4400, 9),
+        dong("세곡동", 4100, 3),
+        dong("압구정동", 4000, 2),
+        dong("청담동", 3900, 4), // 값 그대로 → 텍스처도 그대로
+        dong("삼성동", 2900, 6),
+        dong("역삼동", 2600, 10),
+      ]),
+      "price",
+    );
+    // 남는 라벨은 같은 객체, 불투명도 1 유지(깜빡임 없음)
+    expect(label("대치동")).toBe(daechi);
+    expect(daechi.material.opacity).toBe(1);
+    expect(daechi.name).toBe("label:대치동 4,400만원/㎡"); // 값이 바뀌면 글만 바꾼다
+    expect(label("청담동")).toBe(cheongdam);
+    expect(cheongdam.material.map).toBe(cheongdamTex);
+    expect(label("강남구")).toBe(guLabel);
+    expect(guLabel.material.opacity).toBe(1);
+    // 텍스처는 바뀐 글(대치·압구정·삼성)과 새 라벨(세곡)만 만든다. 구 이름은 다시 만들지 않는다.
+    expect(calls.slice(before).sort()).toEqual(
+      ["대치동 4,400만원/㎡", "삼성동 2,900만원/㎡", "세곡동 4,100만원/㎡", "압구정동 4,000만원/㎡"].sort(),
+    );
+    const sego = label("세곡동")!;
+    expect(sego.material.opacity).toBe(0);
+    expect(label("역삼동")).toBe(yeoksam);
+    expect(yeoksam.material.opacity).toBe(1);
+
+    s.update(0.3, camera);
+    expect(daechi.material.opacity).toBe(1);
+    expect(sego.material.opacity).toBeCloseTo(0.875, 10);
+    expect(yeoksam.material.opacity).toBeCloseTo(0.125, 10);
+
+    s.update(0.3, camera);
+    expect(sego.material.opacity).toBe(1);
+    expect(label("역삼동")).toBeUndefined(); // 다 사라진 뒤 제거
+    expect(sprites(s.group)).toHaveLength(6);
+  });
+
+  it("setOverview interpolates gu colors from current to target", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    const s1 = { 종로구: stat(1000, 1), 강동구: stat(3000, 1) };
+    const s2 = { 종로구: stat(3000, 1), 강동구: stat(1000, 1) };
+    s.setOverview(s1, "price");
+    s.update(0.6, camera);
+    const jongno = () => (guMesh(s.group, "종로구").material as MeshStandardMaterial).color.clone();
+    const c0 = jongno();
+    expect(c0.getHex()).toBe(hex(PALETTE.ramp[0]));
+    s.setOverview(s2, "price");
+    expect(jongno().getHex()).toBe(c0.getHex()); // 아직 출발점
+    s.update(0.15, camera);
+    const cMid = jongno();
+    expect(cMid.getHex()).not.toBe(hex(PALETTE.ramp[0]));
+    expect(cMid.getHex()).not.toBe(hex(PALETTE.ramp[4]));
+    // 같은 요약 객체가 다시 와도 다시 시작하지 않는다
+    s.setOverview(s2, "price");
+    expect(jongno().getHex()).toBe(cMid.getHex());
+    s.update(0.45, camera);
+    expect(jongno().getHex()).toBe(hex(PALETTE.ramp[4]));
+  });
+
+  it("setOverview with reducedMotion recolors immediately", () => {
+    const s = createSeoulScene(fixtureGeo(), { ...noText, reducedMotion: true });
+    s.setOverview({ 종로구: stat(1000, 1), 강동구: stat(3000, 1) }, "price");
+    expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.ramp[0]));
+    s.setOverview({ 종로구: stat(3000, 1), 강동구: stat(1000, 1) }, "price");
+    expect(colorOf(guMesh(s.group, "종로구"))).toBe(hex(PALETTE.ramp[4]));
   });
 });
 
@@ -481,6 +779,7 @@ describe("stage: lift", () => {
     const geo = fixtureGeo();
     const s = createSeoulScene(geo, noText);
     s.setOverview(priceSummary(), "price");
+    s.update(1, camera); // 구 색은 보간된다(CONTRACTS 11): 전체 보기 색에 닿은 뒤 잰다
     const own = colorOf(guMesh(s.group, "강남구"));
     s.lift("강남구");
     const m = guMesh(s.group, "강남구");
@@ -512,6 +811,7 @@ describe("stage: lift", () => {
   it("lift null restores height, colors and hides the shadow", () => {
     const s = createSeoulScene(fixtureGeo(), noText);
     s.setOverview(priceSummary(), "price");
+    s.update(1, camera); // 구 색은 보간된다(CONTRACTS 11)
     const before = guMeshes(s.group).map(colorOf);
     s.lift("강남구");
     s.update(1, camera);
@@ -715,6 +1015,47 @@ describe("stage: setHover", () => {
     a.update(1, camera);
     expect(guMesh(a.group, "서초구").position.y).toBeCloseTo(0, 10);
     expect(edgeOf(guMesh(a.group, "서초구"))).toBe(hex(PALETTE.bg));
+  });
+});
+
+describe("stage × time travel (CONTRACTS-stage 6.2 with CONTRACTS 11)", () => {
+  it("lift dims the rest through the gu colour interpolation; the hover outline is immediate", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.setOverview(priceSummary(), "price");
+    s.update(1, camera);
+    const jongno = guMesh(s.group, "종로구");
+    const overview = colorOf(jongno);
+    s.lift("강남구");
+    expect(colorOf(jongno)).toBe(overview); // 아직 출발점
+    s.update(0.15, camera);
+    expect(colorOf(jongno)).not.toBe(overview);
+    expect(colorOf(jongno)).not.toBe(hex(PALETTE.guDim));
+    s.setHover("서초구"); // 색 보간 중에도 테두리는 바로
+    expect(edgeOf(guMesh(s.group, "서초구"))).toBe(hex(PALETTE.text));
+    s.update(1, camera);
+    expect(colorOf(jongno)).toBe(hex(PALETTE.guDim));
+    s.setHover(null);
+    expect(edgeOf(guMesh(s.group, "서초구"))).toBe(hex(PALETTE.bg));
+  });
+
+  it("a month morph while lifted keeps the gu at LIFT_Y and morphs its bars in place instead of regrowing", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.focus("강남구", gangnam(), "price");
+    s.update(1, camera);
+    s.lift("강남구");
+    s.update(1, camera);
+    const m = guMesh(s.group, "강남구");
+    const b = bars(s.group);
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    s.focus("강남구", { ...gangnam(), month: "202610" }, "price"); // 다른 달(같은 값)
+    expect(instance(b, 0).scale.y).toBeCloseTo(0.35, 6); // 0으로 돌아가지 않는다
+    s.update(0.3, camera);
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    expect(instance(b, 0).pos.y).toBeCloseTo(LIFT_Y + GU_DEPTH, 6);
+    s.focus("서초구", null, "price"); // 들어올린 채 focus가 다른 구로: 들어올린 구는 LIFT_Y에 머문다
+    s.update(1, camera);
+    expect(m.position.y).toBeCloseTo(LIFT_Y, 10);
+    expect(guMesh(s.group, "서초구").position.y).toBeCloseTo(0.03, 10);
   });
 });
 

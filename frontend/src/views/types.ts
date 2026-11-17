@@ -1,6 +1,8 @@
 // 뷰가 받는 공용 의존성. 씬·AR 모듈은 main.ts가 주입한다(테스트는 가짜를 넣는다).
 import type { ArSession, ArSessionOptions } from "../ar/session";
 import type { AppConfig } from "../config";
+import type { IndexSource } from "../data/indexSource";
+import type { Narration } from "../data/narration";
 import type { DataIndex, GuData } from "../data/types";
 import type { RealtimeClient } from "../realtime/types";
 import type { StageChannel } from "../stage/net/stageChannel";
@@ -14,12 +16,19 @@ export interface ArDeps {
 
 export interface ViewContext {
   store: Store;
+  /** 지금 쓰는 index. 새 달을 가져오면 바뀌므로 쓸 때마다 읽는다(붙잡아 두지 않는다). */
   index: DataIndex;
+  /** index를 다시 읽고 바뀌면 알린다(월 가져오기, 모르는 달의 원격 상태). */
+  indexSource: IndexSource;
   config: AppConfig;
   realtime: RealtimeClient;
   /** 무대 채널 /seoul/stage (CONTRACTS-stage 9절). main.ts가 makeStageChannel로 만든다. */
   stageChannel: StageChannel;
   loadGu(month: string, gu: string): Promise<GuData>;
+  /** 그 달의 AI 해설(없으면 null). 테스트 가짜 문맥에서는 생략할 수 있다. */
+  loadNarration?(month: string): Promise<Narration | null>;
+  /** 그 달 해설 캐시를 비운다(다시 확인하기 전에). */
+  forgetNarration?(month: string): void;
   /** 뷰가 스스로 다른 화면으로 보낼 때(폴백). 기록을 바꿔치기한다. 일반 이동은 링크 href로 한다. */
   navigate(hash: string): void;
   toast(message: string): void;
@@ -27,6 +36,8 @@ export interface ViewContext {
   createScene(): SeoulScene;
   reducedMotion: boolean;
   ar: ArDeps;
+  /** 해시의 "?" 뒤. main이 AR(조정 파라미터, views/arTuning.ts)과 3D(stage=1 큰 화면 모드) 뷰에만 넘긴다. */
+  query?: string;
 }
 
 /** 뷰를 root에 그리고 해제 함수를 돌려준다. */

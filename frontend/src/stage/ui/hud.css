@@ -1,6 +1,6 @@
 /* 무대 상단·안내·시작 화면·자막. 토큰은 본체 app.css 변수. */
 .stage-top { display: flex; align-items: baseline; gap: 24px; padding: 16px 28px; font-size: 22px; color: var(--ink); font-family: var(--font); }
-.stage-title { margin: 0; font-size: 22px; font-weight: 700; }
+.stage-top .stage-title { margin: 0; font-size: 22px; font-weight: 700; } /* 큰 화면(#/3d?stage=1) .stage-title과 이름이 겹쳐 상단 바 안으로 한정 */
 .stage-metric { margin: 0; font-size: 22px; color: var(--ink-2); }
 .stage-status { margin: 0 0 0 auto; display: flex; gap: 16px; font-size: 22px; }
 .stage-conn.is-live { color: var(--amber); }

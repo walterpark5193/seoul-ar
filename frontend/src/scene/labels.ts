@@ -49,22 +49,35 @@ export function canvasTextTexture(text: string, color: string): Texture | null {
   }
 }
 
+function aspectOf(tex: Texture): number {
+  const img = tex.image as { width?: unknown; height?: unknown } | null | undefined;
+  return img && typeof img.width === "number" && typeof img.height === "number" && img.width > 0 && img.height > 0
+    ? img.width / img.height
+    : 4;
+}
+
 /** 팩토리가 null을 주면 라벨 없이 진행(null). 아래 가운데가 기준점, 세로 크기 worldHeight. */
 export function makeLabelSprite(text: string, worldHeight: number, factory: TextTextureFactory): Sprite | null {
   const tex = factory(text, PALETTE.text);
   if (!tex) return null;
-  const img = tex.image as { width?: unknown; height?: unknown } | null | undefined;
-  const aspect =
-    img && typeof img.width === "number" && typeof img.height === "number" && img.width > 0 && img.height > 0
-      ? img.width / img.height
-      : 4;
   const material = new SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
   const sprite = new Sprite(material);
   sprite.name = `label:${text}`;
   sprite.center.set(0.5, 0);
-  sprite.scale.set(worldHeight * aspect, worldHeight, 1);
+  sprite.scale.set(worldHeight * aspectOf(tex), worldHeight, 1);
   sprite.renderOrder = 10;
   return sprite;
+}
+
+/** 같은 스프라이트에 새 글을 입힌다(텍스처만 교체, 이전 텍스처는 해제). 팩토리가 null이면 false, 스프라이트는 그대로. */
+export function retextLabelSprite(sprite: Sprite, text: string, worldHeight: number, factory: TextTextureFactory): boolean {
+  const tex = factory(text, PALETTE.text);
+  if (!tex) return false;
+  sprite.material.map?.dispose();
+  sprite.material.map = tex;
+  sprite.name = `label:${text}`;
+  sprite.scale.set(worldHeight * aspectOf(tex), worldHeight, 1);
+  return true;
 }
 
 /** 스프라이트 지오메트리는 three가 모든 Sprite에 공유하므로 버리지 않는다. 텍스처와 재질만. */

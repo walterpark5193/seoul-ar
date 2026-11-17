@@ -120,4 +120,73 @@ describe("createAppSyncRealtime", () => {
     await expect(rt.publish(msg)).resolves.toBeUndefined();
     expect(postMock).toHaveBeenCalledWith("/seoul/state", msg);
   });
+
+  describe("jobs channel", () => {
+    const job = { v: 1, type: "job", jobId: "j-1", month: "202610", state: "running", done: 12, total: 25, gu: "강서구", ts: 2 };
+
+    it("connects /seoul/jobs lazily on the first subscribeJobs and delivers job messages only to job handlers", async () => {
+      const stateCh = fakeChannel();
+      const jobsCh = fakeChannel();
+      connectMock.mockImplementation(async (path: string) => (path === "/seoul/jobs" ? jobsCh : stateCh));
+      const rt = createAppSyncRealtime(cfg);
+      const onState = vi.fn();
+      rt.subscribe(onState);
+      await rt.connect();
+      expect(connectMock.mock.calls.map((c) => c[0])).toEqual(["/seoul/state"]);
+      const onJob = vi.fn();
+      const onJob2 = vi.fn();
+      rt.subscribeJobs(onJob);
+      rt.subscribeJobs(onJob2);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connectMock.mock.calls.map((c) => c[0])).toEqual(["/seoul/state", "/seoul/jobs"]);
+      jobsCh.emit(job);
+      jobsCh.emit(JSON.stringify({ ...job, done: 13 }));
+      jobsCh.emit({ junk: true });
+      expect(onJob).toHaveBeenCalledTimes(2);
+      expect(onJob2).toHaveBeenCalledTimes(2);
+      expect(onState).not.toHaveBeenCalled();
+      stateCh.emit(job);
+      expect(onState).not.toHaveBeenCalled();
+      rt.close();
+    });
+
+    it("retries the jobs channel on its own without touching the state status", async () => {
+      const stateCh = fakeChannel();
+      const jobsCh = fakeChannel();
+      let jobsAttempts = 0;
+      connectMock.mockImplementation(async (path: string) => {
+        if (path !== "/seoul/jobs") return stateCh;
+        jobsAttempts++;
+        if (jobsAttempts === 1) throw new Error("jobs refused");
+        return jobsCh;
+      });
+      const rt = createAppSyncRealtime(cfg);
+      await rt.connect();
+      const onJob = vi.fn();
+      expect(() => rt.subscribeJobs(onJob)).not.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rt.status).toBe("open");
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(jobsAttempts).toBe(2);
+      jobsCh.emit(job);
+      expect(onJob).toHaveBeenCalledTimes(1);
+      expect(rt.status).toBe("open");
+      rt.close();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(jobsAttempts).toBe(2);
+    });
+
+    it("unsubscribing a job handler stops delivery", async () => {
+      const jobsCh = fakeChannel();
+      connectMock.mockResolvedValue(jobsCh);
+      const rt = createAppSyncRealtime(cfg);
+      const onJob = vi.fn();
+      const off = rt.subscribeJobs(onJob);
+      await vi.advanceTimersByTimeAsync(0);
+      off();
+      jobsCh.emit(job);
+      expect(onJob).not.toHaveBeenCalled();
+      rt.close();
+    });
+  });
 });

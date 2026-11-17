@@ -5,7 +5,10 @@
   "type": "commonjs",
   "bin": { "seoul-ar-infra": "bin/app.js" },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.js\" \"lambda/**/*.test.mjs\"",
+    "test:lambda": "node --test \"lambda/**/*.test.mjs\"",
+    "test:stack": "node --test \"test/**/*.test.js\"",
+    "sync:lambda": "node scripts/sync-lambda-shared.mjs",
     "synth": "cdk synth --strict",
     "deploy": "cdk deploy --require-approval never --outputs-file cdk-outputs.json",
     "destroy": "cdk destroy"

@@ -79,4 +79,132 @@ describe("bindViewer", () => {
     store.dispatch({ type: "conn", status: "open" });
     expect(onSheet).toHaveBeenCalledTimes(1);
   });
+
+  describe("same-gu month switch (time travel morph, CONTRACTS 11)", () => {
+    const guMonth = (name: string, month: string): GuData => ({ ...gu(name), month });
+
+    it("keeps the previous month's data on the scene until the new one arrives: no null in between", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202610", gu: "중구", follow: true });
+      const next = deferred<GuData>();
+      const loadGu = vi.fn((m: string, g: string) => (m === "202610" ? Promise.resolve(guMonth(g, m)) : next.promise));
+      const onScene = vi.fn();
+      bindViewer({ store, loadGu, onScene, onSheet: vi.fn() });
+      await flush();
+      store.dispatch({ type: "remote", msg: { v: 1, type: "state", month: "202611", gu: "중구", metric: "price", ts: 1 } });
+      store.dispatch({ type: "conn", status: "open" });
+      store.dispatch({ type: "conn", status: "error" });
+      next.resolve(guMonth("중구", "202611"));
+      await flush();
+      const seq = onScene.mock.calls.map(([s, d]) => `${s.gu}:${d ? d.month : "null"}`);
+      // 처음 마운트는 "보여 줄 것이 없는" 구 변경이라 null로 시작한다. 그 뒤 두 달 사이에는 null이 없다.
+      expect(seq).toEqual(["중구:null", "중구:202610", "중구:202611"]);
+    });
+
+    it("keeps the held data in the sheet (new month label) until the new month arrives", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202610", gu: "중구" });
+      const next = deferred<GuData>();
+      const loadGu = vi.fn((m: string, g: string) => (m === "202610" ? Promise.resolve(guMonth(g, m)) : next.promise));
+      const onSheet = vi.fn();
+      bindViewer({ store, loadGu, onScene: vi.fn(), onSheet });
+      await flush();
+      store.dispatch({ type: "local", month: "202611" });
+      const [s, d] = onSheet.mock.calls.at(-1)!;
+      expect(s.month).toBe("202611");
+      expect(d?.month).toBe("202610");
+      next.resolve(guMonth("중구", "202611"));
+      await flush();
+      expect(onSheet.mock.calls.at(-1)?.[1]?.month).toBe("202611");
+    });
+
+    it("applies a metric change made during the load together with the new data", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202610", gu: "중구" });
+      const next = deferred<GuData>();
+      const loadGu = vi.fn((m: string, g: string) => (m === "202610" ? Promise.resolve(guMonth(g, m)) : next.promise));
+      const onScene = vi.fn();
+      bindViewer({ store, loadGu, onScene, onSheet: vi.fn() });
+      await flush();
+      store.dispatch({ type: "local", month: "202611" });
+      store.dispatch({ type: "local", metric: "count" });
+      next.resolve(guMonth("중구", "202611"));
+      await flush();
+      const last = onScene.mock.calls.at(-1)!;
+      expect(onScene.mock.calls.map(([, d]) => d?.month ?? null)).toEqual([null, "202610", "202611"]);
+      expect(last[0]).toMatchObject({ month: "202611", metric: "count" });
+      expect(last[1]?.month).toBe("202611");
+    });
+
+    it("a real gu change still shows the gu at once with null, then its data", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202611", gu: "중구" });
+      const next = deferred<GuData>();
+      const loadGu = vi.fn((m: string, g: string) => (g === "중구" ? Promise.resolve(guMonth(g, m)) : next.promise));
+      const onScene = vi.fn();
+      bindViewer({ store, loadGu, onScene, onSheet: vi.fn() });
+      await flush();
+      store.dispatch({ type: "local", gu: "마포구" });
+      expect(onScene.mock.calls.at(-1)?.[0].gu).toBe("마포구");
+      expect(onScene.mock.calls.at(-1)?.[1]).toBeNull();
+      next.resolve(guMonth("마포구", "202611"));
+      await flush();
+      expect(onScene.mock.calls.at(-1)?.[1]?.gu).toBe("마포구");
+    });
+  });
+
+  describe("narration", () => {
+    const narr = (month: string) => ({ v: 1 as const, month, generatedAt: "", model: "m", items: { "서울 전체": `${month} 문장` } });
+
+    it("loads the month's narration and passes it to the sheet, reloading when the month changes", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202611" });
+      const onSheet = vi.fn();
+      const loadNarration = vi.fn(async (m: string) => narr(m));
+      bindViewer({ store, loadGu: vi.fn(), loadNarration, onScene: vi.fn(), onSheet });
+      await flush();
+      expect(onSheet.mock.calls.at(-1)?.[2]).toMatchObject({ month: "202611" });
+      store.dispatch({ type: "local", month: "202610" });
+      await flush();
+      expect(loadNarration).toHaveBeenLastCalledWith("202610");
+      expect(onSheet.mock.calls.at(-1)?.[2]).toMatchObject({ month: "202610" });
+    });
+
+    it("never passes a narration for another month while the new one loads", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202611" });
+      const onSheet = vi.fn();
+      const later = deferred<ReturnType<typeof narr>>();
+      const loadNarration = vi.fn(async (m: string) => (m === "202611" ? narr(m) : later.promise));
+      bindViewer({ store, loadGu: vi.fn(), loadNarration, onScene: vi.fn(), onSheet });
+      await flush();
+      store.dispatch({ type: "local", month: "202610" });
+      expect(onSheet.mock.calls.at(-1)?.[2] ?? null).toBeNull();
+      later.resolve(narr("202610"));
+      await flush();
+      expect(onSheet.mock.calls.at(-1)?.[2]).toMatchObject({ month: "202610" });
+    });
+
+    it("checks again later while the narration is missing, and stops after unbind", async () => {
+      vi.useFakeTimers();
+      try {
+        const store = createStore({ ...INITIAL_STATE, month: "202611" });
+        const onSheet = vi.fn();
+        const loadNarration = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(narr("202611"));
+        const forgetNarration = vi.fn();
+        const off = bindViewer({ store, loadGu: vi.fn(), loadNarration, forgetNarration, onScene: vi.fn(), onSheet, narrationRetryMs: 60_000 });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(loadNarration).toHaveBeenCalledTimes(1);
+        const sheetsAfterFirst = onSheet.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        // 재시도 전에 음수 캐시를 비워 60초 + 60초로 늘어나지 않게 하고, 여전히 없으면 시트를 다시 그리지 않는다.
+        expect(forgetNarration).toHaveBeenCalledWith("202611");
+        expect(forgetNarration.mock.invocationCallOrder[0]!).toBeLessThan(loadNarration.mock.invocationCallOrder[1]!);
+        expect(loadNarration).toHaveBeenCalledTimes(2);
+        expect(onSheet.mock.calls.length).toBe(sheetsAfterFirst);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(loadNarration).toHaveBeenCalledTimes(3);
+        expect(onSheet.mock.calls.at(-1)?.[2]).toMatchObject({ month: "202611" });
+        await vi.advanceTimersByTimeAsync(300_000);
+        expect(loadNarration).toHaveBeenCalledTimes(3);
+        off();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

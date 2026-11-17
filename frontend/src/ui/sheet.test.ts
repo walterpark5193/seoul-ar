@@ -44,6 +44,12 @@ describe("renderSheet", () => {
     expect(t).toContain("52.6억");
   });
 
+  it("says a capped fetch is incomplete, not a 1,000-row cutoff", () => {
+    const t = text(renderSheet(state(), { ...gangnam, total: stat({ truncated: true }) }, index));
+    expect(t).toContain("거래가 많아 일부만 집계했습니다.");
+    expect(t).not.toContain("1,000건");
+  });
+
   it("sheet renders 거래 없음", () => {
     const t = text(renderSheet(state({ gu: "도봉구" }), null, index));
     expect(t).toContain("도봉구");
@@ -99,6 +105,108 @@ describe("renderSheet", () => {
     const html = renderSheet(state(), gangnam, index, { altView: { href: "#/3d", label: "3D로 보기" } });
     expect(html).toContain('href="#/3d"');
     expect(text(html)).toContain("3D로 보기");
+  });
+
+  describe("top dong list", () => {
+    const dong = (name: string, medPerM2: number | null, n: number) => ({
+      name, n, cancelled: 0, nApt: 0, medPerM2, medPerM2Apt: null, medAmt: 1, maxAmt: 1, usage: {},
+    });
+    // CONTRACTS 2.2 order: medPerM2 desc, null last.
+    const many: GuData = {
+      ...gangnam,
+      dongs: [
+        dong("대치동", 3300, 7), dong("압구정동", 3200, 3), dong("삼성동", 3000, 9), dong("청담동", 2950, 2),
+        dong("역삼동", 2600, 12), dong("개포동", 2400, 5), dong("일원동", null, 1),
+      ],
+    };
+    const rows = (html: string) =>
+      [...html.matchAll(/<li class="dong[^"]*">([\s\S]*?)<\/li>/g)].map((m) => text(m[1]!).trim());
+
+    it("lists the top 5 dongs in the data's order for price, with value and count", () => {
+      const r = rows(renderSheet(state({ metric: "price" }), many, index));
+      expect(r).toHaveLength(5);
+      expect(r.map((t) => t.split(" ")[1])).toEqual(["대치동", "압구정동", "삼성동", "청담동", "역삼동"]);
+      expect(r[0]).toContain("3,300만원/㎡");
+      expect(r[0]).toContain("7건");
+      expect(r[0]).toMatch(/^1 /);
+    });
+
+    it("sorts by trade count for the count metric", () => {
+      const r = rows(renderSheet(state({ metric: "count" }), many, index));
+      expect(r.map((t) => t.split(" ")[1])).toEqual(["역삼동", "삼성동", "대치동", "개포동", "압구정동"]);
+      expect(r[0]).toContain("12건");
+      expect(r[0]).toContain("2,600만원/㎡");
+    });
+
+    it("shows 거래 없음 rows gracefully and lists fewer than 5 when there are fewer dongs", () => {
+      const r = rows(renderSheet(state({ metric: "price" }), gangnam, index));
+      expect(r).toHaveLength(2);
+      expect(r[1]).toContain("거래 없음");
+      expect(r[1]).toContain("2건");
+      expect(r.join(" ")).not.toMatch(/NaN|undefined|null/);
+    });
+
+    it("keeps the same gu's held list while the next month loads, with the new month's figures", () => {
+      const held = { ...many, month: "202610", total: stat({ medPerM2: 9999 }) };
+      const html = renderSheet(state({ month: "202611", metric: "price" }), held, index);
+      expect(rows(html)).toHaveLength(5);
+      expect(text(html)).toContain("2026년 11월");
+      expect(text(html)).toContain("2,890만원/㎡");
+      expect(text(html)).not.toContain("9,999만원/㎡");
+    });
+
+    it("omits the list for Seoul overview, while loading, and for a gu with no dongs", () => {
+      expect(rows(renderSheet(state({ gu: null }), null, index))).toHaveLength(0);
+      expect(rows(renderSheet(state(), null, index))).toHaveLength(0);
+      expect(rows(renderSheet(state(), { ...gangnam, dongs: [] }, index))).toHaveLength(0);
+      expect(rows(renderSheet(state({ gu: "중구" }), many, index))).toHaveLength(0);
+    });
+
+    it("titles the list by metric", () => {
+      expect(text(renderSheet(state({ metric: "price" }), many, index))).toContain("㎡당 중앙값 상위 법정동");
+      expect(text(renderSheet(state({ metric: "count" }), many, index))).toContain("거래가 많은 법정동");
+    });
+  });
+
+  describe("AI 해설", () => {
+    const narration = {
+      v: 1 as const, month: "202611", generatedAt: "", model: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      items: { "서울 전체": "11월 서울 매매 46건입니다.", 강남구: "강남구 11월: <b>압구정동</b>이 가장 높습니다." },
+    };
+
+    it("shows the selected gu's line with the attribution, escaped", () => {
+      const html = renderSheet(state(), gangnam, index, { narration });
+      expect(html).toContain('class="ai-note"');
+      expect(text(html)).toContain("AI 해설");
+      expect(text(html)).toContain("강남구 11월:");
+      expect(html).toContain("&lt;b&gt;압구정동&lt;/b&gt;");
+      expect(html).not.toContain("<b>압구정동</b>");
+      expect(text(html)).toContain("Bedrock · claude-haiku-4-5-20251001 · 자동 생성, 참고용");
+    });
+
+    it("uses the 서울 전체 line in the overview", () => {
+      expect(text(renderSheet(state({ gu: null }), null, index, { narration }))).toContain("11월 서울 매매 46건입니다.");
+    });
+
+    it("is placed under the numbers", () => {
+      const html = renderSheet(state(), gangnam, index, { narration });
+      expect(html.indexOf('class="figs"')).toBeLessThan(html.indexOf('class="ai-note"'));
+    });
+
+    it("hides the whole area when there is no narration, no item for the key, or another month", () => {
+      expect(renderSheet(state(), gangnam, index)).not.toContain("ai-note");
+      expect(renderSheet(state(), gangnam, index, { narration: null })).not.toContain("ai-note");
+      expect(renderSheet(state({ gu: "도봉구" }), null, index, { narration })).not.toContain("ai-note");
+      expect(renderSheet(state({ month: "202610" }), null, index, { narration })).not.toContain("ai-note");
+    });
+  });
+
+  it("shows the AR tuning note under the header only when given", () => {
+    const withNote = renderSheet(state(), gangnam, index, { tuningNote: "조정값 적용 중: cf=0.0001 <b>" });
+    expect(withNote).toContain('class="sheet-tuning"');
+    expect(text(withNote)).toContain("조정값 적용 중: cf=0.0001");
+    expect(withNote).not.toContain("<b>");
+    expect(renderSheet(state(), gangnam, index)).not.toContain("sheet-tuning");
   });
 
   it("escapes names coming from data", () => {

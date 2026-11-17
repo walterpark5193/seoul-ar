@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { withFallback } from "./fallback";
 import { createMockRealtime } from "./mock";
-import type { ConnStatus, RealtimeClient, StateMessage } from "./types";
+import type { ConnStatus, JobMessage, RealtimeClient, StateMessage } from "./types";
 
 const msg: StateMessage = { v: 1, type: "state", month: "202611", gu: null, metric: "count", ts: 2 };
 
@@ -11,6 +11,7 @@ function brokenClient(publish = vi.fn(async () => {})): RealtimeClient {
     get status() { return status; },
     async connect() { status = "error"; throw new Error("socket refused"); },
     subscribe: () => () => {},
+    subscribeJobs: () => () => {},
     publish,
     onStatus: () => () => {},
     close() { status = "closed"; },
@@ -21,17 +22,20 @@ function brokenClient(publish = vi.fn(async () => {})): RealtimeClient {
 function flakyClient() {
   let status: ConnStatus = "idle";
   const handlers = new Set<(m: StateMessage) => void>();
+  const jobHandlers = new Set<(m: JobMessage) => void>();
   const statusSubs = new Set<(s: ConnStatus) => void>();
   const set = (s: ConnStatus) => { status = s; for (const cb of statusSubs) cb(s); };
-  const client: RealtimeClient & { recover(): void; emit(m: StateMessage): void } = {
+  const client: RealtimeClient & { recover(): void; emit(m: StateMessage): void; emitJob(m: JobMessage): void } = {
     get status() { return status; },
     async connect() { set("connecting"); set("error"); throw new Error("events.connect: 8000ms timeout"); },
     subscribe(h) { handlers.add(h); return () => { handlers.delete(h); }; },
+    subscribeJobs: vi.fn((h: (m: JobMessage) => void) => { jobHandlers.add(h); return () => { jobHandlers.delete(h); }; }),
     publish: vi.fn(async () => {}),
     onStatus(cb) { statusSubs.add(cb); return () => { statusSubs.delete(cb); }; },
     close() { set("closed"); },
     recover() { set("connecting"); set("open"); },
     emit(m) { for (const h of handlers) h(m); },
+    emitJob(m) { for (const h of jobHandlers) h(m); },
   };
   return client;
 }
@@ -91,5 +95,43 @@ describe("withFallback", () => {
     const rt = withFallback(null, () => createMockRealtime({ channel: () => null }));
     await rt.connect();
     expect(rt.status).toBe("open");
+  });
+
+  describe("jobs", () => {
+    const job: JobMessage = { v: 1, type: "job", jobId: "j", month: "202610", state: "done", done: 25, total: 25, ts: 3 };
+
+    it("subscribes to the primary's jobs lazily and forwards them", async () => {
+      const primary = flakyClient();
+      const rt = withFallback(primary, () => createMockRealtime({ channel: () => null }));
+      await rt.connect();
+      expect(primary.subscribeJobs).not.toHaveBeenCalled();
+      const onJob = vi.fn();
+      rt.subscribeJobs(onJob);
+      expect(primary.subscribeJobs).toHaveBeenCalledTimes(1);
+      rt.subscribeJobs(vi.fn());
+      expect(primary.subscribeJobs).toHaveBeenCalledTimes(1);
+      primary.emitJob(job);
+      expect(onJob).toHaveBeenCalledWith(job);
+    });
+
+    it("also forwards jobs from the same-device mock while degraded", async () => {
+      const mock = createMockRealtime({ channel: () => null });
+      const rt = withFallback(flakyClient(), () => mock);
+      const onJob = vi.fn();
+      rt.subscribeJobs(onJob);
+      await rt.connect();
+      mock.publishJob(job);
+      expect(onJob).toHaveBeenCalledWith(job);
+    });
+
+    it("stops forwarding after unsubscribe", async () => {
+      const primary = flakyClient();
+      const rt = withFallback(primary, () => createMockRealtime({ channel: () => null }));
+      const onJob = vi.fn();
+      const off = rt.subscribeJobs(onJob);
+      off();
+      primary.emitJob(job);
+      expect(onJob).not.toHaveBeenCalled();
+    });
   });
 });

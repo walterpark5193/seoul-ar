@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderHostControls, toMessage, viewerUrl } from "./hostView";
+import { renderHostControls, stageUrl, toMessage, viewerUrl } from "./hostView";
 import type { AppState } from "../state/store";
 import type { DataIndex } from "../data/types";
 
@@ -13,6 +13,11 @@ describe("hostView", () => {
   it("viewerUrl prefers the configured app URL and points at #/ar", () => {
     expect(viewerUrl("https://d1.cloudfront.net/", { origin: "http://localhost:5173", pathname: "/" })).toBe("https://d1.cloudfront.net/#/ar");
     expect(viewerUrl(null, { origin: "http://localhost:5173", pathname: "/" })).toBe("http://localhost:5173/#/ar");
+  });
+
+  it("stageUrl opens the big-screen 3D view on the current origin", () => {
+    expect(stageUrl({ origin: "http://localhost:5173", pathname: "/" })).toBe("http://localhost:5173/#/3d?stage=1");
+    expect(stageUrl({ origin: "https://d1.cloudfront.net", pathname: "/index.html" })).toBe("https://d1.cloudfront.net/#/3d?stage=1");
   });
 
   it("toMessage builds a contract state message", () => {

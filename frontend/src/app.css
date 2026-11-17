@@ -199,6 +199,12 @@ kbd {
 .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .sheet-title { font-size: 28px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
 .sheet-month { margin-top: 2px; color: var(--ink-2); font-size: 13px; }
+/* AR 실기 조정값(#/ar?cf=… 등)이 있을 때만: 시험하는 사람이 무엇이 적용됐는지 알게 */
+.sheet-tuning {
+  margin-top: 8px; color: var(--ink-2);
+  font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 
 .live { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; font-size: 14px; }
 .live--on {
@@ -234,6 +240,38 @@ kbd {
 .fig-caption { display: block; margin-top: 2px; color: var(--ink-2); font-size: 12px; }
 
 .sheet-note { margin-top: 10px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+
+/* AI 해설: 데이터가 아니라 자동 생성 문장이라는 것을 왼쪽 선과 출처 줄로 구분한다. */
+.ai-note {
+  margin-top: 12px; padding: 8px 12px;
+  border-left: 3px solid var(--sky);
+  border-radius: 0 10px 10px 0;
+  background: rgb(56 189 248 / 0.07);
+}
+.ai-text { font-size: 14px; line-height: 1.55; }
+.ai-label { margin-right: 4px; color: var(--sky); font-weight: 700; }
+.ai-meta { margin-top: 2px; color: var(--ink-2); font-size: 11px; }
+
+/* 법정동 상위 5: 3D 라벨이 흔들려도 2D에서 읽히는 숫자. 순위는 실제 순서라 번호를 붙인다. */
+.dongs { margin-top: 12px; }
+.dongs-title { margin: 0 0 2px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.dong-list { margin: 0; padding: 0; list-style: none; }
+.dong {
+  display: grid; grid-template-columns: 1.3em minmax(0, 1fr) auto 5.2em;
+  align-items: baseline; column-gap: 8px;
+  font-size: 14px; line-height: 1.55; font-variant-numeric: tabular-nums;
+}
+.dong-rank { color: var(--ink-2); font-size: 12px; text-align: right; }
+.dong-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dong-val { text-align: right; }
+.dong-val .fig-num { font-size: 15px; font-weight: 600; }
+.dong-val .fig-unit { font-size: 12px; }
+.dong-val .fig-none { font-size: 13px; font-weight: 500; }
+.dong-sub { color: var(--ink-2); font-size: 12px; text-align: right; }
+/* 작은 폰(세로 660px 미만)에서는 3줄만: 시트가 그림을 덮지 않게 */
+@media (max-height: 660px) {
+  .dong:nth-child(n + 4) { display: none; }
+}
 
 .legend {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
@@ -306,6 +344,32 @@ kbd {
     linear-gradient(var(--c) 0 0) right bottom / 3px var(--len);
   background-repeat: no-repeat;
 }
+/* 화면 고정: 카메라 영상과 포즈를 멈춰 흔들림 없이 읽는다 */
+.ar-tools {
+  position: absolute; z-index: 3;
+  top: calc(10px + var(--safe-t)); right: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.btn-freeze {
+  min-height: var(--tap); min-width: 96px; padding: 0 16px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  background: rgb(11 16 32 / 0.72); color: var(--ink);
+  font-size: 15px; font-weight: 600;
+}
+.btn-freeze:disabled { color: var(--ink-2); cursor: not-allowed; }
+.ar-tools.is-frozen .btn-freeze { background: var(--amber); border-color: var(--amber); color: var(--night); }
+.freeze-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 0 12px; border-radius: 999px;
+  background: var(--ink); color: var(--night);
+  font-size: 14px; font-weight: 700;
+}
+.freeze-state::before {
+  content: ""; width: 3px; height: 11px;
+  border-left: 3px solid currentColor; border-right: 3px solid currentColor;
+  box-sizing: content-box;
+}
+
 .scan-text {
   position: absolute; top: calc(66px + var(--safe-t));
   padding: 10px 16px; border-radius: 999px;
@@ -380,7 +444,43 @@ kbd {
 .gu-val { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .gu-btn[aria-pressed="true"] .gu-val { color: var(--ink-on-light); }
 
-.host-tools { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* 월 가져오기: 칩과 같은 결의 입력과 버튼. 진행 한 줄은 숫자가 흔들리지 않게 tabular */
+.host-fetch { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.fetch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fetch-row input {
+  min-height: var(--tap); padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  background: rgb(229 231 235 / 0.06); color: var(--ink);
+  font: 500 16px/1 var(--font); font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+.fetch-row input[type="month"] { min-width: 11em; }
+.fetch-row input[type="password"] { flex: 1 1 10em; min-width: 0; }
+.chip:disabled { color: var(--ink-2); border-color: var(--line); cursor: not-allowed; }
+.chip--primary { background: var(--amber); border-color: var(--amber); color: var(--night); }
+.fetch-key { display: grid; gap: 8px; margin-top: 12px; }
+.fetch-key label { font-size: 14px; font-weight: 600; }
+.fetch-hint { color: var(--ink-2); font-size: 13px; }
+.fetch-status { margin-top: 10px; min-height: 1.5em; font-size: 14px; font-variant-numeric: tabular-nums; }
+.fetch-error { margin-top: 6px; color: var(--alert); font-size: 14px; font-weight: 600; line-height: 1.5; }
+
+/* 시간 여행: 지금 달은 굵기와 밝기로(색만이 아니라) 표시 */
+.host-travel { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.travel-interval select {
+  min-height: var(--tap); padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  background: rgb(229 231 235 / 0.06); color: var(--ink);
+  font: 500 16px/1 var(--font);
+}
+.travel-interval option { background: #111827; color: var(--ink); }
+.travel-line { margin-top: 10px; color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; }
+.travel-line strong { color: var(--ink); font-weight: 800; }
+.fetch-narrate { margin-top: 10px; }
+
+.host-stage-open { display: grid; gap: 4px; }
+.host-tools-hint { color: var(--ink-2); font-size: 12px; }
+
+.host-tools { margin-top: auto; flex-wrap: wrap; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .host-tools .btn { min-height: 48px; font-size: 15px; }
 .host-exit {
   display: inline-flex; align-items: center; min-height: var(--tap); color: var(--ink-2); font-size: 14px;
@@ -408,6 +508,46 @@ kbd {
   .host-marker { width: min(100%, 520px); }
   .host-panel { position: static; max-height: none; border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* ---------- 큰 화면 3D 모드 (#/3d?stage=1) ---------- */
+
+.viewer--stage.is-idle, .viewer--stage.is-idle * { cursor: none; }
+.stage-info {
+  position: absolute; z-index: 3;
+  top: clamp(24px, 5vh, 64px); left: clamp(24px, 4vw, 72px);
+  max-width: min(48vw, 820px);
+  pointer-events: none;
+}
+.stage-month { color: var(--ink-2); font-size: clamp(18px, 1.6vw, 28px); }
+/* .stage-title·.stage-conn은 손짓 무대(#/stage, stage/ui/hud.css)에도 있는 이름이라 큰 화면 패널 안으로 한정한다. */
+.stage-info .stage-title {
+  margin-top: 4px;
+  font-size: clamp(56px, 7vw, 128px); font-weight: 800; line-height: 1; letter-spacing: -0.045em;
+}
+.stage-figs {
+  display: grid; grid-template-columns: repeat(3, auto); justify-content: start;
+  margin-top: clamp(20px, 3vh, 40px);
+}
+.stage-figs .fig + .fig { padding-left: clamp(20px, 2.4vw, 44px); margin-left: clamp(20px, 2.4vw, 44px); }
+.stage-figs dt { font-size: clamp(16px, 1.3vw, 22px); }
+.stage-figs .fig-num { font-size: clamp(40px, 4.4vw, 84px); font-weight: 700; }
+.stage-figs .fig-unit { font-size: clamp(16px, 1.4vw, 24px); }
+.stage-figs .fig-none { font-size: clamp(24px, 2.2vw, 36px); }
+.stage-figs .fig-caption { font-size: clamp(14px, 1.1vw, 18px); }
+.stage-ai { margin-top: clamp(20px, 3vh, 36px); max-width: 40ch; }
+.stage-ai .ai-text { font-size: clamp(20px, 1.8vw, 30px); line-height: 1.45; }
+.stage-ai .ai-meta { font-size: clamp(13px, 1vw, 16px); }
+.stage-info .stage-conn {
+  display: flex; align-items: center; gap: 10px; margin-top: 16px;
+  color: var(--alert); font-size: clamp(18px, 1.4vw, 24px); font-weight: 700;
+}
+.stage-qr {
+  position: absolute; z-index: 3;
+  right: clamp(24px, 3vw, 56px); bottom: clamp(24px, 4vh, 56px);
+  display: grid; justify-items: end; gap: 12px;
+}
+.stage-qr canvas { width: clamp(160px, 14vw, 240px); height: auto; aspect-ratio: 1; border-radius: 8px; }
+.stage-qr figcaption { max-width: 16em; text-align: right; font-size: clamp(16px, 1.3vw, 22px); line-height: 1.4; }
 
 /* ---------- 토스트 ---------- */
 

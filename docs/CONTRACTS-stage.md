@@ -405,3 +405,10 @@ export function voteLine(m: VoteMessage): string;                      // "투�
   - 8 overlay.css: 미리보기 숨김(`is-hidden`)·골격 모드에서도 `<video>`는 렌더 트리에 남긴다(display:none·visibility:hidden 금지). 숨김은 화면 안 자리에서 1px·`opacity: 0`·`pointer-events: none`(`.stage-view .stage-preview.is-hidden`이 stage.css 크기 규칙을 이김), 골격 모드 video는 `opacity: 0`. 골격 canvas는 숨겨도 된다.
   - 2.4 recognizer: `RVFC_STALL_MS = 500` — 영상이 재생 중(readyState ≥ 2, paused 아님)인데 rVFC가 500ms 동안 새 프레임을 주지 않으면 그 루프를 rAF + currentTime 확인으로 바꾸고 계속 쓴다. 감시는 rAF로 하며 감시 간격이 250ms 넘게 벌어지면(숨은 탭에서 돌아옴) 그 사이는 세지 않는다. 바꾼 뒤 늦게 온 rVFC 콜백은 무시(같은 프레임 두 번·루프 둘 없음).
   - 9 stageView: `deps.onVisibilityChange?(cb): () => void`(mountStageView가 `visibilitychange`로 연결). 숨은 동안과 숨김→보임 첫 순간(틱·손 준비 감시·visibilitychange 중 먼저 본 쪽)에 정지 감지 기준(마지막 프레임 시각)과 손 준비 대기 시작 시각을 지금으로 맞춘다. `HAND_START_TIMEOUT_MS`는 한 번짜리 타이머가 아니라 `VOTE_TICK_MS` 간격 감시로 보이는 시간만 잰다.
+
+## 12. main(abb26c6) 병합 결정 (2026-11-17)
+
+- 6.2 씬: 본체 CONTRACTS 11(시간 여행 모프, 구 색 보간)과 합쳤다. 시계는 넷 — 구 상승·색 `guT`(0.6s), 막대·라벨 `barT`(0.6s, 같은 구의 다른 달은 모프), hover·들어올림(0.3s), 지도↔펼치기(0.8s). 들어올림·펼치기의 색 변화(나머지 guDim, 펼치기 중 focus 모습 쉼)는 구 색 보간으로 바뀐다(즉시가 아님). hover 테두리만 보간 없이 바로. 막대·동 라벨·지시선은 focus 구의 이동·바닥 스케일을 따른다. 펼치기에서 지도로 돌아오면 막대는 새로 자란다(fresh).
+- 큰 화면(`#/3d?stage=1`, 본체 13)과 손짓 무대(`#/stage`)는 이름만 겹친다. `queryFor("stage", …)`는 undefined, 무대는 `?vote=`를 `location.hash`에서 읽는다. `.stage-title`·`.stage-conn` 클래스가 겹쳐 큰 화면 규칙은 `.stage-info` 안, 무대 규칙은 `.stage-top` 안으로 한정했다.
+- 10 관객: 투표 결과 한 줄은 `#/3d` 바텀시트 모드와 큰 화면 모드 모두에 있다(큰 화면은 따라가기 고정이라 펼침·들어올림도 따라간다). `--sheet-h`는 바텀시트 면이 정한다.
+- 9 호스트: "큰 화면 열기"(새 창) 뒤, "처음으로" 앞에 "무대 열기"(`#/stage`, 같은 창).

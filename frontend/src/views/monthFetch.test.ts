@@ -1,0 +1,516 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  PRESENTER_KEY, createMonthFetch, defaultFetchMonth, isBusy, needsFetchRender, needsNarrationRecheck, parseMonthInput, renderMonthFetch, statusLine,
+  type FetchView,
+} from "./monthFetch";
+import type { DataIndex } from "../data/types";
+import type { JobMessage } from "../realtime/types";
+
+const NOW = new Date(2026, 10, 17, 12).getTime(); // 2026년 11월 17일(로컬)
+const index = (months: string[]): DataIndex => ({ v: 1, generatedAt: "", source: "", months, gus: [], summary: {} });
+const res = (status: number, body: unknown = {}) =>
+  ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+const job = (over: Partial<JobMessage> = {}): JobMessage => ({
+  v: 1, type: "job", jobId: "j-1", month: "202610", state: "running", done: 1, total: 25, gu: "종로구", ts: 1, ...over,
+});
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const m = new Map(Object.entries(initial));
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => { m.set(k, v); },
+    removeItem: (k: string) => { m.delete(k); },
+  };
+}
+
+function setup(opts: { stored?: string; fetch?: (url: string, init?: RequestInit) => Promise<Response>; refresh?: () => Promise<DataIndex>; reloadNarration?: (m: string) => Promise<unknown> } = {}) {
+  const handlers = new Set<(m: JobMessage) => void>();
+  const subscribeJobs = vi.fn((h: (m: JobMessage) => void) => { handlers.add(h); return () => { handlers.delete(h); }; });
+  const emit = (m: JobMessage) => { for (const h of [...handlers]) h(m); };
+  const storage = memoryStorage(opts.stored ? { [PRESENTER_KEY]: opts.stored } : {});
+  // 작업 기록 파일(data/jobs/{jobId}.json): done/error 이벤트는 이 기록과 맞을 때만 받아들인다.
+  const records = new Map<string, unknown>();
+  const inner = opts.fetch ?? (async (url: string) =>
+    (url === "/api/fetch-month" ? res(202, { jobId: "j-1", month: "202610" }) : res(404)));
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const id = /^\/data\/jobs\/(.+)\.json$/.exec(url)?.[1];
+    if (id && records.has(decodeURIComponent(id))) return res(200, records.get(decodeURIComponent(id)));
+    return inner(url, init);
+  });
+  const refreshIndex = vi.fn(opts.refresh ?? (async () => index(["202610", "202611"])));
+  const toast = vi.fn();
+  const reloadNarration = vi.fn(opts.reloadNarration ?? (async () => null));
+  const views: FetchView[] = [];
+  const mf = createMonthFetch({
+    fetch: fetch as unknown as typeof globalThis.fetch,
+    storage, subscribeJobs, refreshIndex, toast, reloadNarration,
+    onChange: (v) => views.push(v),
+    now: () => Date.now(), pollMs: 4000, staleMs: 660_000,
+  });
+  return { mf, emit, storage, fetch, refreshIndex, toast, views, subscribeJobs, handlers, reloadNarration, records };
+}
+
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); });
+afterEach(() => { vi.useRealTimers(); });
+
+describe("parseMonthInput", () => {
+  it("accepts <input type=month> values and typed YYYYMM", () => {
+    expect(parseMonthInput("2026-10", NOW)).toBe("202610");
+    expect(parseMonthInput("202610", NOW)).toBe("202610");
+    expect(parseMonthInput(" 2026-10 ", NOW)).toBe("202610");
+    expect(parseMonthInput("200601", NOW)).toBe("200601");
+    expect(parseMonthInput("202611", NOW)).toBe("202611");
+  });
+
+  it("rejects other shapes, impossible months and months outside 200601..this month", () => {
+    for (const bad of ["", "2026/10", "26-10", "202613", "202600", "200512", "202612", "2027-01", "abcdef"]) {
+      expect(parseMonthInput(bad, NOW), bad).toBeNull();
+    }
+  });
+});
+
+describe("defaultFetchMonth", () => {
+  it("suggests the month before the earliest loaded month", () => {
+    expect(defaultFetchMonth(index(["202611"]), NOW)).toBe("202610");
+    expect(defaultFetchMonth(index(["202601", "202611"]), NOW)).toBe("202512");
+    expect(defaultFetchMonth(index([]), NOW)).toBe("202610");
+  });
+});
+
+describe("createMonthFetch", () => {
+  it("asks for the passcode on first use, stores it, and posts with the header", async () => {
+    const { mf, fetch, storage, views, subscribeJobs } = setup();
+    expect(subscribeJobs).not.toHaveBeenCalled();
+    await mf.submit("2026-10");
+    expect(mf.view).toEqual({ phase: "key", kind: "fetch", month: "202610" });
+    expect(fetch).not.toHaveBeenCalled();
+    await mf.submitKey("pw");
+    expect(storage.getItem(PRESENTER_KEY)).toBe("pw");
+    expect(subscribeJobs).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("/api/fetch-month");
+    expect((init!.headers as Record<string, string>)["x-presenter-key"]).toBe("pw");
+    expect(JSON.parse(String(init!.body))).toEqual({ month: "202610" });
+    expect(views.some((v) => v.phase === "sending")).toBe(true);
+    expect(mf.view).toMatchObject({ phase: "running", month: "202610", jobId: "j-1", done: 0 });
+    expect(statusLine(mf.view)).toBe("2026년 10월 수집 시작");
+  });
+
+  it("uses the stored passcode without asking", async () => {
+    const { mf, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mf.view.phase).toBe("running");
+  });
+
+  it("shows progress, ignores other jobs, and on done reloads the index and toasts", async () => {
+    const { mf, emit, refreshIndex, toast, records } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(job({ done: 12, gu: "강서구" }));
+    expect(statusLine(mf.view)).toBe("2026년 10월 수집 중 12/25 · 강서구");
+    emit(job({ jobId: "other", done: 20, gu: "송파구" }));
+    expect(statusLine(mf.view)).toBe("2026년 10월 수집 중 12/25 · 강서구");
+    emit(job({ done: 11, gu: "양천구" }));
+    expect(mf.view).toMatchObject({ done: 12 });
+    records.set("j-1", job({ state: "done", done: 25, gu: undefined }));
+    emit(job({ state: "done", done: 25, gu: undefined }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refreshIndex).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("2026년 10월 데이터가 준비됐습니다");
+    // 수집이 끝나면 워커가 이어서 돌리는 해설 작업(${jobId}-narration)을 따라간다(I2).
+    expect(mf.view).toMatchObject({ phase: "running", kind: "narration", month: "202610", jobId: "j-1-narration", total: 26 });
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refreshIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("401 clears the stored passcode and asks again", async () => {
+    const { mf, storage } = setup({ stored: "old", fetch: async () => res(401) });
+    await mf.submit("202610");
+    expect(storage.getItem(PRESENTER_KEY)).toBeNull();
+    expect(mf.view).toEqual({ phase: "key", kind: "fetch", month: "202610", error: "발표자 암호가 맞지 않습니다. 다시 입력해 주세요." });
+  });
+
+  it("explains 400, 409, a missing endpoint and network failures in plain sentences", async () => {
+    const cases: Array<[() => Promise<Response>, string]> = [
+      [async () => res(400), "2006년 1월부터 이번 달 사이"],
+      [async () => res(409), "다른 달을 가져오는 중입니다"],
+      [async () => res(404), "이 배포에서는 월 가져오기를 쓸 수 없습니다"],
+      [async () => { throw new TypeError("Failed to fetch"); }, "수집 서버에 연결하지 못했습니다"],
+      [async () => res(500), "수집 서버에 연결하지 못했습니다"],
+    ];
+    for (const [f, text] of cases) {
+      const { mf } = setup({ stored: "pw", fetch: f });
+      await mf.submit("202610");
+      expect(mf.view.phase).toBe("idle");
+      expect((mf.view as { error?: string }).error).toContain(text);
+    }
+  });
+
+  it("rejects an invalid month before calling the server", async () => {
+    const { mf, fetch } = setup({ stored: "pw" });
+    await mf.submit("2026/10");
+    expect(fetch).not.toHaveBeenCalled();
+    expect((mf.view as { error?: string }).error).toContain("2006년 1월부터 이번 달 사이");
+  });
+
+  it("shows the job's own error message", async () => {
+    const { mf, emit, records } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    records.set("j-1", job({ state: "error", message: "서울 API가 응답하지 않습니다." }));
+    emit(job({ state: "error", message: "서울 API가 응답하지 않습니다." }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 수집 실패: 서울 API가 응답하지 않습니다." });
+  });
+
+  it("does not start a second job while one is running", async () => {
+    const { mf, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    expect(isBusy(mf.view)).toBe(true);
+    await mf.submit("202609");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls the job status file when no events arrive", async () => {
+    const { mf, fetch, refreshIndex } = setup({
+      stored: "pw",
+      fetch: async (url) => (url === "/api/fetch-month"
+        ? res(202, { jobId: "j-1", month: "202610" })
+        : res(200, job({ state: "done", done: 25 }))),
+    });
+    await mf.submit("202610");
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(fetch).toHaveBeenCalledWith("/data/jobs/j-1.json", { cache: "no-store" });
+    expect(refreshIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up with a message when no progress arrives for staleMs", async () => {
+    const { mf } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    await vi.advanceTimersByTimeAsync(664_000);
+    expect(mf.view.phase).toBe("idle");
+    expect((mf.view as { error?: string }).error).toContain("수집 상태를 받지 못했습니다");
+  });
+
+  it("tells the presenter to reload when the index cannot be re-read", async () => {
+    const { mf, emit, toast, records } = setup({ stored: "pw", refresh: async () => { throw new Error("offline"); } });
+    await mf.submit("202610");
+    records.set("j-1", job({ state: "done", done: 25 }));
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toast.mock.calls.at(-1)?.[0]).toContain("새로고침");
+  });
+
+  it("dispose stops polling, unsubscribes, and ignores late events", async () => {
+    const { mf, emit, fetch, refreshIndex, handlers } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    mf.dispose();
+    expect(handlers.size).toBe(0);
+    emit(job({ state: "done" }));
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(refreshIndex).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a done or error event that the job record does not confirm (spoofed on the public channel)", async () => {
+    const { mf, emit, refreshIndex, records, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledWith("/data/jobs/j-1.json", { cache: "no-store" });
+    expect(mf.view.phase).toBe("running");
+    expect(refreshIndex).not.toHaveBeenCalled();
+    records.set("j-1", job({ state: "running", done: 3 }));
+    emit(job({ state: "error", message: "가짜 실패" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view.phase).toBe("running");
+    records.set("j-1", job({ state: "done", done: 25 }));
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refreshIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the verified record's error message, not the event's", async () => {
+    const { mf, emit, records } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    records.set("j-1", job({ state: "error", message: "서울 API 오류입니다." }));
+    emit(job({ state: "error", message: "<b>가짜</b> 문구" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 수집 실패: 서울 API 오류입니다." });
+  });
+
+  it("progress events still count up without verification", async () => {
+    const { mf, emit, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(job({ done: 4, gu: "성동구" }));
+    expect(mf.view).toMatchObject({ done: 4, gu: "성동구" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe("server reasons (I1)", () => {
+    const cases: Array<[number, unknown, string]> = [
+      [429, {}, "암호를 너무 많이 틀렸습니다. 약 10분 뒤 다시 시도해 주세요."],
+      [429, { retryAfterSeconds: 130 }, "암호를 너무 많이 틀렸습니다. 약 3분 뒤 다시 시도해 주세요."],
+      [429, { message: "잠겼습니다. 4분 뒤에 다시 하세요." }, "잠겼습니다. 4분 뒤에 다시 하세요."],
+      [409, { message: "2026년 11월 해설을 만드는 중입니다" }, "2026년 11월 해설을 만드는 중입니다"],
+      [409, {}, "다른 달을 가져오는 중입니다. 끝난 뒤 다시 눌러 주세요."],
+      [503, { error: "passcode_too_short", message: "발표자 암호가 12자보다 짧습니다. 관리자에게 알려 주세요." }, "발표자 암호가 12자보다 짧습니다. 관리자에게 알려 주세요."],
+      [503, {}, "수집 서버가 지금 요청을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."],
+      [400, { message: "월은 2006년 1월부터 이번 달까지입니다." }, "월은 2006년 1월부터 이번 달까지입니다."],
+    ];
+
+    it.each(cases)("HTTP %i %j shows the right sentence", async (status, body, sentence) => {
+      const { mf } = setup({ stored: "pw", fetch: async () => res(status, body) });
+      await mf.submit("202610");
+      expect(mf.view).toEqual({ phase: "idle", error: sentence });
+    });
+
+    it("keeps the stored passcode on 429 and 503; only 401 wipes it", async () => {
+      for (const status of [429, 503]) {
+        const { mf, storage } = setup({ stored: "pw", fetch: async () => res(status) });
+        await mf.submit("202610");
+        expect(storage.getItem(PRESENTER_KEY), String(status)).toBe("pw");
+      }
+    });
+  });
+
+  describe("automatic narration after a fetch (I2)", () => {
+    async function fetchDone() {
+      const t = setup({ stored: "pw" });
+      await t.mf.submit("202610");
+      t.records.set("j-1", job({ state: "done", done: 25 }));
+      t.emit(job({ state: "done", done: 25 }));
+      await vi.advanceTimersByTimeAsync(0);
+      return t;
+    }
+    const auto = (over: Partial<JobMessage> = {}) =>
+      job({ jobId: "j-1-narration", kind: "narration", gu: undefined, done: 0, total: 26, ...over });
+
+    it("follows ${jobId}-narration with progress, then reloads the narration and toasts", async () => {
+      const { mf, emit, records, reloadNarration, toast, subscribeJobs } = await fetchDone();
+      expect(statusLine(mf.view)).toBe("2026년 10월 해설 생성 중");
+      expect(isBusy(mf.view)).toBe(true);
+      expect(subscribeJobs).toHaveBeenCalledTimes(1);
+      emit(auto({ done: 12 }));
+      expect(statusLine(mf.view)).toBe("2026년 10월 해설 생성 중 12/26");
+      records.set("j-1-narration", auto({ state: "done", done: 26 }));
+      emit(auto({ state: "done", done: 26 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reloadNarration).toHaveBeenCalledWith("202610");
+      expect(toast).toHaveBeenLastCalledWith("해설이 준비됐습니다");
+      expect(mf.view).toEqual({ phase: "idle", note: "해설이 준비됐습니다" });
+    });
+
+    it("falls back to polling data/jobs/${jobId}-narration.json", async () => {
+      const { fetch, records, reloadNarration } = await fetchDone();
+      records.set("j-1-narration", auto({ state: "done", done: 26 }));
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(fetch).toHaveBeenCalledWith("/data/jobs/j-1-narration.json", { cache: "no-store" });
+      expect(reloadNarration).toHaveBeenCalledWith("202610");
+    });
+
+    it("shows the narration error and unlocks", async () => {
+      const { mf, emit, records } = await fetchDone();
+      records.set("j-1-narration", auto({ state: "error", message: "모델을 호출하지 못했습니다." }));
+      emit(auto({ state: "error", message: "모델을 호출하지 못했습니다." }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 해설 생성 실패: 모델을 호출하지 못했습니다." });
+      expect(isBusy(mf.view)).toBe(false);
+    });
+
+    it("quietly stops following if the narration job never shows up", async () => {
+      const { mf, toast } = await fetchDone();
+      const toasts = toast.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(mf.view).toEqual({ phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" });
+      expect(toast.mock.calls.length).toBe(toasts);
+    });
+
+    it("the give-up ends the follow so the host re-checks and re-enables 해설 생성", async () => {
+      const { mf, views } = await fetchDone();
+      const running = mf.view;
+      await vi.advanceTimersByTimeAsync(95_000);
+      const after = mf.view;
+      expect(after).toEqual({ phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" });
+      // hostView는 이 판정이 true면 checkNarration을 다시 돌린다 → 해설이 없으면 absent → 버튼 켜짐.
+      expect(needsNarrationRecheck(running, after)).toBe(true);
+      expect(views.some((v, i) => i > 0 && needsNarrationRecheck(views[i - 1]!, v))).toBe(true);
+      const button = /<button[^>]*data-action="narrate"[^>]*>/.exec(
+        renderMonthFetch(after, { value: "2026-09", max: "2026-11", narration: { month: "202610", state: "absent" } }))?.[0] ?? "";
+      expect(button).not.toContain("disabled");
+    });
+
+    it("keeps following once the job has been seen, even if it is slow", async () => {
+      const { mf, emit } = await fetchDone();
+      emit(auto({ done: 1 }));
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(mf.view).toMatchObject({ phase: "running", kind: "narration", done: 1 });
+    });
+  });
+
+  it("cancelKey returns to idle", async () => {
+    const { mf } = setup();
+    await mf.submit("202610");
+    mf.cancelKey();
+    expect(mf.view).toEqual({ phase: "idle" });
+  });
+});
+
+describe("renderMonthFetch", () => {
+  const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const opts = { value: "2026-10", max: "2026-11" };
+
+  it("renders a month input and a 가져오기 button", () => {
+    const html = renderMonthFetch({ phase: "idle" }, opts);
+    expect(html).toContain('type="month"');
+    expect(html).toContain('value="2026-10"');
+    expect(html).toContain('max="2026-11"');
+    expect(html).toContain('min="2006-01"');
+    expect(text(html)).toContain("가져오기");
+    expect(html).not.toMatch(/data-fetch-submit[^>]*disabled/);
+  });
+
+  it("disables the button and shows the progress line while running", () => {
+    const html = renderMonthFetch({ phase: "running", kind: "fetch", month: "202610", jobId: "j", done: 12, total: 25, gu: "강서구" }, opts);
+    expect(html).toMatch(/data-fetch-submit[^>]*disabled/);
+    expect(text(html)).toContain("2026년 10월 수집 중 12/25 · 강서구");
+  });
+
+  it("shows an inline passcode form in the key phase", () => {
+    const html = renderMonthFetch({ phase: "key", kind: "fetch", month: "202610", error: "발표자 암호가 맞지 않습니다. 다시 입력해 주세요." }, opts);
+    expect(html).toContain('data-form="key"');
+    expect(html).toContain('type="password"');
+    expect(text(html)).toContain("발표자 암호");
+    expect(text(html)).toContain("다시 입력해 주세요");
+  });
+
+  it("escapes server-provided error text", () => {
+    const html = renderMonthFetch({ phase: "idle", error: "<img src=x>" }, opts);
+    expect(html).not.toContain("<img");
+  });
+});
+
+describe("해설 생성", () => {
+  const narrJob = (over: Partial<JobMessage> = {}) => job({ jobId: "n-1", month: "202611", kind: "narration", gu: undefined, done: 0, total: 26, ...over });
+  const narrateFetch = async (url: string) =>
+    (url === "/api/narrate-month" ? res(202, { jobId: "n-1", month: "202611" }) : res(404));
+
+  it("posts /api/narrate-month with the stored passcode and shows narration progress", async () => {
+    const { mf, fetch } = setup({ stored: "pw", fetch: narrateFetch });
+    await mf.narrate("202611");
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("/api/narrate-month");
+    expect((init!.headers as Record<string, string>)["x-presenter-key"]).toBe("pw");
+    expect(mf.view).toMatchObject({ phase: "running", kind: "narration", month: "202611", jobId: "n-1" });
+    expect(statusLine(mf.view)).toBe("2026년 11월 해설 생성 중");
+  });
+
+  it("reuses the passcode prompt", async () => {
+    const { mf, fetch, storage } = setup({ fetch: narrateFetch });
+    await mf.narrate("202611");
+    expect(mf.view).toEqual({ phase: "key", kind: "narration", month: "202611" });
+    await mf.submitKey("pw");
+    expect(storage.getItem(PRESENTER_KEY)).toBe("pw");
+    expect(fetch.mock.calls[0]![0]).toBe("/api/narrate-month");
+  });
+
+  it("on done reloads the narration and toasts 해설이 준비됐습니다", async () => {
+    const { mf, emit, toast, reloadNarration, refreshIndex, records } = setup({ stored: "pw", fetch: narrateFetch });
+    await mf.narrate("202611");
+    emit(narrJob({ done: 13 }));
+    expect(statusLine(mf.view)).toBe("2026년 11월 해설 생성 중 13/26");
+    records.set("n-1", narrJob({ state: "done", done: 26 }));
+    emit(narrJob({ state: "done", done: 26 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloadNarration).toHaveBeenCalledWith("202611");
+    expect(refreshIndex).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith("해설이 준비됐습니다");
+    expect(mf.view).toEqual({ phase: "idle", note: "해설이 준비됐습니다" });
+  });
+
+  it("shows the narration error message", async () => {
+    const { mf, emit, records } = setup({ stored: "pw", fetch: narrateFetch });
+    await mf.narrate("202611");
+    records.set("n-1", narrJob({ state: "error", message: "모델을 호출하지 못했습니다." }));
+    emit(narrJob({ state: "error", message: "모델을 호출하지 못했습니다." }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view).toEqual({ phase: "idle", error: "2026년 11월 해설 생성 실패: 모델을 호출하지 못했습니다." });
+  });
+
+  it("explains 400 for narration as missing data", async () => {
+    const { mf } = setup({ stored: "pw", fetch: async () => res(400) });
+    await mf.narrate("202611");
+    expect((mf.view as { error?: string }).error).toContain("이 달의 데이터가 없어 해설을 만들 수 없습니다");
+  });
+
+  it("renders the 해설 생성 button enabled only when the selected month has no narration and nothing runs", () => {
+    const base = { value: "2026-10", max: "2026-11" };
+    const button = (h: string) => /<button[^>]*data-action="narrate"[^>]*>/.exec(h)?.[0] ?? "";
+    expect(button(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "absent" } }))).not.toContain("disabled");
+    expect(button(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "present" } }))).toContain("disabled");
+    expect(button(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "unknown" } }))).toContain("disabled");
+    expect(button(renderMonthFetch({ phase: "running", kind: "fetch", month: "202610", jobId: "j", done: 1, total: 25 },
+      { ...base, narration: { month: "202611", state: "absent" } }))).toContain("disabled");
+    const text = (h: string) => h.replace(/<[^>]+>/g, " ");
+    expect(text(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "present" } }))).toContain("2026년 11월 해설이 있습니다");
+    expect(text(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "absent" } }))).toContain("2026년 11월 해설이 아직 없습니다");
+  });
+
+  it("ignores events of the other kind for the same jobId while running", async () => {
+    const { mf, emit, records, reloadNarration } = setup({ stored: "pw", fetch: narrateFetch });
+    await mf.narrate("202611");
+    emit(job({ jobId: "n-1", month: "202611", done: 5, gu: "중구" }));
+    expect(mf.view).toMatchObject({ phase: "running", kind: "narration", done: 0 });
+    records.set("n-1", job({ jobId: "n-1", month: "202611", state: "done", done: 25 }));
+    emit(job({ jobId: "n-1", month: "202611", kind: "fetch", state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view.phase).toBe("running");
+    expect(reloadNarration).not.toHaveBeenCalled();
+  });
+});
+
+describe("needsFetchRender", () => {
+  it("re-renders for view changes always, and for context changes only outside the passcode form", () => {
+    expect(needsFetchRender("key", "view")).toBe(true);
+    expect(needsFetchRender("key", "context")).toBe(false);
+    expect(needsFetchRender("idle", "context")).toBe(true);
+    expect(needsFetchRender("running", "context")).toBe(true);
+  });
+});
+
+describe("해설 생성 button while a narration job runs (I2)", () => {
+  const base = { value: "2026-10", max: "2026-11" };
+  const button = (h: string) => /<button[^>]*data-action="narrate"[^>]*>/.exec(h)?.[0] ?? "";
+  const text = (h: string) => h.replace(/<[^>]+>/g, " ");
+
+  it("is disabled with a 만드는 중 hint when the availability says running", () => {
+    const html = renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202610", state: "running" } });
+    expect(button(html)).toContain("disabled");
+    expect(text(html)).toContain("2026년 10월 해설을 만드는 중");
+  });
+
+  it("a running narration view for that month overrides an absent availability", () => {
+    const html = renderMonthFetch({ phase: "running", kind: "narration", month: "202610", jobId: "j-1-narration", done: 3, total: 26 },
+      { ...base, narration: { month: "202610", state: "absent" } });
+    expect(button(html)).toContain("disabled");
+    expect(text(html)).toContain("2026년 10월 해설을 만드는 중");
+  });
+});
+
+describe("needsNarrationRecheck", () => {
+  const running = { phase: "running" as const, kind: "narration" as const, month: "202610", jobId: "j-n", done: 3, total: 26 };
+  const loading = { phase: "loading" as const, kind: "narration" as const, month: "202610" };
+
+  it("is true whenever a narration job stops running: done, error or give-up", () => {
+    expect(needsNarrationRecheck(loading, { phase: "idle", note: "해설이 준비됐습니다" })).toBe(true);
+    expect(needsNarrationRecheck(running, { phase: "idle", error: "실패" })).toBe(true);
+    expect(needsNarrationRecheck(running, { phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" })).toBe(true);
+  });
+
+  it("is false while it keeps running, and for fetch jobs", () => {
+    expect(needsNarrationRecheck(running, { ...running, done: 4 })).toBe(false);
+    expect(needsNarrationRecheck(running, loading)).toBe(false);
+    expect(needsNarrationRecheck({ phase: "running", kind: "fetch", month: "202610", jobId: "j", done: 1, total: 25 }, { phase: "idle" })).toBe(false);
+    expect(needsNarrationRecheck({ phase: "idle" }, { phase: "idle" })).toBe(false);
+  });
+});

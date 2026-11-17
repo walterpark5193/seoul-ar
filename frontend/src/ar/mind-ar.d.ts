@@ -20,9 +20,13 @@ declare module "mind-ar/dist/mindar-image-three.prod.js" {
     uiLoading?: "yes" | "no";
     uiScanning?: "yes" | "no";
     uiError?: "yes" | "no";
+    /** One-Euro filter min cutoff, cycles per millisecond (MindAR default 0.001 = 1 Hz); null = default. */
     filterMinCF?: number | null;
+    /** One-Euro filter speed coefficient (MindAR default 1000); null = default. */
     filterBeta?: number | null;
+    /** Consecutive tracked frames before the target counts as found (MindAR default 5). */
     warmupTolerance?: number | null;
+    /** Consecutive missed frames before the target counts as lost (MindAR default 5). */
     missTolerance?: number | null;
     userDeviceId?: string | null;
     environmentDeviceId?: string | null;

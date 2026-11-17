@@ -183,6 +183,32 @@ export function arSupported(): boolean;    // navigator.mediaDevices?.getUserMed
 
 좌표계 주의(2026-11-17 보강): MindAR의 `anchor.group`은 타깃 그림을 자기 XY 평면에 놓고 z가 카메라 쪽이다. 씬(4절)은 XZ 평면에 y 위다. 따라서 `ArSession.anchor`는 MindAR `anchor.group`에 직접 넣은 **내부 Group**이고, `inner.rotation.x = Math.PI / 2`로 돌려 둔다(씬의 y가 그림에서 솟아오르고, 씬의 z(남)가 그림의 아래가 된다). 뷰는 이 `anchor`에 `seoulScene.group`을 그대로 add 한다.
 
+안정화와 고정(2026-11-17 추가, 사용자 폰 시험 피드백 "너무 흔들려서 값을 읽기 힘듦"):
+
+```ts
+export interface ArSmoothing { positionAlpha?: number; /* 0.18 */ rotationAlpha?: number; /* 0.18 */ deadbandPos?: number; /* 0.004 (타깃 폭 단위) */ deadbandRotRad?: number; /* 0.01 */ holdMs?: number; /* 800: 타깃 유실 뒤 마지막 포즈 유지 시간 */ }
+export interface ArSessionOptions {
+  container: HTMLElement; targetSrc: string;
+  smoothing?: ArSmoothing;                 // 기본값 위 주석
+  filterMinCF?: number;                    // MindAR One-Euro 필터, 기본 0.0001 (작을수록 덜 흔들리고 더 느림)
+  filterBeta?: number;                     // MindAR One-Euro 필터, 기본 0.01 (작을수록 덜 흔들림)
+  warmupTolerance?: number;                // 기본 5
+  missTolerance?: number;                  // 기본 10 (잠깐 놓쳐도 lost 로 깜빡이지 않게)
+}
+export interface ArSession {
+  // ...기존 멤버...
+  freeze(): void;                          // 카메라 영상(video.pause())과 포즈 갱신을 멈추고 마지막 포즈를 유지. 렌더 루프는 계속 돈다
+  unfreeze(): void;                        // 영상·포즈 갱신 재개
+  readonly frozen: boolean;
+  onFreeze(cb: (frozen: boolean) => void): () => void;
+}
+```
+
+- `anchor`는 이제 MindAR `anchor.group`의 직계 자식이 아니라 `scene` 바로 아래의 **추종 그룹**이다. 매 프레임 MindAR `anchor.group`의 월드 변환을 읽어 위치는 `positionAlpha`로 lerp, 회전은 `rotationAlpha`로 slerp 하되, 변화량이 `deadbandPos`/`deadbandRotRad` 미만이면 무시한다(정지 상태에서 미세 떨림 제거). 타깃을 잃으면 `holdMs` 동안 마지막 포즈로 보이게 두고 그 뒤 숨긴다. 추종 그룹 안에 `rotation.x = +π/2` 내부 그룹이 있고 뷰는 그 내부 그룹(=`anchor`)에 씬을 add 한다(좌표계 규칙 동일).
+- `freeze()` 동안 `onFound/onLost`는 발화하지 않는다.
+
+바텀시트(8절 보강): `renderSheet`는 현재 지표 기준 법정동 상위 5개(이름, 값, 건수)를 목록으로 포함한다. 3D 라벨이 흔들려도 숫자는 2D에서 읽을 수 있어야 한다. AR 뷰에는 "화면 고정" 토글 버튼(44px 이상)이 있고 고정 중에는 "고정됨" 상태와 "다시 추적" 버튼을 보여 준다.
+
 마커 파일: `frontend/public/marker/target.png`(정사각 1024), `frontend/public/marker/target.mind`.
 도구: `node tools/marker/make-slide.mjs` (target.png와 `frontend/public/marker/slide.png` 1920×1080 생성), `node tools/marker/compile-target.mjs` (target.mind 생성).
 
@@ -250,3 +276,89 @@ export const INITIAL_STATE: AppState; // month: index.months의 마지막, gu: n
 ## 9. 인프라 출력 (infra/)
 
 스택 이름 `SeoulArStack`, 리전 us-east-1. CfnOutput: `CloudFrontUrl`, `EventsHttpEndpoint`, `EventsRealtimeEndpoint`, `BucketName`. 배포 명령은 `infra/`에서 `npx cdk deploy --require-approval never --outputs-file cdk-outputs.json`. 프론트 빌드 결과 `frontend/dist`가 있어야 synth 된다.
+
+## 10. 월 실시간 수집 (Task 9, 2026-11-17 추가)
+
+사용자 요청: "지금은 2026.11만 있는데 월별 리포트를 실시간으로 가져올 수 있는 버튼". 발표자 화면에서 월을 고르면 Lambda가 서울 API를 호출해 그 달의 25구 집계 JSON을 S3에 쓰고, 진행 상황을 AppSync Events로 알린다. 서울 API 키는 AWS 안(SSM)에만 있고 코드·저장소·브라우저에는 없다.
+
+### 10.1 SSM 파라미터 (us-east-1, 사용자가 만든다. CDK는 이름만 참조)
+- `/seoul-ar/seoul-api-key` SecureString: 서울 열린데이터광장 인증키
+- `/seoul-ar/presenter-passcode` SecureString: 발표자 암호(수집 버튼 보호. 뒤에 AppSync publish 잠금에도 재사용)
+
+### 10.2 HTTP API
+`POST /api/fetch-month` (CloudFront 추가 동작 `/api/*` → Lambda Function URL 오리진, 캐시 없음). 요청 JSON `{ "month": "202610" }`, 헤더 `x-presenter-key: <암호>`.
+- 202 `{ "jobId": "...", "month": "202610" }` 시작됨 (비동기: 핸들러가 자기 자신을 Event 로 재호출하고 바로 응답)
+- 400 월 형식 오류(YYYYMM, 200601 ≤ month ≤ 이번 달)
+- 401 암호 불일치(sha256 다이제스트 timingSafeEqual 비교)
+- 409 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시)
+- Function URL 직접 호출도 같은 검사를 거친다(CloudFront 우회 방어는 암호).
+
+### 10.3 수집 알고리즘 (참고 구현: ~/claude-lab/capstone/seoul-realestate/server.py 의 _fetch_page/fetch_trades)
+- 구마다: 서울 API `tbLnOpendataRtmsV` 를 접수연도 `RCPT_YR = month[:4]`, 자치구 `CGG_NM = gu` 로 1000건씩 페이지 호출. 결과는 최근 계약부터 오므로, 한 페이지가 1000건 미만이거나 페이지의 가장 오래된 `CTRT_DAY` 가 해당 월 1일보다 앞서면 멈춘다(최대 12페이지). `CTRT_DAY[:6] === month` 인 행만 남긴다.
+- 집계는 `tools/data/aggregate.mjs` 의 `aggregateRows`/`buildIndex` 와 **같은 코드**를 쓴다. Lambda 디렉터리에 복사본을 두고(`infra/lambda/fetch-month/aggregate.mjs`), 두 파일이 바이트 단위로 같은지 테스트로 묶는다. 출력 스키마는 2절 그대로(금지 필드 없음).
+- 쓰기: `data/{month}/{gu}.json` 25개, 그 뒤 `data/index.json` 갱신(기존 index 를 읽어 `months` 에 월 추가·정렬, `summary[month]` 교체, `generatedAt` 갱신). 모두 `Cache-Control: no-cache`. 끝나면 CloudFront 무효화 `/data/*`.
+- 오류 응답 코드 `INFO-200`(데이터 없음)은 빈 결과로 처리. 그 외 오류는 작업 실패.
+- 예외 메시지에 URL(키 포함)을 절대 넣지 않는다.
+
+### 10.4 진행 이벤트
+채널 `/seoul/jobs`. Lambda 가 AppSync Events HTTP 엔드포인트에 `x-api-key` 로 POST 한다(`{"channel":"/seoul/jobs","events":[<JSON 문자열>]}`).
+
+```ts
+export interface JobMessage { v: 1; type: "job"; jobId: string; month: string; state: "running" | "done" | "error"; done: number; total: number; gu?: string; message?: string; ts: number; }
+export function isJobMessage(x: unknown): x is JobMessage;
+```
+- 구 하나 끝날 때마다 `running`(done 증가, gu 이름), 마지막에 `done` 또는 `error`(message 는 사용자용 한 문장, 키·URL 없음).
+- 폴링 폴백: `data/jobs/{jobId}.json` 에 마지막 상태를 쓴다.
+
+### 10.5 프론트
+- `RealtimeClient` 에 `subscribeJobs(handler: (msg: JobMessage) => void): () => void` 추가(AppSync 구현은 `/seoul/jobs` 채널 연결, mock 은 메모리/BroadcastChannel).
+- 호스트 화면 "월 가져오기" 구역: 월 입력(YYYYMM 또는 `<input type="month">`), "가져오기" 버튼, 처음 누를 때 발표자 암호 입력(세션 저장소 `seoul-ar.presenter`), 진행 표시 "2026년 10월 수집 중 12/25 · 강서구", 완료 시 index 를 다시 읽어(`no-store`) 월 토글에 새 달이 나타나고 토스트 "2026년 10월 데이터가 준비됐습니다". 401/409/400/네트워크 오류는 사용자용 문장으로 표시.
+- 뷰어: 원격 상태의 `month` 가 자기 index 에 없으면 index 를 한 번 다시 읽은 뒤 적용한다(새 달이 생겼을 때 폰이 따라오게).
+
+### 10.6 CDK
+- `lambda.Function` Node.js 22, `Code.fromAsset("lambda/fetch-month")`(의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch 만), memory 512, timeout 600s, env: `BUCKET`, `DISTRIBUTION_ID`, `EVENTS_HTTP_ENDPOINT`, `EVENTS_API_KEY`, `SSM_API_KEY_NAME`, `SSM_PASSCODE_NAME`, `SELF_FUNCTION_NAME`.
+- IAM 최소 권한: 버킷의 `data/*` Get/Put, 해당 배포의 `cloudfront:CreateInvalidation`, 두 파라미터의 `ssm:GetParameter` + `kms:Decrypt`(aws/ssm 키), 자기 자신 `lambda:InvokeFunction`.
+- Function URL(AuthType NONE) + CloudFront 추가 동작 `/api/*`: `FunctionUrlOrigin`, 캐시 비활성(`CACHING_DISABLED`), 오리진 요청 정책 `ALL_VIEWER_EXCEPT_HOST_HEADER`, 메서드 ALL, HTTPS 리다이렉트.
+- 출력 `FetchMonthUrl`. 테스트: Lambda 핸들러 단위 테스트(`node --test`, fetch/S3/publish 주입), CDK assertions(동작·권한·env).
+
+## 11. 시간 여행 재생 (Task 10, 2026-11-17 추가)
+
+호스트 전용 조작. `index.months.length >= 2`일 때 "시간 여행" 구역이 보인다: 재생/일시정지 버튼, 간격 선택(2초·4초·8초, 기본 4초), 진행 표시 "2026년 9월 → 10월 → **11월**". 재생 중에는 오름차순으로 월을 바꾸며 매 단계 기존 `StateMessage`를 발행한다(gu·metric 유지, month 만 바뀜). 마지막 달에서 멈춘다(반복 없음). 호스트가 다른 조작을 하면 재생이 멈춘다. 뷰어 쪽 변경은 없다(월 변화를 그대로 따라감).
+
+씬(4절 보강): `focus(gu, data, metric)`에서 `gu`가 같고 `data`가 다른 객체(다른 월)이면 막대를 0부터 다시 키우지 않고 **현재 높이에서 새 높이로 보간**한다(같은 이름의 법정동끼리 매칭, 새로 생긴 동은 0에서 자람, 사라진 동은 0으로 줄어든 뒤 제거). 색도 보간. 시간은 0.6초 ease-out 그대로. `setOverview`도 같은 규칙으로 구 색을 보간한다. reducedMotion 이면 즉시.
+
+## 12. AI 한 줄 해설 (Task 11, 2026-11-17 추가)
+
+### 12.1 파일
+`data/{month}/narration.json` (Cache-Control no-cache):
+```json
+{ "v": 1, "month": "202611", "generatedAt": "...", "model": "anthropic.claude-haiku-5-5", 
+  "items": { "서울 전체": "11월 서울 매매 1,014건, ㎡당 중앙값은 …", "강남구": "강남구 11월: ㎡당 중앙값 1,564만원, 압구정동이 가장 높습니다." } }
+```
+- 키는 "서울 전체" 와 GU_ORDER 25개. 값은 한국어 한 문장, 80자 이내, 사실만. 금지: 투자 권유·전망 표현(추천, 매수, 매도, 사세요, 팔세요, 오를, 내릴, 전망, 유망, 투자하), 본번·부번·건물명, 개별 거래 언급. 거래 0건이면 "거래가 없었습니다"류 한 문장.
+- 생성 실패한 항목은 키를 생략한다(프론트는 없으면 숨김).
+
+### 12.2 생성 (Lambda, Task 9a 코드에 추가)
+- Bedrock Converse API, 모델은 us-east-1에서 호출 가능한 Claude Haiku 계열(`anthropic.claude-haiku-5-5` 우선, 안 되면 `anthropic.claude-haiku-4-5-20251001-v1:0`; 인퍼런스 프로파일이 필요하면 `us.` 접두 ID). 모델 ID는 env `BEDROCK_MODEL_ID`로 넘기고 코드에 하드코딩하지 않는다. 입력은 집계 JSON(2절)만 넘긴다. 한 번의 호출로 26개 문장을 JSON 으로 받고(`{"서울 전체": "...", "강남구": "..."}`), 파싱 실패·누락 항목은 구별 개별 호출로 1회 재시도.
+- 출력 검증(코드): 길이 ≤ 80, 금지어 정규식, GU 키 유효성. 걸리면 해당 항목만 1회 재생성, 그래도 걸리면 생략.
+- 트리거: (a) 월 수집 작업(10절) 끝에 자동 생성, (b) 관리용 `POST /api/narrate-month` `{month}` + `x-presenter-key`(기존 202611 등 이미 있는 달용; 202 비동기, 진행은 `/seoul/jobs` 에 `type:"job"`, `kind:"narration"` 필드 추가 — JobMessage 에 선택 필드 `kind?: "fetch" | "narration"`).
+- IAM: `bedrock:InvokeModel` 을 해당 모델(및 인퍼런스 프로파일) ARN 으로 한정. 공개 트리거 없음(Bedrock 호출은 암호 보호 경로 또는 수집 작업에서만).
+- 비용 상한: 한 작업당 호출 ≤ 30회.
+
+### 12.3 프론트
+- 로더: `loadNarration(month) → Promise<Narration | null>` (404면 null, 메모리 캐시, index 재로딩 시 무효화).
+- 시트: 수치 아래 "AI 해설" 한 줄(선택 구 또는 서울 전체). 작은 글씨로 "Bedrock · 모델명 · 자동 생성, 참고용". 없으면 영역 자체를 숨긴다.
+- 호스트: "월 가져오기" 구역에 "해설 생성" 버튼(해당 월 narration 이 없을 때만 활성) → `/api/narrate-month`.
+
+## 13. 큰 화면 3D 모드 (Task 12, 2026-11-17 추가)
+
+`#/3d?stage=1` = 무대 모드. 기존 3D 뷰어와 같은 씬·같은 실시간 따라가기(follow 고정, 직접 조작 비활성)지만 레이아웃이 큰 화면용이다: 바텀시트 대신 왼쪽 위 큰 제목(구 이름 또는 "서울 전체", 월), 그 아래 큰 수치 3개(㎡당 중앙값, 거래, 최고가)와 AI 해설 한 줄, 오른쪽 아래 QR(관객용 주소)과 "폰으로 QR을 찍어 그림을 비춰 보세요" 안내, 자동 회전(reducedMotion 이면 정지), 커서 숨김, 어두운 배경. 라우터는 `#/3d` 에도 query 를 넘긴다. 호스트 화면에 "큰 화면 열기" 버튼(새 창으로 `#/3d?stage=1`)과 안내 "프로젝터 쪽 창에 두세요".
+
+## 14. 정정 (2026-11-17 09:55, 구현·리뷰 결과 반영)
+
+- **2절 `truncated`**: 빌드 시 스냅샷(MCP, 한 호출 최대 1000건)에서는 "원자료 1000행"이 기준이지만, Lambda 라이브 수집에서는 **페이지 캡(30페이지) 도달 = 데이터 불완전**을 뜻한다. 프론트 문구는 "거래가 많아 일부만 집계했습니다."
+- **10.2**: Function URL 은 `AWS_IAM` + CloudFront OAC 로 잠겨 있어 직접 호출은 불가하다. 브라우저는 `/api/*` POST 에 본문의 SHA-256 hex 를 `x-amz-content-sha256` 헤더로 보낸다. 암호 실패는 IP(IPv6 는 /64)별 10회/10분 잠금(429). 401 → 프론트는 저장된 암호를 지우고 다시 묻는다.
+- **10.3**: 중단 규칙은 "페이지의 가장 새로운 `CTRT_DAY` 가 해당 월 1일 이전"일 때. 페이지 캡 30, 구 4개 병렬, `list_total_count` 도달 시 중단. 11·12월은 다음 해 신고분이 빠질 수 있음을 done 메시지로 고지(RCPT_YR+1 미조회).
+- **10.4**: 자동 해설 작업의 jobId 는 `{jobId}-narration`, `kind:"narration"`. 프론트는 done/error 이벤트를 `data/jobs/{jobId}.json` 으로 확인한 뒤 반영한다.
+- **10.6**: Lambda 는 둘(API: Function URL·암호·잠금 / worker: 수집·집계·쓰기·무효화·발행·해설). 배포는 site(`data/*` 제외, prune) + seed(`data/`, prune 없음) 두 개와 매 배포 `rebuild-index` 호출로 구성된다.
+- **12.1/12.2**: 기본 모델 ID 는 인퍼런스 프로파일 `us.anthropic.claude-haiku-5-5`(온디맨드 `anthropic.claude-haiku-5-5` 는 이 계정에서 호출 불가, 2026-11-17 실호출로 확인). IAM 은 프로파일 ARN + `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-5-5`.
