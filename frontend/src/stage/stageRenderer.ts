@@ -10,6 +10,33 @@ export interface CameraPose { pos: Vec3; target: Vec3; fov: number; }
 export const MAP_POSE: CameraPose = { pos: [0, 1.05, 0.75], target: [0, 0, 0.02], fov: 40 };
 export const SPREAD_POSE: CameraPose = { pos: [0, 0.55, 1.35], target: [0, 0.12, 0.1], fov: 40 };
 
+/**
+ * 이 가로세로비보다 좁은 화면이면 카메라를 target은 그대로 두고 뒤로 물린다(거리 × FIT/aspect).
+ * 펼친 호는 양 끝이 카메라 쪽으로 휘어 가로로 넓게 보인다. 기준 포즈는 약 2:1 창에서 맞으므로
+ * 16:9·16:10·4:3 프로젝터에서는 물려야 1위·25위가 잘리지 않는다(stageRenderer.test의 투영 검사).
+ */
+export const SPREAD_FIT_ASPECT = 2.0;
+/** 지도 포즈는 4:3까지 그대로 들어온다. 더 좁은 화면(세로 창 등)에서만 물린다. */
+export const MAP_FIT_ASPECT = 4 / 3;
+
+function pullBack(p: CameraPose, k: number): CameraPose {
+  if (!(k > 1)) return p;
+  const [tx, ty, tz] = p.target;
+  return { pos: [tx + (p.pos[0] - tx) * k, ty + (p.pos[1] - ty) * k, tz + (p.pos[2] - tz) * k], target: p.target, fov: p.fov };
+}
+
+const validAspect = (aspect: number) => Number.isFinite(aspect) && aspect > 0;
+
+/** 화면 비율에 맞춘 펼치기 포즈. 넓은 화면(≥ SPREAD_FIT_ASPECT)이나 잘못된 값이면 SPREAD_POSE 그대로. */
+export function spreadPoseFor(aspect: number): CameraPose {
+  return validAspect(aspect) ? pullBack(SPREAD_POSE, SPREAD_FIT_ASPECT / aspect) : SPREAD_POSE;
+}
+
+/** 화면 비율에 맞춘 지도 포즈. 4:3 이상이거나 잘못된 값이면 MAP_POSE 그대로. */
+export function mapPoseFor(aspect: number): CameraPose {
+  return validAspect(aspect) ? pullBack(MAP_POSE, MAP_FIT_ASPECT / aspect) : MAP_POSE;
+}
+
 /** 포즈 보간 시간(초). 본체 LAYOUT_SECONDS(0.8)와 같은 값이다. */
 const CAMERA_SECONDS = 0.8;
 const MAX_DT = 0.1;
@@ -54,6 +81,7 @@ export function createStageRenderer(
   const world = new Scene();
   const camera = new PerspectiveCamera(MAP_POSE.fov, 1, 0.01, 20);
 
+  let mode: StageMode = "map";
   let current: CameraPose = MAP_POSE;
   let from: CameraPose = MAP_POSE;
   let to: CameraPose = MAP_POSE;
@@ -66,9 +94,11 @@ export function createStageRenderer(
     if (camera.fov !== p.fov) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
   };
   apply(MAP_POSE);
+  const poseFor = (m: StageMode) => (m === "spread" ? spreadPoseFor(camera.aspect) : mapPoseFor(camera.aspect));
 
-  const setMode = (mode: StageMode, instant = false) => {
-    const dest = mode === "spread" ? SPREAD_POSE : MAP_POSE;
+  const setMode = (next: StageMode, instant = false) => {
+    mode = next;
+    const dest = poseFor(next);
     if (instant || opts.reducedMotion) {
       from = to = dest;
       elapsed = CAMERA_SECONDS;
@@ -86,6 +116,10 @@ export function createStageRenderer(
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // 비율이 바뀌면 지금 모드의 포즈도 다시 맞춘다. 보간 중이면 지금 자리에서 새 목적지로 다시 보간한다(순간이동 없음).
+    const dest = poseFor(mode);
+    if (elapsed >= CAMERA_SECONDS) { from = to = dest; apply(dest); }
+    else { from = current; to = dest; elapsed = 0; }
   };
   const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
   ro?.observe(container);
