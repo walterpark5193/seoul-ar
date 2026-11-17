@@ -21,6 +21,12 @@
   - 브이(`Victory`): 전체 보기(focus 해제, 지도 배치).
 - 투표: 발표자가 `V` 키 또는 화면 버튼으로 시작. 후보 3곳을 하나씩 5초 동안 띄우고 그동안 카메라에 보이는 손 개수를 센다(상한 6손 = 관객 3명 × 2). 결과를 막대와 숫자로 보여 주고 최다 득표 구를 들어올려 해설한다. 투표 중에는 제스처 조작이 꺼진다.
   - 사용자 결정: 카메라에는 발표자 손만 비춘다. 데모에서는 발표자가 손 0~2개를 들어 관객 3명의 표를 대신 보여 준다(관객이 노트북 앞으로 오지 않음, 앉은 관객의 손은 세지 않음). 숫자키 `0`~`6` 입력이 같은 자격의 예비 경로다.
+  - 개수 직접 선택(사용자 요청): 카메라가 잘못 세거나 카메라가 없을 때를 위해 발표자가 각 후보의 손 개수를 직접 고를 수 있다.
+    - 투표 패널의 후보 줄마다 `0`~`6` 선택 버튼(클릭·터치). 카메라 값을 언제든 덮어쓰고, 직접 고른 값에는 "직접" 표시가 붙는다. 키보드 숫자키도 같다.
+    - 투표 입력 방식 두 가지: "카메라"와 "직접 선택". 카메라 거부·없음·모델 실패·마우스 모드면 자동으로 "직접 선택". 패널 토글이나 `N` 키로 언제든 바꾼다.
+    - "직접 선택" 방식은 타이머가 없다. 후보 안내 뒤 개수를 고를 때까지 기다리고, 고르면 1초 뒤 다음 후보로 간다.
+    - "카메라" 방식에서 5초 동안 안정된 손 개수가 한 번도 안 잡히면(인식 실패) 0표로 넘기지 않는다. 타이머를 멈추고 "손이 인식되지 않았어요 · 개수를 골라 주세요"를 띄워 선택을 기다린다.
+    - 결과 확정 전 검토: 세 후보를 다 센 뒤 "집계 확인" 3초. 이 동안 어느 줄이든 개수를 고칠 수 있고, 고치면 자동 확정이 멈춰 `Enter` 또는 "확정" 버튼을 기다린다. 확정해야 승자 결정·해설·publish가 일어난다.
 - 웹캠 미리보기: 기본은 거울 영상 + 손 골격(발표자 손만 비추므로). `C` 키로 "영상+골격 → 골격만 → 숨김" 순환. 어느 경우든 영상은 로컬 화면에만 그린다. 내 결정.
 - 해설(설계 결정 A, 미리 생성): 빌드 전에 Bedrock이 25개 구 × 3개월 해설 문장을 데이터 사실만으로 쓰고, 템플릿 문장(투표 안내, 득표 결과, 펼치기 소개 등)과 함께 Polly 서연으로 MP3를 만들어 정적 파일로 싣는다. 무대에서는 재생만 한다. 재생 중 자막을 같이 보인다.
 - 마우스·키보드 폴백: 카메라 거부, 모델 파일 없음, wasm 로드 실패 시 자동으로 마우스 모드로 바꾸고 토스트. 언제든 키로 전환 가능.
@@ -116,9 +122,28 @@
 ```
 │        강남구 보고 싶은 분, 손 들어 주세요            ◔ 3초                     │
 │                                                                                 │
-│   강남구  ███████████  2손                                                       │
+│   강남구  ███████████  2손 카메라      0  1 [2] 3  4  5  6                         │
 │   마포구  ░░░░░░░░░░░  —   (대기)                                                │
 │   노원구  ░░░░░░░░░░░  —   (대기)                                                │
+│                                              입력: [카메라] 직접 선택   (N)       │
+```
+
+인식 실패 또는 직접 선택 방식:
+
+```
+│        마포구 보고 싶은 분, 손 들어 주세요       손이 인식되지 않았어요 · 개수를 골라 주세요 │
+│   강남구  ███████████  2손 카메라      0  1 [2] 3  4  5  6                         │
+│   마포구  ░░░░░░░░░░░  ?               0  1  2  3  4  5  6   ← 여기서 선택(숫자키 가능) │
+│   노원구  ░░░░░░░░░░░  —   (대기)                                                │
+```
+
+집계 확인(3초, 고치면 멈춤):
+
+```
+│                 집계 확인 · 고칠 곳이 있으면 개수를 누르세요      [확정 Enter] ◔ 2초 │
+│   강남구  ███████████  2손 카메라      0  1 [2] 3  4  5  6                         │
+│   마포구  ██████░░░░░  1손 직접        0 [1] 2  3  4  5  6                         │
+│   노원구  ░░░░░░░░░░░  0손 카메라     [0] 1  2  3  4  5  6                         │
 ```
 
 - 진입: "무대 시작" 버튼 한 개(카메라·오디오 권한). 옆에 "마우스로 시작" 작은 링크.
@@ -140,20 +165,24 @@
 ```
 StageState { mode: "map" | "spread"; hover: gu|null; lifted: gu|null; focus: gu|null;
              input: "hands" | "mouse"; vote: VoteState|null; month; metric }
-VoteState  { candidates: [gu, gu, gu]; index: 0..2; phase: "prompt" | "counting" | "result";
-             counts: (number|null)[]; winner: gu|null; endsAt: number }
+VoteState  { candidates: [gu, gu, gu]; index: 0..2;
+             phase: "prompt" | "counting" | "awaitManual" | "review" | "result";
+             method: "camera" | "manual";
+             counts: (number|null)[]; sources: ("camera" | "manual" | null)[];
+             reviewEdited: boolean; winner: gu|null; endsAt: number|null }
 ```
 
-- 이벤트: `hover(gu)`, `grab`, `release`, `spread`, `victory`, `voteStart(candidates)`, `voteTick(now, handCount)`, `voteCancel`, `setInput`, `month`, `metric`.
+- 이벤트: `hover(gu)`, `grab`, `release`, `spread`, `victory`, `voteStart(candidates)`, `voteTick(now, handCount)`, `voteSet(index, n)`, `voteMethod(method)`, `voteConfirm`, `voteCancel`, `setInput`, `month`, `metric`.
 - 규칙: `grab` → `lifted = hover`(hover 없으면 무시). `release` → `focus = lifted, lifted = null, mode = "map"`. `spread` → mode 토글(map ↔ spread). `victory` → `focus = null, lifted = null, mode = "map"`. 투표 중에는 grab·spread·victory 무시.
-- 투표 진행: 후보마다 prompt(1.5초, 안내 음성) → counting(5초) → 다음 후보. 끝나면 result: 최다 득표 구가 winner, 동점이면 후보 순서상 앞선 구, 전원 0표면 winner = 첫 후보이고 "아무도 손을 들지 않아 ○○구로 갑니다" 클립. result 후 winner를 focus로.
+- 투표 진행: 후보마다 prompt(1.5초, 안내 음성) → counting(카메라 방식 5초, 직접 선택 방식은 `voteSet`까지 대기) → 다음 후보. 카메라 방식에서 창이 끝났는데 `voteCounter` 값이 null이면 `awaitManual`(타이머 멈춤, `voteSet` 대기). 세 후보가 끝나면 review(3초, `voteSet`이 오면 `reviewEdited = true`로 자동 확정 정지, `voteConfirm` 대기). 확정되면 result: 최다 득표 구가 winner, 동점이면 후보 순서상 앞선 구, 전원 0표면 winner = 첫 후보이고 "아무도 손을 들지 않아 ○○구로 갑니다" 클립. result 후 winner를 focus로.
+- `voteSet(index, n)`: n은 0~6 정수만. 이미 지난 후보와 현재 후보는 언제든, 아직 안 온 후보는 review에서만 받는다. 직접 값은 같은 후보의 이후 카메라 값보다 우선(`sources[index] = "manual"`). `input`이 mouse로 바뀌거나 카메라 로드가 실패하면 `method = "manual"`.
 - 기본 후보: 현재 월 ㎡당 중앙값 1위, 13위, 25위 구(비싼 곳·중간·싼 곳). URL `#/stage?vote=강남구,마포구,노원구`로 바꿀 수 있다. 잘못된 이름은 무시하고 기본값으로 채운다.
 - 상태가 바뀌면 출력 효과 세 가지로 나간다: 씬 명령, 해설 큐, publish. 효과 계산은 `diffEffects(prev, next) → Effect[]` 순수 함수.
 
 ### 5.4 마우스·키보드 폴백 (`frontend/src/stage/mouseInput.ts`)
 
 - 마우스 이동 = 커서(hover). 누르고 있기 = 주먹(grab/release). 스페이스 = 두 손 펴기(spread). `Esc` = 브이(victory).
-- 투표 counting 중 숫자키 `0`~`6` = 그 후보의 손 개수를 직접 입력(카메라 값보다 우선).
+- 투표 중 숫자키 `0`~`6` = 현재 후보(review에서는 선택된 줄, `↑`/`↓`로 이동)의 손 개수 직접 선택. 패널의 숫자 버튼 클릭과 같다. `N` = 투표 입력 방식(카메라 ↔ 직접 선택). `Enter` = 집계 확정.
 - `G` = 손 모드 ↔ 마우스 모드 전환. `V` = 투표 시작/취소. `M` = 음소거. `C` = 웹캠 미리보기 숨김. `D` = 진단. `H` = 안내 줄 숨김. `←`/`→` = 월, `P` = 가격·건수 지표 전환.
 - 손 모드에서도 마우스와 키는 항상 살아 있다(발표 중 비상 조작).
 
@@ -215,7 +244,7 @@ interface VoteMessage  { v: 1; type: "vote"; round: number; phase: "counting" | 
 
 ### 5.10 시험
 
-- 순수 모듈 vitest: `oneEuro`, `cursorMap`, `gestureMachine`(확정·쿨다운·release 타임아웃, 합성 프레임 시퀀스), `voteCounter`(500ms 안정 구간, 상한, 순간 튐 무시), `stageState` 리듀서와 `diffEffects`, `mouseInput` 키 매핑, `spreadLayout`(정렬, 값 없는 구 뒤, 호 범위 안), `isStageMessage`/`isVoteMessage`/허용 키 검사, `narrator` 큐(끊기 규칙, 파일 없음), `facts`, `validateScript`, 템플릿 id 생성(306개, 중복 없음), manifest 생성.
+- 순수 모듈 vitest: `oneEuro`, `cursorMap`, `gestureMachine`(확정·쿨다운·release 타임아웃, 합성 프레임 시퀀스), `voteCounter`(500ms 안정 구간, 상한, 순간 튐 무시, 안정 구간 없으면 null), `stageState` 리듀서와 `diffEffects`(직접 선택 방식은 타이머 없이 대기, 카메라 null이면 awaitManual, 직접 값이 카메라 값보다 우선, review 수정 시 자동 확정 정지, 0~6 밖 값 거절, 확정 전에는 publish·해설 없음), `mouseInput` 키 매핑, `spreadLayout`(정렬, 값 없는 구 뒤, 호 범위 안), `isStageMessage`/`isVoteMessage`/허용 키 검사, `narrator` 큐(끊기 규칙, 파일 없음), `facts`, `validateScript`, 템플릿 id 생성(306개, 중복 없음), manifest 생성.
 - 통합: `#/stage`가 mock 실시간 + 마우스 입력으로 publish 순서가 맞는지(StateMessage → StageMessage), 페이로드에 좌표·이미지 키가 없는지.
 - 브라우저 확인(카메라, GPU 위임, 오디오 재생, 프로젝터 화면)은 이 머신에서 불가. 보고서에 "미확인"으로 적고 사용자 리허설 체크리스트로 넘긴다. 헤드리스 크로미움이 가능하면 마우스 모드 스크린샷까지.
 
@@ -229,5 +258,5 @@ interface VoteMessage  { v: 1; type: "vote"; round: number; phase: "counting" | 
 ## 7. 데모 운영 메모
 
 - 발표 전: 노트북 웹캠 앞 0.5~1m, 손 뒤 배경은 단색, 역광 피하기. `D`로 FPS 20 이상 확인. 주먹·두 손 펴기·브이 각 3회 리허설. 투표는 손 0, 1, 2개로 리허설.
-- 카메라가 안 잡히면 `G`로 마우스 모드. 숫자키로 투표 입력.
+- 카메라가 안 잡히면 `G`로 마우스 모드(투표는 자동으로 직접 선택). 카메라가 엉뚱하게 세면 패널 숫자를 누르거나 숫자키로 고치고, 집계 확인에서 한 번 더 고칠 수 있다.
 - 발표 중 순서 예: 무대 시작 → 손 펼쳐 가격순 → 다시 펼쳐 지도 → 주먹으로 강남구 → 브이 → `V` 투표 → 결과 구 해설.
