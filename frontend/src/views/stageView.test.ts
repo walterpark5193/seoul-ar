@@ -307,6 +307,16 @@ describe("normalizeKey", () => {
     expect(normalizeKey(" ", "Space")).toBe(" ");
     expect(normalizeKey("ㅍ", undefined)).toBe("ㅍ");
   });
+  it("M-5: also maps Escape, Enter and the arrows under the IME (Task 15)", () => {
+    expect(normalizeKey("Process", "Escape")).toBe("Escape");
+    expect(normalizeKey("Process", "Enter")).toBe("Enter");
+    expect(normalizeKey("Process", "NumpadEnter")).toBe("Enter");
+    expect(normalizeKey("Process", "ArrowLeft")).toBe("ArrowLeft");
+    expect(normalizeKey("Process", "ArrowRight")).toBe("ArrowRight");
+    expect(normalizeKey("Process", "ArrowUp")).toBe("ArrowUp");
+    expect(normalizeKey("Process", "ArrowDown")).toBe("ArrowDown");
+    expect(normalizeKey("Process", "F5")).toBe("Process");
+  });
   it("maps the Windows IME \"Process\" key back to the physical key", () => {
     expect(normalizeKey("Process", "KeyG")).toBe("g");
     expect(normalizeKey("Process", "KeyV")).toBe("v");
@@ -1035,6 +1045,36 @@ describe("stage controller", () => {
     expect(s.view.parts.hints ?? null).toBeNull();
     s.key("h");
     expect(s.view.parts.hints).toContain("누르고 있기");
+  });
+
+  it("M-1: the hover follows the map moving under a still mouse (zoom/spin), not only mouse moves (Task 15)", async () => {
+    let under: string | null = "강남구";
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    expect(s.c.state.hover).toBe("강남구");
+    under = "서초구"; // 지도가 움직이면 같은 자리 아래 구가 바뀐다
+    s.render();
+    expect(s.c.state.hover).toBe("강남구"); // 지도가 그대로면 다시 고르지 않는다
+    s.c.pointer.wheel(-100);
+    s.render();
+    expect(s.c.state.hover).toBe("서초구");
+  });
+
+  it("M-4: G to mouse turns the camera off and the error fallback cannot toast in mouse mode; G again restarts hands (Task 15)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    expect(s.c.state.input).toBe("hands");
+    s.key("g");
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.src.source.stop).toHaveBeenCalled();
+    s.src.source.errors = 999;
+    s.clock.advance(VOTE_TICK_MS * 4);
+    expect(s.toast.mock.calls.some(([m]) => String(m).includes("손 인식이 계속 실패"))).toBe(false);
+    const starts = s.startHands.mock.calls.length;
+    s.key("g");
+    await flush();
+    expect(s.startHands.mock.calls.length).toBe(starts + 1);
   });
 
   it("ui keys toggle hints, diag, preview and mute", async () => {

@@ -109,7 +109,8 @@ export function voteTiming(candidates: readonly [string, string, string], clipMs
 
 /**
  * 한글 입력 상태에서는 V가 "ㅍ"로, Windows 한국어 IME에서는 "Process"로 들어온다.
- * 그럴 때는 물리 키(code)로 바꾼다: 글자 키는 영문 소문자, 숫자 키는 숫자, 스페이스는 " ".
+ * 그럴 때는 물리 키(code)로 바꾼다: 글자 키는 영문 소문자, 숫자 키는 숫자, 스페이스는 " ",
+ * Esc·Enter(숫자판 포함)·화살표는 그 이름 그대로(M-5).
  */
 export function normalizeKey(key: string, code: string | undefined): string {
   if (!code || !(key === "Process" || /^[ㄱ-ㅣ]$/.test(key))) return key;
@@ -118,6 +119,9 @@ export function normalizeKey(key: string, code: string | undefined): string {
   const digit = /^Digit([0-9])$/.exec(code);
   if (digit) return digit[1]!;
   if (code === "Space") return " ";
+  if (code === "Escape") return "Escape";
+  if (code === "Enter" || code === "NumpadEnter") return "Enter";
+  if (/^Arrow(Left|Right|Up|Down)$/.test(code)) return code;
   return key;
 }
 
@@ -690,7 +694,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     deps.toast(message);
   }
   function toggleInput(): void {
-    if (state.input === "hands") { dispatch({ type: "setInput", input: "mouse", now: clock.now() }); return; }
+    if (state.input === "hands") {
+      // G로 마우스로 가면 카메라와 인식기를 끈다(M-4). 다시 G를 누르면 acquireHands가 새로 켠다.
+      detach();
+      gestures.reset();
+      dispatch({ type: "setInput", input: "mouse", now: clock.now() });
+      renderCursor();
+      return;
+    }
     if (source) useHands();
     else void acquireHands();
   }
@@ -739,7 +750,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     syncVisibility(); // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
     if (!renderer) frameTick(VOTE_TICK_MS / 1000);
     const now = clock.now();
-    if (source && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
+    // 손 모드일 때만: 마우스 모드에서 "마우스로 바꿨습니다"를 띄우지 않는다(M-4).
+    if (source && state.input === "hands" && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
     else if (source && state.input === "hands" && now - frameAt > HAND_STALL_MS) fallbackToMouse(HAND_STALL_TOAST);
     if (state.vote) dispatch({ type: "voteTick", now, cameraCount: counter.result() });
     renderVote();
@@ -748,10 +760,17 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   const heartbeat = () => { publishState(); publishStage(); };
 
   /** 렌더 루프 한 번: 관성·정면 복귀를 진행하고 도시 group과 카메라 거리에 적용, 관성 변화를 알리고 큰 화면에 보낸다. */
+  let lastYaw = 0;
+  let lastZoom = 1;
   function frameTick(dt: number): void {
     const v = rotator.tick(dt);
     scene.group.rotation.y = v.yaw;
     renderer?.setZoom(v.zoom);
+    // 마우스를 가만히 둔 채 지도가 돌거나(관성·정면 복귀) 확대되면, 같은 자리 아래 구가 바뀐다. 그 자리에서 다시 고른다(M-1).
+    const moved = v.yaw !== lastYaw || v.zoom !== lastZoom;
+    lastYaw = v.yaw;
+    lastZoom = v.zoom;
+    if (moved && phase === "running" && state.input === "mouse" && mousePoint && state.rotate === "none") hoverTo(pickAt(mousePoint));
     syncSpin();
     publishView();
   }

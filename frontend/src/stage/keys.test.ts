@@ -169,3 +169,73 @@ describe("attachPointer wheel", () => {
     expect(l.has("wheel")).toBe(false);
   });
 });
+
+describe("attachPointer pointer filtering (Task 15)", () => {
+  const mk = () => {
+    const l = new Map<string, (e: any) => void>();
+    const wl = new Map<string, () => void>();
+    const captured: number[] = [];
+    const el: any = {
+      addEventListener: (t: string, f: any) => l.set(t, f),
+      removeEventListener: (t: string, f: any) => { if (l.get(t) === f) l.delete(t); },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+      setPointerCapture: (id: number) => captured.push(id),
+    };
+    const win = {
+      addEventListener: (t: string, f: () => void) => wl.set(t, f),
+      removeEventListener: (t: string, f: () => void) => { if (wl.get(t) === f) wl.delete(t); },
+    };
+    const calls: string[] = [];
+    const h = { move: (p: any) => calls.push(`move ${p.x}`), down: () => calls.push("down"), up: () => calls.push("up"), leave: () => calls.push("leave") };
+    return { l, wl, el, win, calls, captured, h };
+  };
+  const pe = (o: Record<string, unknown>) => ({ preventDefault() {}, pointerType: "touch", isPrimary: true, pointerId: 1, clientX: 10, clientY: 10, ...o });
+
+  it("P-1: a second finger never moves, presses or releases (only the primary pointer counts)", () => {
+    const { l, el, win, calls, h } = mk();
+    attachPointer(el, h, win);
+    l.get("pointerdown")!(pe({ pointerId: 1, clientX: 10 }));
+    l.get("pointerdown")!(pe({ pointerId: 2, isPrimary: false, clientX: 90 }));
+    l.get("pointermove")!(pe({ pointerId: 2, isPrimary: false, clientX: 80, buttons: 1 }));
+    l.get("pointerup")!(pe({ pointerId: 2, isPrimary: false }));
+    l.get("pointercancel")!(pe({ pointerId: 2, isPrimary: false }));
+    l.get("pointerleave")!(pe({ pointerId: 2, isPrimary: false }));
+    l.get("pointermove")!(pe({ pointerId: 1, clientX: 20, buttons: 1 }));
+    l.get("pointerup")!(pe({ pointerId: 1 }));
+    expect(calls).toEqual(["down", "move 0.2", "up"]);
+  });
+
+  it("M-2: right and middle mouse buttons do not press (and are not captured)", () => {
+    const { l, el, win, calls, captured, h } = mk();
+    attachPointer(el, h, win);
+    l.get("pointerdown")!(pe({ pointerType: "mouse", button: 2, pointerId: 5 }));
+    l.get("pointerdown")!(pe({ pointerType: "mouse", button: 1, pointerId: 5 }));
+    expect(calls).toEqual([]);
+    expect(captured).toEqual([]);
+    l.get("pointerdown")!(pe({ pointerType: "mouse", button: 0, pointerId: 5 }));
+    expect(calls).toEqual(["down"]);
+  });
+
+  it("M-3: a move with no buttons held while pressed releases once (missed pointerup backstop)", () => {
+    const { l, el, win, calls, h } = mk();
+    attachPointer(el, h, win);
+    l.get("pointermove")!(pe({ pointerType: "mouse", buttons: 0, clientX: 30 })); // 누르지 않은 이동은 그냥 이동
+    l.get("pointerdown")!(pe({ pointerType: "mouse", button: 0 }));
+    l.get("pointermove")!(pe({ pointerType: "mouse", buttons: 0, clientX: 40 }));
+    l.get("pointermove")!(pe({ pointerType: "mouse", buttons: 0, clientX: 50 }));
+    expect(calls).toEqual(["move 0.3", "down", "up", "move 0.4", "move 0.5"]);
+  });
+
+  it("M-3: window blur releases an active press, and is detached", () => {
+    const { l, wl, el, win, calls, h } = mk();
+    const off = attachPointer(el, h, win);
+    wl.get("blur")!();
+    expect(calls).toEqual([]);
+    l.get("pointerdown")!(pe({}));
+    wl.get("blur")!();
+    expect(calls).toEqual(["down", "up"]);
+    off();
+    expect(wl.size).toBe(0);
+  });
+});
+
