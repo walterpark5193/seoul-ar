@@ -110,7 +110,7 @@ async function main(): Promise<void> {
 
   let unmount: () => void = () => {};
   let seq = 0;
-  startRouter(async (next) => {
+  startRouter(async (next, query) => {
     const mine = ++seq;
     unmount();
     unmount = () => {};
@@ -124,7 +124,8 @@ async function main(): Promise<void> {
       if (mine !== seq) return; // 기다리는 사이 다른 화면으로 이동했다
       root.innerHTML = "";
     }
-    unmount = views[next](root, ctx);
+    // 해시 쿼리(조정 파라미터)는 AR 뷰에만 넘긴다.
+    unmount = views[next](root, next === "ar" ? { ...ctx, query } : ctx);
   });
 }
 

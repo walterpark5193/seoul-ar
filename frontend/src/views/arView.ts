@@ -5,6 +5,7 @@ import type { SeoulScene } from "../scene/seoulScene";
 import type { AppState } from "../state/store";
 import type { GuData } from "../data/types";
 import { mountSheet } from "../ui/sheetDom";
+import { describeArTuning, parseArTuning, type ArTuning } from "./arTuning";
 import type { MountView } from "./types";
 import { bindViewer, drawCity } from "./viewerSync";
 
@@ -29,6 +30,8 @@ export interface BeginArOptions {
   onFail(err: unknown): void;
   /** "화면 고정" 버튼 상태. 처음 한 번(비활성)과, 타깃 첫 인식·고정·해제 때마다 부른다. */
   onFreezeState?(state: FreezeState): void;
+  /** 해시 쿼리에서 읽은 조정값(views/arTuning.ts). container와 targetSrc는 덮어쓸 수 없다. */
+  tuning?: ArTuning;
 }
 
 export interface RunningAr {
@@ -77,7 +80,7 @@ export async function beginAr(o: BeginArOptions): Promise<RunningAr | null> {
   let session: ArSession | null = null;
   let offFreeze: () => void = () => {};
   try {
-    const s = o.createArSession({ container: o.container, targetSrc: TARGET_SRC });
+    const s = o.createArSession({ ...o.tuning, container: o.container, targetSrc: TARGET_SRC });
     session = s;
     const freezable = canFreeze(s);
     let foundOnce = false;
@@ -154,7 +157,11 @@ export const mountArView: MountView = (root, ctx) => {
   const freezeBtn = root.querySelector<HTMLButtonElement>("[data-freeze]")!;
   const freezeState = root.querySelector<HTMLElement>("[data-freeze-state]")!;
 
-  const sheet = mountSheet(sheetHost, ctx.store, ctx.index, { altView: { href: "#/3d", label: "3D로 보기" } });
+  const tuning = parseArTuning(ctx.query ?? "");
+  const sheet = mountSheet(sheetHost, ctx.store, ctx.index, {
+    altView: { href: "#/3d", label: "3D로 보기" },
+    tuningNote: describeArTuning(tuning),
+  });
   let alive = true;
   let running: RunningAr | null = null;
   let pending: [AppState, GuData | null] | null = null;
@@ -194,6 +201,7 @@ export const mountArView: MountView = (root, ctx) => {
       container: stage,
       createArSession: ctx.ar.createArSession,
       createScene: ctx.createScene,
+      tuning,
       onFound: () => { tracking = true; updateScan(); },
       onLost: () => { tracking = false; updateScan(); },
       onFreezeState: applyFreeze,

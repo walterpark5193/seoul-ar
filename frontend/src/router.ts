@@ -11,6 +11,12 @@ export function parseRoute(hash: string): Route {
   return ROUTES[path] ?? "landing";
 }
 
+/** 해시의 "?" 뒤(쿼리). 경로 판정은 이를 무시하지만, AR 뷰는 조정 파라미터로 쓴다. */
+export function routeQuery(hash: string): string {
+  const i = hash.indexOf("?");
+  return i < 0 ? "" : hash.slice(i + 1);
+}
+
 export function navigate(hash: string): void {
   if (location.hash === hash) return;
   location.hash = hash;
@@ -22,15 +28,15 @@ export function redirect(hash: string): void {
   location.replace(hash);
 }
 
-/** hashchange마다 onRoute를 부른다. 처음 한 번은 즉시. 반환값은 해제 함수. */
-export function startRouter(onRoute: (route: Route) => void): () => void {
+/** hashchange마다 onRoute(경로, 쿼리)를 부른다. 처음 한 번은 즉시. 반환값은 해제 함수. */
+export function startRouter(onRoute: (route: Route, query: string) => void): () => void {
   const fire = () => {
     const route = parseRoute(location.hash);
     // 알 수 없는 주소는 #/로 정리한다(새 기록 없이).
     if (route === "landing" && location.hash !== "" && location.hash !== "#" && location.hash !== "#/") {
       history.replaceState(null, "", "#/");
     }
-    onRoute(route);
+    onRoute(route, route === "landing" ? "" : routeQuery(location.hash));
   };
   window.addEventListener("hashchange", fire);
   fire();

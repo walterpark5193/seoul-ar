@@ -153,6 +153,14 @@ describe("renderSheet", () => {
     });
   });
 
+  it("shows the AR tuning note under the header only when given", () => {
+    const withNote = renderSheet(state(), gangnam, index, { tuningNote: "조정값 적용 중: cf=0.0001 <b>" });
+    expect(withNote).toContain('class="sheet-tuning"');
+    expect(text(withNote)).toContain("조정값 적용 중: cf=0.0001");
+    expect(withNote).not.toContain("<b>");
+    expect(renderSheet(state(), gangnam, index)).not.toContain("sheet-tuning");
+  });
+
   it("escapes names coming from data", () => {
     const html = renderSheet(state(), gangnam, { ...index, gus: [...index.gus, "<script>"] });
     expect(html).not.toContain("<script>");

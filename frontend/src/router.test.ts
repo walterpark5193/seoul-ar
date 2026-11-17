@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute } from "./router";
+import { parseRoute, routeQuery } from "./router";
+
+describe("routeQuery", () => {
+  it("returns the part after ? in the hash, or an empty string", () => {
+    expect(routeQuery("#/ar?cf=0.0001&beta=0.01")).toBe("cf=0.0001&beta=0.01");
+    expect(routeQuery("#/ar")).toBe("");
+    expect(routeQuery("#/ar?")).toBe("");
+    expect(routeQuery("")).toBe("");
+  });
+});
 
 describe("parseRoute", () => {
   it("maps the four hash routes", () => {

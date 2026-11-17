@@ -5,7 +5,11 @@ import type { AppState } from "../state/store";
 import { NO_TRADE, fmtAmt, fmtCount, fmtMonth, fmtNumber, fmtPerM2 } from "./format";
 import { esc, figure } from "./html";
 
-export interface SheetOptions { altView?: { href: string; label: string }; }
+export interface SheetOptions {
+  altView?: { href: string; label: string };
+  /** AR 실기 조정값 안내(views/arTuning.ts describeArTuning). 있을 때만 머리 아래 한 줄. */
+  tuningNote?: string | null;
+}
 
 interface Figure { label: string; value: string; caption?: string; }
 
@@ -153,6 +157,7 @@ export function renderSheet(state: AppState, data: GuData | null, index: DataInd
   return `<section class="sheet" aria-label="고른 지역의 실거래 요약">` +
     `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +
     `<p class="sheet-month">${esc(fmtMonth(state.month))} 매매 실거래</p></div>${renderLive(state)}</header>` +
+    (opts.tuningNote ? `<p class="sheet-tuning">${esc(opts.tuningNote)}</p>` : "") +
     renderFigures(figures) +
     dongs +
     (notes.length ? `<p class="sheet-note">${notes.map(esc).join(" ")}</p>` : "") +

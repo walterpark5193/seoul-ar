@@ -127,6 +127,36 @@ describe("arView", () => {
     expect(session.renderer.forceContextLoss).toHaveBeenCalled();
   });
 
+  it("passes hash tuning options into createArSession without letting them override container or target", async () => {
+    const { session } = fakeSession(async () => {});
+    const container = {} as HTMLElement;
+    let seen: unknown = null;
+    await beginAr({
+      container,
+      createArSession: (opts) => { seen = opts; return session; },
+      createScene: fakeScene,
+      onFound: vi.fn(), onLost: vi.fn(), onFail: vi.fn(),
+      tuning: { filterMinCF: 0.0005, missTolerance: 20, smoothing: { holdMs: 1200 } },
+    });
+    expect(seen).toEqual({
+      container, targetSrc: "/marker/target.mind",
+      filterMinCF: 0.0005, missTolerance: 20, smoothing: { holdMs: 1200 },
+    });
+  });
+
+  it("passes only container and target when there is no tuning", async () => {
+    const { session } = fakeSession(async () => {});
+    const container = {} as HTMLElement;
+    let seen: unknown = null;
+    await beginAr({
+      container,
+      createArSession: (opts) => { seen = opts; return session; },
+      createScene: fakeScene,
+      onFound: vi.fn(), onLost: vi.fn(), onFail: vi.fn(),
+    });
+    expect(seen).toEqual({ container, targetSrc: "/marker/target.mind" });
+  });
+
   describe("화면 고정 toggle", () => {
     it("is disabled until the target has been found once", async () => {
       const { session, hooks } = fakeSession(async () => {});

@@ -24,6 +24,8 @@ export interface ViewContext {
   createScene(): SeoulScene;
   reducedMotion: boolean;
   ar: ArDeps;
+  /** 해시의 "?" 뒤. main이 AR 뷰에만 넘긴다(조정 파라미터, views/arTuning.ts). */
+  query?: string;
 }
 
 /** 뷰를 root에 그리고 해제 함수를 돌려준다. */
