@@ -24,7 +24,7 @@ import type { Geo, GuShape } from "../geo/types";
 import type { Stat, GuData, Metric } from "../data/types";
 import { PALETTE, colorFor, normalize } from "./colors";
 import { BAR_MIN_HEIGHT, boundsOf, layoutBars } from "./layout";
-import { canvasTextTexture, disposeLabel, makeLabelSprite } from "./labels";
+import { canvasTextTexture, disposeLabel, makeLabelSprite, retextLabelSprite } from "./labels";
 
 export interface SeoulScene {
   group: Group;                                                    // 부모(AR 앵커 또는 월드)에 add
@@ -85,10 +85,20 @@ interface BarState {
   leaving: boolean; // 대상에 없는 동: 0.02로 줄어든 뒤 애니메이션 끝에 빠진다
 }
 
+/** 라벨 하나. 달이 바뀌어도 같은 동(또는 같은 구 이름)이면 같은 스프라이트가 이어진다. */
 interface LabelEntry {
+  kind: "dong" | "gu";
+  key: string; // 동 이름 또는 구 이름
+  text: string;
   sprite: Sprite;
-  bar: BarState | null; // null이면 구 이름 라벨
-  y: number; // 구 윗면 기준 라벨 아래쪽 높이
+  bar: BarState | null; // 따라갈 막대(구 이름 라벨은 null)
+  fromY: number; // 구 윗면 기준 라벨 아래쪽 높이(쌓는 칸)
+  toY: number;
+  curY: number;
+  fromOp: number; // 불투명도
+  toOp: number;
+  curOp: number;
+  leaving: boolean; // 상위 5에서 빠짐: 흐려진 뒤 애니메이션 끝에 제거
 }
 
 function snap(x: number, z: number, size: number, h: number, color: Color | string): BarSnap {
@@ -204,7 +214,9 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
   const labels = new Group();
   labels.name = "labels";
   group.add(labels);
-  const leaderMaterial = new LineBasicMaterial({ color: PALETTE.text, transparent: true, opacity: 0.55 });
+  // 지시선은 정점 RGBA 색으로 선마다 따로 흐려진다(라벨 불투명도 × 0.55).
+  const leaderMaterial = new LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false });
+  const leaderColor = new Color(PALETTE.text);
 
   let metric: Metric = "price";
   let summary: Record<string, Stat> | null = null;
@@ -277,33 +289,119 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
     labels.clear();
   }
 
-  function buildLabels(): void {
+  /** 동 라벨 수에 맞춰 지시선 버퍼를 다시 만든다(위치·색은 applyAll이 채운다). */
+  function rebuildLeader(): void {
+    if (leader) {
+      leader.geometry.dispose();
+      leader.removeFromParent();
+      leader = null;
+    }
+    const n = labelEntries.filter((e) => e.kind === "dong").length;
+    if (n === 0) return;
+    const g = new BufferGeometry();
+    g.setAttribute("position", new Float32BufferAttribute(new Float32Array(n * 6), 3));
+    g.setAttribute("color", new Float32BufferAttribute(new Float32Array(n * 8), 4));
+    leader = new LineSegments(g, leaderMaterial);
+    leader.name = "leaders";
+    leader.frustumCulled = false;
+    labels.add(leader);
+  }
+
+  function newLabel(kind: "dong" | "gu", key: string, text: string, height: number, bar: BarState | null, y: number): LabelEntry | null {
+    const sprite = makeLabelSprite(text, height, makeText);
+    if (!sprite) return null;
+    labels.add(sprite);
+    return { kind, key, text, sprite, bar, fromY: y, toY: y, curY: y, fromOp: 0, toOp: 1, curOp: 0, leaving: false };
+  }
+
+  /** 남는 라벨을 새 칸·글로 옮긴다. 글이 같으면 텍스처도 그대로. 팩토리가 null을 주면 false. */
+  function keepLabel(e: LabelEntry, text: string, height: number, bar: BarState | null, y: number): boolean {
+    if (e.text !== text) {
+      if (!retextLabelSprite(e.sprite, text, height, makeText)) return false;
+      e.text = text;
+    }
+    e.bar = bar;
+    e.leaving = false;
+    e.fromY = e.curY;
+    e.toY = y;
+    e.fromOp = e.curOp;
+    e.toOp = 1;
+    return true;
+  }
+
+  /**
+   * 라벨: 선택 구 이름 + 값 있는 상위 5개 법정동을 가장 높은 막대 위에 아래에서 위로 쌓는다(1위가 가장 아래).
+   * - "fresh": 모두 새로 만들고 0에서 나타난다.
+   * - "morph": 상위 5에 남는 동과 구 이름은 같은 스프라이트를 쓰고(값이 바뀌면 텍스처만 교체) 새 칸으로 옮긴다.
+   *   새로 든 동만 나타나고, 빠진 동만 흐려진 뒤 애니메이션 끝에 제거된다.
+   */
+  function syncLabels(mode: "fresh" | "morph"): void {
+    if (!focused || mode === "fresh") clearLabels();
     if (!focused) return;
     const targets = barStates.filter((b) => !b.leaving);
+    const stateOf = new Map(barStates.map((b) => [b.name, b] as const));
     const maxH = targets.reduce((m, b) => Math.max(m, b.to.h), 0);
+    const oldDong = new Map<string, LabelEntry>();
+    let oldGu: LabelEntry | null = null;
+    for (const e of labelEntries) {
+      if (e.kind === "gu") oldGu = e;
+      else oldDong.set(e.key, e);
+    }
+
+    const next: LabelEntry[] = [];
     let y = maxH + LABEL_CLEAR;
-    // 상위 5개 법정동(값 있는 것만)을 아래에서 위로 쌓는다. 1위가 가장 아래(자기 막대와 가장 가깝다).
     for (const b of targets.filter((q) => q.value !== null).slice(0, LABEL_TOP_N)) {
-      const sprite = makeLabelSprite(dongLabelText(b.name, b.value, metric), DONG_LABEL_H, makeText);
-      if (!sprite) continue;
-      labelEntries.push({ sprite, bar: b, y });
-      labels.add(sprite);
+      const text = dongLabelText(b.name, b.value, metric);
+      const prev = oldDong.get(b.name);
+      let entry: LabelEntry | null = null;
+      if (prev) {
+        oldDong.delete(b.name);
+        if (keepLabel(prev, text, DONG_LABEL_H, b, y)) entry = prev;
+        else disposeLabel(prev.sprite);
+      } else {
+        entry = newLabel("dong", b.name, text, DONG_LABEL_H, b, y);
+      }
+      if (!entry) continue;
+      next.push(entry);
       y += LABEL_STEP;
     }
-    const guSprite = makeLabelSprite(focused.shape.name, GU_LABEL_H, makeText);
-    if (guSprite) {
-      labelEntries.push({ sprite: guSprite, bar: null, y: y + 0.01 });
-      labels.add(guSprite);
+
+    const guName = focused.shape.name;
+    const guY = y + 0.01;
+    let guEntry: LabelEntry | null = null;
+    if (oldGu && oldGu.key === guName && keepLabel(oldGu, guName, GU_LABEL_H, null, guY)) guEntry = oldGu;
+    else {
+      if (oldGu) disposeLabel(oldGu.sprite);
+      guEntry = newLabel("gu", guName, guName, GU_LABEL_H, null, guY);
     }
-    const withBar = labelEntries.filter((e) => e.bar !== null).length;
-    if (withBar > 0) {
-      const g = new BufferGeometry();
-      g.setAttribute("position", new Float32BufferAttribute(new Float32Array(withBar * 6), 3));
-      leader = new LineSegments(g, leaderMaterial);
-      leader.name = "leaders";
-      leader.frustumCulled = false;
-      labels.add(leader);
+    if (guEntry) next.push(guEntry);
+
+    // 상위 5에서 빠진 동: 자기 막대(남아 있으면 새 상태, 떠나는 중이면 그 상태)를 따라가며 흐려진다.
+    for (const e of oldDong.values()) {
+      if (reducedMotion) {
+        disposeLabel(e.sprite);
+        continue;
+      }
+      e.bar = stateOf.get(e.key) ?? e.bar;
+      e.leaving = true;
+      e.fromY = e.curY;
+      e.toY = e.curY;
+      e.fromOp = e.curOp;
+      e.toOp = 0;
+      next.push(e);
     }
+
+    labelEntries = next;
+    rebuildLeader();
+  }
+
+  /** 애니메이션 끝: 흐려진 라벨을 지운다. */
+  function dropLeavingLabels(): boolean {
+    if (!labelEntries.some((e) => e.leaving)) return false;
+    for (const e of labelEntries) if (e.leaving) disposeLabel(e.sprite);
+    labelEntries = labelEntries.filter((e) => !e.leaving);
+    rebuildLeader();
+    return true;
   }
 
   function syncInstanceSet(): void {
@@ -319,14 +417,16 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
    * 칸은 layoutBars가 대상 동 목록으로 다시 계산한다(정렬·격자 크기가 바뀌면 막대가 새 칸으로 미끄러진다).
    */
   function startBars(mode: "fresh" | "morph"): void {
-    clearLabels();
+    // 지금 막대가 없으면(구를 막 골라 data가 이제 왔을 때, focus(gu,null) → focus(gu,data)) 모프할 대상이 없으니
+    // 막대는 새 성장. 라벨은 구가 그대로이므로 이어 쓴다(구 이름 라벨이 다시 깜빡이지 않게).
+    const barMode = barStates.length === 0 ? "fresh" : mode;
     const placements =
       focused && focusData && focusData.gu === focused.shape.name
         ? layoutBars(focusData.dongs, boundsOf(focused.shape.rings), metric).slice(0, MAX_BARS)
         : [];
     const ts = normalize(placements.map((p) => p.value));
     const old = new Map<string, BarState>();
-    if (mode === "morph") for (const b of barStates) if (!old.has(b.name)) old.set(b.name, b);
+    if (barMode === "morph") for (const b of barStates) if (!old.has(b.name)) old.set(b.name, b);
 
     const next: BarState[] = placements.map((p, i) => {
       const t = ts[i];
@@ -336,14 +436,14 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
       if (prev) {
         old.delete(p.name);
         from = cloneSnap(prev.cur);
-      } else if (mode === "morph") {
+      } else if (barMode === "morph") {
         from = snap(p.x, p.z, p.size, BAR_MIN_HEIGHT, PALETTE.noData);
       } else {
         from = snap(p.x, p.z, p.size, 0, to.color); // 0에서(그릴 때는 MIN_BAR_SCALE로 받친다)
       }
       return { name: p.name, value: p.value, from, to, cur: cloneSnap(from), leaving: false };
     });
-    if (mode === "morph" && !reducedMotion) {
+    if (barMode === "morph" && !reducedMotion) {
       for (const prev of old.values()) {
         if (next.length >= MAX_BARS) break;
         const from = cloneSnap(prev.cur);
@@ -355,15 +455,17 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
     barStates = focused ? next : [];
     barT = reducedMotion ? GROW_SECONDS : 0;
     syncInstanceSet();
-    buildLabels();
+    syncLabels(mode);
     applyAll();
   }
 
   /** 애니메이션이 끝나면 떠나는 막대를 인스턴스 집합에서 뺀다(항상 배열 끝에 있으므로 앞 번호는 그대로). */
   function dropLeaving(): void {
-    if (!barStates.some((b) => b.leaving)) return;
-    barStates = barStates.filter((b) => !b.leaving);
-    syncInstanceSet();
+    if (barStates.some((b) => b.leaving)) {
+      barStates = barStates.filter((b) => !b.leaving);
+      syncInstanceSet();
+    }
+    if (dropLeavingLabels()) applyAll(); // 새 지시선 버퍼를 채운다
   }
 
   function applyAll(): void {
@@ -395,20 +497,27 @@ export function createSeoulScene(geo: Geo, opts: SceneOptions = {}): SeoulScene 
 
     if (!focused) return;
     const [cx, cz] = focused.shape.centroid;
-    const attr = leader?.geometry.getAttribute("position");
+    const pos = leader?.geometry.getAttribute("position");
+    const col = leader?.geometry.getAttribute("color");
     let k = 0;
-    for (const entry of labelEntries) {
-      const x = entry.bar ? entry.bar.cur.x : cx;
-      const z = entry.bar ? entry.bar.cur.z : cz;
-      entry.sprite.position.set(x, base + entry.y, z);
-      entry.sprite.material.opacity = eB;
-      if (entry.bar && attr) {
-        attr.setXYZ(k++, x, base + Math.max(MIN_BAR_SCALE, entry.bar.cur.h), z);
-        attr.setXYZ(k++, x, base + entry.y, z);
+    for (const e of labelEntries) {
+      e.curY = mix(e.fromY, e.toY, eB);
+      e.curOp = mix(e.fromOp, e.toOp, eB);
+      const x = e.bar ? e.bar.cur.x : cx;
+      const z = e.bar ? e.bar.cur.z : cz;
+      e.sprite.position.set(x, base + e.curY, z);
+      e.sprite.material.opacity = e.curOp;
+      if (e.kind === "dong" && pos && col) {
+        const top = base + Math.max(MIN_BAR_SCALE, e.bar ? e.bar.cur.h : 0);
+        const a = 0.55 * e.curOp;
+        col.setXYZW(k, leaderColor.r, leaderColor.g, leaderColor.b, a);
+        pos.setXYZ(k++, x, top, z);
+        col.setXYZW(k, leaderColor.r, leaderColor.g, leaderColor.b, a);
+        pos.setXYZ(k++, x, base + e.curY, z);
       }
     }
-    if (attr) attr.needsUpdate = true;
-    leaderMaterial.opacity = 0.55 * eB;
+    if (pos) pos.needsUpdate = true;
+    if (col) col.needsUpdate = true;
   }
 
   return {

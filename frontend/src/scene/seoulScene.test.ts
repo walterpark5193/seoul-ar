@@ -529,6 +529,104 @@ describe("time travel morph (CONTRACTS 11)", () => {
     expect(b.count).toBe(0);
   });
 
+  it("picking a gu then receiving its data (focus(gu,null) → focus(gu,data)) is a fresh growth, not a grey morph", () => {
+    const s = createSeoulScene(fixtureGeo(), noText);
+    s.focus("강남구", null, "price"); // 뷰어: 구를 고르면 먼저 data 없이
+    s.update(0.2, camera);
+    s.focus("강남구", october(), "price"); // 로드 완료
+    const b = bars(s.group);
+    expect(b.count).toBe(6);
+    const top = byName(b, "압구정동"); // 10월 최댓값
+    expect(top.scale.y).toBeLessThan(0.001); // 0.02 바탕선 아래, 0에서 시작
+    expect(top.color.getHex()).toBe(hex(PALETTE.ramp[4])); // 회색(noData)이 아니라 대상 색을 바로
+    s.update(0.3, camera);
+    expect(byName(b, "압구정동").scale.y).toBeCloseTo(0.35 * 0.875, 6);
+    expect(byName(b, "압구정동").color.getHex()).toBe(hex(PALETTE.ramp[4]));
+  });
+
+  it("the gu name label survives focus(gu,null) → focus(gu,data) without blinking", () => {
+    const s = createSeoulScene(fixtureGeo(), {
+      makeTextTexture: () => {
+        const t = new Texture();
+        t.image = { width: 256, height: 64 };
+        return t;
+      },
+    });
+    s.focus("강남구", null, "price");
+    s.update(0.6, camera);
+    const guLabel = sprites(s.group).find((sp) => sp.name === "label:강남구")!;
+    expect(guLabel.material.opacity).toBe(1);
+    s.focus("강남구", october(), "price");
+    expect(sprites(s.group).find((sp) => sp.name === "label:강남구")).toBe(guLabel);
+    expect(guLabel.material.opacity).toBe(1);
+    const dongLabels = sprites(s.group).filter((sp) => sp !== guLabel);
+    expect(dongLabels).toHaveLength(5);
+    expect(dongLabels.every((sp) => sp.material.opacity === 0)).toBe(true); // 새 라벨만 나타난다
+  });
+
+  it("time travel keeps labels of dongs that stay in the top 5 (same sprite, opacity 1); only leavers fade out, newcomers fade in", () => {
+    const calls: string[] = [];
+    const s = createSeoulScene(fixtureGeo(), {
+      makeTextTexture: (text) => {
+        calls.push(text);
+        const t = new Texture();
+        t.image = { width: 256, height: 64 };
+        return t;
+      },
+    });
+    s.focus("강남구", october(), "price");
+    s.update(0.6, camera);
+    const label = (name: string) => sprites(s.group).find((sp) => sp.name.startsWith(`label:${name}`));
+    // 10월 상위 5: 압구정 청담 대치 삼성 역삼. 11월(변형) 상위 5: 대치 세곡 압구정 청담 삼성
+    const daechi = label("대치동")!;
+    const cheongdam = label("청담동")!;
+    const yeoksam = label("역삼동")!;
+    const guLabel = label("강남구")!;
+    const cheongdamTex = cheongdam.material.map;
+    expect(daechi.material.opacity).toBe(1);
+    expect(label("세곡동")).toBeUndefined();
+    const before = calls.length;
+
+    s.focus(
+      "강남구",
+      gangnam([
+        dong("대치동", 4400, 9),
+        dong("세곡동", 4100, 3),
+        dong("압구정동", 4000, 2),
+        dong("청담동", 3900, 4), // 값 그대로 → 텍스처도 그대로
+        dong("삼성동", 2900, 6),
+        dong("역삼동", 2600, 10),
+      ]),
+      "price",
+    );
+    // 남는 라벨은 같은 객체, 불투명도 1 유지(깜빡임 없음)
+    expect(label("대치동")).toBe(daechi);
+    expect(daechi.material.opacity).toBe(1);
+    expect(daechi.name).toBe("label:대치동 4,400만원/㎡"); // 값이 바뀌면 글만 바꾼다
+    expect(label("청담동")).toBe(cheongdam);
+    expect(cheongdam.material.map).toBe(cheongdamTex);
+    expect(label("강남구")).toBe(guLabel);
+    expect(guLabel.material.opacity).toBe(1);
+    // 텍스처는 바뀐 글(대치·압구정·삼성)과 새 라벨(세곡)만 만든다. 구 이름은 다시 만들지 않는다.
+    expect(calls.slice(before).sort()).toEqual(
+      ["대치동 4,400만원/㎡", "삼성동 2,900만원/㎡", "세곡동 4,100만원/㎡", "압구정동 4,000만원/㎡"].sort(),
+    );
+    const sego = label("세곡동")!;
+    expect(sego.material.opacity).toBe(0);
+    expect(label("역삼동")).toBe(yeoksam);
+    expect(yeoksam.material.opacity).toBe(1);
+
+    s.update(0.3, camera);
+    expect(daechi.material.opacity).toBe(1);
+    expect(sego.material.opacity).toBeCloseTo(0.875, 10);
+    expect(yeoksam.material.opacity).toBeCloseTo(0.125, 10);
+
+    s.update(0.3, camera);
+    expect(sego.material.opacity).toBe(1);
+    expect(label("역삼동")).toBeUndefined(); // 다 사라진 뒤 제거
+    expect(sprites(s.group)).toHaveLength(6);
+  });
+
   it("setOverview interpolates gu colors from current to target", () => {
     const s = createSeoulScene(fixtureGeo(), noText);
     const s1 = { 종로구: stat(1000, 1), 강동구: stat(3000, 1) };
