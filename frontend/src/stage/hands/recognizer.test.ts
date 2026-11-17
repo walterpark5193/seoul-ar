@@ -180,4 +180,26 @@ describe("startHandSource", () => {
     expect(got).toHaveLength(1);
     r.source.stop();
   });
+  it("기본 modelExists: 200 + text/html(SPA 폴백)이면 model-missing", async () => {
+    const { d } = deps({ modelExists: undefined, fetchImpl: (async () => new Response("<html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } })) as typeof fetch });
+    expect(await startHandSource(d)).toEqual({ ok: false, reason: "model-missing" });
+  });
+  it("기본 modelExists: 200 + octet-stream이면 진행", async () => {
+    const { d } = deps({ modelExists: undefined, fetchImpl: (async () => new Response("x", { status: 200, headers: { "content-type": "application/octet-stream" } })) as typeof fetch });
+    const r = await startHandSource(d);
+    expect(r.ok).toBe(true);
+    if (r.ok) r.source.stop();
+  });
+  it("기본 modelExists: 404면 model-missing", async () => {
+    const { d } = deps({ modelExists: undefined, fetchImpl: (async () => new Response("", { status: 404 })) as typeof fetch });
+    expect(await startHandSource(d)).toEqual({ ok: false, reason: "model-missing" });
+  });
+  it("WebAssembly가 없으면 카메라 전에 unsupported", async () => {
+    vi.stubGlobal("WebAssembly", undefined);
+    try {
+      const { d } = deps();
+      expect(await startHandSource(d)).toEqual({ ok: false, reason: "unsupported" });
+      expect(d.getUserMedia).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
 });

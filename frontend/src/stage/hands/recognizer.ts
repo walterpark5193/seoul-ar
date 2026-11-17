@@ -39,6 +39,7 @@ export interface HandSourceDeps {
   loadVision?: () => Promise<typeof import("@mediapipe/tasks-vision")>;
   modelExists?: () => Promise<boolean>;                              // 기본: fetch(MODEL_PATH, {method:"HEAD"}).ok
   createVideo?: () => HTMLVideoElement;                              // 기본: document.createElement("video")
+  fetchImpl?: typeof fetch;                                          // 기본 modelExists에서만 사용
 }
 
 const FPS_WINDOW = 30;
@@ -48,6 +49,7 @@ function stopTracks(stream: MediaStream): void {
 }
 
 export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: true; source: HandSource } | { ok: false; reason: HandSourceError }> {
+  if (typeof WebAssembly === "undefined") return { ok: false, reason: "unsupported" };
   const getUserMedia = deps.getUserMedia
     ?? (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia
       ? (c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c)
@@ -62,7 +64,11 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
   }
 
   const modelExists = deps.modelExists
-    ?? (async () => (await fetch(MODEL_PATH, { method: "HEAD" })).ok);
+    ?? (async () => {
+      // SPA 폴백(CloudFront 403/404 → index.html, Vite dev)은 200 + text/html이므로 없는 모델로 본다.
+      const res = await (deps.fetchImpl ?? fetch)(MODEL_PATH, { method: "HEAD" });
+      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+    });
   let exists = false;
   try { exists = await modelExists(); } catch { exists = false; }
   if (!exists) { stopTracks(stream); return { ok: false, reason: "model-missing" }; }
