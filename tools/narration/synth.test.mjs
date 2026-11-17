@@ -3,7 +3,10 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unlinkSync } from "node:fs";
-import { speechHash, buildManifest, synthAll, mergeManifest } from "./synth.mjs";
+import { writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { speechHash, buildManifest, synthAll, mergeManifest, backfillMs } from "./synth.mjs";
 
 const lines = [
   { id: "stage-hello", caption: "안녕", speech: "안녕하세요" },
@@ -173,5 +176,82 @@ describe("synth", () => {
     const r2 = await synthAll(bad, opts({ client: fakeClient(), outDir }));
     expect(r2.failed).toEqual(["no/such/dir"]);
     expect(r2.synthesized).toEqual(["stage-hello"]);
+  });
+});
+
+// MPEG-2 Layer III 48kbps 24kHz 프레임(24ms) n개
+function mp3(n) {
+  const out = new Uint8Array(144 * n).fill(0x55);
+  for (let i = 0; i < n; i++) out.set([0xff, 0xf3, 0x64, 0xc4], i * 144);
+  return out;
+}
+function mp3Client(n) {
+  const calls = [];
+  return { calls, async send(cmd) { calls.push(cmd.input); return { AudioStream: { transformToByteArray: async () => mp3(n) } }; } };
+}
+
+describe("synth ms", () => {
+  it("buildManifest는 durations가 있으면 ms를 적는다", () => {
+    const m = buildManifest(lines, { voice: "Seoyeon", engine: "generative", hashes: { "stage-hello": "aa" }, durations: { "stage-hello": 1234 } });
+    expect(m.items["stage-hello"]).toEqual({ file: "stage-hello.mp3", caption: "안녕", hash: "aa", ms: 1234 });
+    expect(m.items["map-back"].ms).toBeUndefined();
+  });
+  it("새로 합성한 항목은 MP3 길이를 ms로 기록한다", async () => {
+    const r = await synthAll(lines, opts({ client: mp3Client(50), outDir: tmp() }));
+    expect(r.manifest.items["stage-hello"].ms).toBe(1200);
+    expect(r.manifest.items["map-back"].ms).toBe(1200);
+  });
+  it("건너뛴 항목은 이전 ms를 쓰고, 없으면 파일에서 잰다", async () => {
+    const outDir = tmp();
+    const first = await synthAll(lines, opts({ client: mp3Client(10), outDir }));
+    const prev = { ...first.manifest, items: { ...first.manifest.items, "map-back": { ...first.manifest.items["map-back"] } } };
+    prev.items["stage-hello"].ms = 999;
+    delete prev.items["map-back"].ms;
+    const client = mp3Client(10);
+    const r = await synthAll(lines, opts({ client, outDir, previous: prev }));
+    expect(client.calls.length).toBe(0);
+    expect(r.manifest.items["stage-hello"].ms).toBe(999);
+    expect(r.manifest.items["map-back"].ms).toBe(240);
+  });
+  it("MP3가 아니면 ms를 적지 않는다", async () => {
+    const r = await synthAll([lines[0]], opts({ client: fakeClient(), outDir: tmp() }));
+    expect(r.manifest.items["stage-hello"].ms).toBeUndefined();
+  });
+});
+
+describe("backfillMs", () => {
+  const base = (items) => ({ v: 1, voice: "Seoyeon", engine: "generative", items });
+  it("파일에서 길이를 재서 채우고 원본은 바꾸지 않는다", () => {
+    const outDir = tmp();
+    writeFileSync(join(outDir, "a.mp3"), mp3(25));
+    writeFileSync(join(outDir, "b.mp3"), mp3(10));
+    const m = base({ a: { file: "a.mp3", caption: "가", hash: "h1" }, b: { file: "b.mp3", caption: "나", hash: "h2", ms: 1 } });
+    const r = backfillMs(m, outDir);
+    expect(r.manifest.items.a).toEqual({ file: "a.mp3", caption: "가", hash: "h1", ms: 600 });
+    expect(r.manifest.items.b.ms).toBe(240);
+    expect(r.filled).toEqual(["a", "b"]);
+    expect(r.missing).toEqual([]);
+    expect(m.items.a.ms).toBeUndefined();
+    expect(r.manifest.voice).toBe("Seoyeon");
+  });
+  it("파일이 없거나 MP3가 아니면 missing·bad로 알리고 항목은 그대로 둔다", () => {
+    const outDir = tmp();
+    writeFileSync(join(outDir, "bad.mp3"), new Uint8Array([1, 2, 3]));
+    const m = base({ gone: { file: "gone.mp3", caption: "가" }, bad: { file: "bad.mp3", caption: "나" } });
+    const r = backfillMs(m, outDir);
+    expect(r.missing).toEqual(["gone"]);
+    expect(r.bad).toEqual(["bad"]);
+    expect(r.manifest.items.gone).toEqual({ file: "gone.mp3", caption: "가" });
+    expect(r.manifest.items.bad).toEqual({ file: "bad.mp3", caption: "나" });
+  });
+  it("CLI --backfill-ms는 합성 없이 manifest만 고쳐 쓴다", () => {
+    const outDir = tmp();
+    writeFileSync(join(outDir, "a.mp3"), mp3(5));
+    writeFileSync(join(outDir, "manifest.json"), JSON.stringify(base({ a: { file: "a.mp3", caption: "가", hash: "h" } })));
+    const script = fileURLToPath(new URL("./synth.mjs", import.meta.url));
+    const res = spawnSync(process.execPath, [script, "--backfill-ms", "--out", outDir], { encoding: "utf8", env: { ...process.env, AWS_ACCESS_KEY_ID: "", AWS_PROFILE: "none-such" } });
+    expect(res.status).toBe(0);
+    const m = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8"));
+    expect(m.items.a).toEqual({ file: "a.mp3", caption: "가", hash: "h", ms: 120 });
   });
 });

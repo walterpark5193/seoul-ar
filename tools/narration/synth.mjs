@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { mp3DurationMs } from "./mp3.mjs";
 
 const CONCURRENCY = 4;
 const RETRIES = 2;
@@ -11,11 +12,12 @@ export function speechHash(text, voice, engine) {
   return createHash("sha1").update(`${voice}\n${engine}\n${text}`).digest("hex").slice(0, 16);
 }
 
-export function buildManifest(lines, { voice, engine, hashes }) {
+export function buildManifest(lines, { voice, engine, hashes, durations }) {
   const items = {};
   for (const l of lines) {
     const item = { file: `${l.id}.mp3`, caption: l.caption };
     if (hashes?.[l.id]) item.hash = hashes[l.id];
+    if (durations?.[l.id] > 0) item.ms = durations[l.id];
     items[l.id] = item;
   }
   return { v: 1, voice, engine, items };
@@ -47,13 +49,17 @@ export async function synthAll(lines, {
   mkdirSync(outDir, { recursive: true });
   const synthesized = [], skipped = [], failed = [], fallbacks = [];
   const hashes = {};
+  const durations = {};
   const ok = new Set();
+  const measure = (data) => { try { return mp3DurationMs(data); } catch { return 0; } };
 
   const work = async (line) => {
     const hash = speechHash(line.speech, voice, engine);
     const file = join(outDir, `${line.id}.mp3`);
     if (previous?.items?.[line.id]?.hash === hash && existsSync(file)) {
       hashes[line.id] = hash; ok.add(line.id); skipped.push(line.id);
+      const prevMs = previous.items[line.id].ms;
+      durations[line.id] = Number.isInteger(prevMs) && prevMs > 0 ? prevMs : measure(readFileSync(file));
       return;
     }
     let bytes, usedFallback = false, usedEngine = engine;
@@ -78,6 +84,7 @@ export async function synthAll(lines, {
       return;
     }
     hashes[line.id] = usedFallback ? speechHash(line.speech, voice, usedEngine) : hash; ok.add(line.id); synthesized.push(line.id);
+    durations[line.id] = measure(bytes);
     if (usedFallback) fallbacks.push(line.id);
   };
 
@@ -89,7 +96,7 @@ export async function synthAll(lines, {
   const byOrder = (a, b) => order.get(a) - order.get(b);
   synthesized.sort(byOrder); skipped.sort(byOrder); failed.sort(byOrder); fallbacks.sort(byOrder);
 
-  const manifest = buildManifest(lines.filter((l) => ok.has(l.id)), { voice, engine, hashes });
+  const manifest = buildManifest(lines.filter((l) => ok.has(l.id)), { voice, engine, hashes, durations });
   return { manifest, synthesized, skipped, failed, fallbacks };
 }
 
@@ -103,6 +110,19 @@ export function mergeManifest(result, previous, outDir) {
   return { ...result.manifest, items };
 }
 
+// 이미 있는 manifest의 항목마다 mp3 파일 길이를 재서 ms를 채운다(재합성·AWS 호출 없음). 원본은 바꾸지 않는다.
+export function backfillMs(manifest, outDir) {
+  const items = {};
+  const filled = [], missing = [], bad = [];
+  for (const [id, item] of Object.entries(manifest?.items ?? {})) {
+    const file = join(outDir, item.file);
+    if (!existsSync(file)) { missing.push(id); items[id] = item; continue; }
+    const ms = mp3DurationMs(readFileSync(file));
+    if (ms > 0) { items[id] = { ...item, ms }; filled.push(id); } else { bad.push(id); items[id] = item; }
+  }
+  return { manifest: { ...manifest, items }, filled, missing, bad };
+}
+
 function arg(argv, name, def) {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 ? argv[i + 1] : def;
@@ -113,6 +133,25 @@ async function main(argv) {
   const dataDir = arg(argv, "data", "frontend/public/data");
   const month = arg(argv, "month", "202611");
   const outDir = arg(argv, "out", "frontend/public/narration");
+  const manifestPath = join(outDir, "manifest.json");
+
+  if (argv.includes("--backfill-ms")) {
+    let current;
+    try {
+      current = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch (e) {
+      console.error(`[synth] ${manifestPath}를 읽을 수 없습니다(${e.message}).`);
+      process.exit(1);
+    }
+    const r = backfillMs(current, outDir);
+    writeFileSync(manifestPath, JSON.stringify(r.manifest, null, 2));
+    console.log(`ms 채움 ${r.filled.length}, 파일 없음 ${r.missing.length}, MP3 아님 ${r.bad.length}`);
+    if (r.missing.length || r.bad.length) {
+      console.error("길이를 못 잰 항목:", [...r.missing, ...r.bad].join(", "));
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   const { templateLines } = await import("./templates.mjs");
   const index = JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8"));
@@ -126,7 +165,6 @@ async function main(argv) {
   }
   for (const [id, s] of Object.entries(scripts.items ?? {})) lines.push({ id, caption: s.caption, speech: s.speech });
 
-  const manifestPath = join(outDir, "manifest.json");
   let previous;
   if (existsSync(manifestPath)) {
     try { previous = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { previous = undefined; }

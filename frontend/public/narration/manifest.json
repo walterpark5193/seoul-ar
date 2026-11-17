@@ -6,1147 +6,1376 @@
     "stage-hello": {
       "file": "stage-hello.mp3",
       "caption": "무대를 시작합니다. 손을 들어 서울을 움직여 보세요.",
-      "hash": "5ccb69f9a0cb5856"
+      "hash": "5ccb69f9a0cb5856",
+      "ms": 3840
     },
     "spread-intro": {
       "file": "spread-intro.mp3",
       "caption": "25개 구를 ㎡당 가격순으로 펼쳤습니다. 왼쪽이 가장 비쌉니다.",
-      "hash": "aae5974b12b365f5"
+      "hash": "aae5974b12b365f5",
+      "ms": 5784
     },
     "map-back": {
       "file": "map-back.mp3",
       "caption": "다시 지도로 돌아왔습니다.",
-      "hash": "03feb27e4d8e91d0"
+      "hash": "03feb27e4d8e91d0",
+      "ms": 1896
     },
     "vote-intro": {
       "file": "vote-intro.mp3",
       "caption": "투표를 시작합니다. 보고 싶은 구에 손을 들어 주세요.",
-      "hash": "9b45296f01a35582"
+      "hash": "9b45296f01a35582",
+      "ms": 3768
     },
     "vote-prompt-종로구": {
       "file": "vote-prompt-종로구.mp3",
       "caption": "종로구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "ca625c7ab9abdd5a"
+      "hash": "ca625c7ab9abdd5a",
+      "ms": 2568
     },
     "vote-prompt-중구": {
       "file": "vote-prompt-중구.mp3",
       "caption": "중구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "39d8a758691eb328"
+      "hash": "39d8a758691eb328",
+      "ms": 2544
     },
     "vote-prompt-용산구": {
       "file": "vote-prompt-용산구.mp3",
       "caption": "용산구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "c37facad3c73b5a3"
+      "hash": "c37facad3c73b5a3",
+      "ms": 2544
     },
     "vote-prompt-성동구": {
       "file": "vote-prompt-성동구.mp3",
       "caption": "성동구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "cdc774da0db8f4ca"
+      "hash": "cdc774da0db8f4ca",
+      "ms": 2712
     },
     "vote-prompt-광진구": {
       "file": "vote-prompt-광진구.mp3",
       "caption": "광진구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "293d55ad84b0da3f"
+      "hash": "293d55ad84b0da3f",
+      "ms": 2664
     },
     "vote-prompt-동대문구": {
       "file": "vote-prompt-동대문구.mp3",
       "caption": "동대문구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "4a48141c53914b89"
+      "hash": "4a48141c53914b89",
+      "ms": 2928
     },
     "vote-prompt-중랑구": {
       "file": "vote-prompt-중랑구.mp3",
       "caption": "중랑구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "b27f10529e207680"
+      "hash": "b27f10529e207680",
+      "ms": 2592
     },
     "vote-prompt-성북구": {
       "file": "vote-prompt-성북구.mp3",
       "caption": "성북구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "fac763d423b1bafd"
+      "hash": "fac763d423b1bafd",
+      "ms": 2616
     },
     "vote-prompt-강북구": {
       "file": "vote-prompt-강북구.mp3",
       "caption": "강북구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "ddcb501b92ab05d2"
+      "hash": "ddcb501b92ab05d2",
+      "ms": 2616
     },
     "vote-prompt-도봉구": {
       "file": "vote-prompt-도봉구.mp3",
       "caption": "도봉구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "e84a1979ec301f62"
+      "hash": "e84a1979ec301f62",
+      "ms": 2712
     },
     "vote-prompt-노원구": {
       "file": "vote-prompt-노원구.mp3",
       "caption": "노원구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "a9c464e3ac5f94b9"
+      "hash": "a9c464e3ac5f94b9",
+      "ms": 2664
     },
     "vote-prompt-은평구": {
       "file": "vote-prompt-은평구.mp3",
       "caption": "은평구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "dd6e5cc3cc9824ff"
+      "hash": "dd6e5cc3cc9824ff",
+      "ms": 2640
     },
     "vote-prompt-서대문구": {
       "file": "vote-prompt-서대문구.mp3",
       "caption": "서대문구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "1196db49da5ab1b3"
+      "hash": "1196db49da5ab1b3",
+      "ms": 2832
     },
     "vote-prompt-마포구": {
       "file": "vote-prompt-마포구.mp3",
       "caption": "마포구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "04d85bc5bb2dfbf2"
+      "hash": "04d85bc5bb2dfbf2",
+      "ms": 2616
     },
     "vote-prompt-양천구": {
       "file": "vote-prompt-양천구.mp3",
       "caption": "양천구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "27b52eec774fa130"
+      "hash": "27b52eec774fa130",
+      "ms": 2712
     },
     "vote-prompt-강서구": {
       "file": "vote-prompt-강서구.mp3",
       "caption": "강서구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "b67f3c32bfb005cf"
+      "hash": "b67f3c32bfb005cf",
+      "ms": 2568
     },
     "vote-prompt-구로구": {
       "file": "vote-prompt-구로구.mp3",
       "caption": "구로구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "c3615d498a888eba"
+      "hash": "c3615d498a888eba",
+      "ms": 2520
     },
     "vote-prompt-금천구": {
       "file": "vote-prompt-금천구.mp3",
       "caption": "금천구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "588ada4bdec1237d"
+      "hash": "588ada4bdec1237d",
+      "ms": 2712
     },
     "vote-prompt-영등포구": {
       "file": "vote-prompt-영등포구.mp3",
       "caption": "영등포구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "da4bc0fb94dd1ddc"
+      "hash": "da4bc0fb94dd1ddc",
+      "ms": 2736
     },
     "vote-prompt-동작구": {
       "file": "vote-prompt-동작구.mp3",
       "caption": "동작구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "10369730ba712b12"
+      "hash": "10369730ba712b12",
+      "ms": 2568
     },
     "vote-prompt-관악구": {
       "file": "vote-prompt-관악구.mp3",
       "caption": "관악구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "917bdfa683330e6f"
+      "hash": "917bdfa683330e6f",
+      "ms": 2664
     },
     "vote-prompt-서초구": {
       "file": "vote-prompt-서초구.mp3",
       "caption": "서초구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "62b60abc9f4daa7a"
+      "hash": "62b60abc9f4daa7a",
+      "ms": 2592
     },
     "vote-prompt-강남구": {
       "file": "vote-prompt-강남구.mp3",
       "caption": "강남구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "01d35c73f95b5b03"
+      "hash": "01d35c73f95b5b03",
+      "ms": 2688
     },
     "vote-prompt-송파구": {
       "file": "vote-prompt-송파구.mp3",
       "caption": "송파구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "dfd6a9470f5d9b85"
+      "hash": "dfd6a9470f5d9b85",
+      "ms": 2544
     },
     "vote-prompt-강동구": {
       "file": "vote-prompt-강동구.mp3",
       "caption": "강동구 보고 싶은 분, 손 들어 주세요.",
-      "hash": "e01f481e08a61d28"
+      "hash": "e01f481e08a61d28",
+      "ms": 2688
     },
     "vote-result-종로구-1": {
       "file": "vote-result-종로구-1.mp3",
       "caption": "1표로 종로구가 뽑혔습니다.",
-      "hash": "d078e05eb4cd147b"
+      "hash": "d078e05eb4cd147b",
+      "ms": 2136
     },
     "vote-result-종로구-2": {
       "file": "vote-result-종로구-2.mp3",
       "caption": "2표로 종로구가 뽑혔습니다.",
-      "hash": "d747200a244b16a8"
+      "hash": "d747200a244b16a8",
+      "ms": 2064
     },
     "vote-result-종로구-3": {
       "file": "vote-result-종로구-3.mp3",
       "caption": "3표로 종로구가 뽑혔습니다.",
-      "hash": "ba517e58ede8892c"
+      "hash": "ba517e58ede8892c",
+      "ms": 2232
     },
     "vote-result-종로구-4": {
       "file": "vote-result-종로구-4.mp3",
       "caption": "4표로 종로구가 뽑혔습니다.",
-      "hash": "5796e812236e4ae6"
+      "hash": "5796e812236e4ae6",
+      "ms": 2256
     },
     "vote-result-종로구-5": {
       "file": "vote-result-종로구-5.mp3",
       "caption": "5표로 종로구가 뽑혔습니다.",
-      "hash": "36d03935d0584dc4"
+      "hash": "36d03935d0584dc4",
+      "ms": 2328
     },
     "vote-result-종로구-6": {
       "file": "vote-result-종로구-6.mp3",
       "caption": "6표로 종로구가 뽑혔습니다.",
-      "hash": "6f399713d63ecae3"
+      "hash": "6f399713d63ecae3",
+      "ms": 2256
     },
     "vote-result-중구-1": {
       "file": "vote-result-중구-1.mp3",
       "caption": "1표로 중구가 뽑혔습니다.",
-      "hash": "a0624f8e0f7af564"
+      "hash": "a0624f8e0f7af564",
+      "ms": 2448
     },
     "vote-result-중구-2": {
       "file": "vote-result-중구-2.mp3",
       "caption": "2표로 중구가 뽑혔습니다.",
-      "hash": "f310c443cb5426f5"
+      "hash": "f310c443cb5426f5",
+      "ms": 2016
     },
     "vote-result-중구-3": {
       "file": "vote-result-중구-3.mp3",
       "caption": "3표로 중구가 뽑혔습니다.",
-      "hash": "a74f9115435a9488"
+      "hash": "a74f9115435a9488",
+      "ms": 1992
     },
     "vote-result-중구-4": {
       "file": "vote-result-중구-4.mp3",
       "caption": "4표로 중구가 뽑혔습니다.",
-      "hash": "98d3a99374b033c8"
+      "hash": "98d3a99374b033c8",
+      "ms": 2184
     },
     "vote-result-중구-5": {
       "file": "vote-result-중구-5.mp3",
       "caption": "5표로 중구가 뽑혔습니다.",
-      "hash": "49e837a99f5b1d1c"
+      "hash": "49e837a99f5b1d1c",
+      "ms": 2208
     },
     "vote-result-중구-6": {
       "file": "vote-result-중구-6.mp3",
       "caption": "6표로 중구가 뽑혔습니다.",
-      "hash": "aaf7dd2a3078c468"
+      "hash": "aaf7dd2a3078c468",
+      "ms": 2136
     },
     "vote-result-용산구-1": {
       "file": "vote-result-용산구-1.mp3",
       "caption": "1표로 용산구가 뽑혔습니다.",
-      "hash": "a0fadc2d518acb80"
+      "hash": "a0fadc2d518acb80",
+      "ms": 2184
     },
     "vote-result-용산구-2": {
       "file": "vote-result-용산구-2.mp3",
       "caption": "2표로 용산구가 뽑혔습니다.",
-      "hash": "c45065cf3e4c5632"
+      "hash": "c45065cf3e4c5632",
+      "ms": 2232
     },
     "vote-result-용산구-3": {
       "file": "vote-result-용산구-3.mp3",
       "caption": "3표로 용산구가 뽑혔습니다.",
-      "hash": "ac83425c45d233ab"
+      "hash": "ac83425c45d233ab",
+      "ms": 2208
     },
     "vote-result-용산구-4": {
       "file": "vote-result-용산구-4.mp3",
       "caption": "4표로 용산구가 뽑혔습니다.",
-      "hash": "b63939e69b678f9c"
+      "hash": "b63939e69b678f9c",
+      "ms": 2400
     },
     "vote-result-용산구-5": {
       "file": "vote-result-용산구-5.mp3",
       "caption": "5표로 용산구가 뽑혔습니다.",
-      "hash": "623e7358037c0b85"
+      "hash": "623e7358037c0b85",
+      "ms": 2304
     },
     "vote-result-용산구-6": {
       "file": "vote-result-용산구-6.mp3",
       "caption": "6표로 용산구가 뽑혔습니다.",
-      "hash": "d251d607e41b74f9"
+      "hash": "d251d607e41b74f9",
+      "ms": 2280
     },
     "vote-result-성동구-1": {
       "file": "vote-result-성동구-1.mp3",
       "caption": "1표로 성동구가 뽑혔습니다.",
-      "hash": "a60f59b889f483ab"
+      "hash": "a60f59b889f483ab",
+      "ms": 2208
     },
     "vote-result-성동구-2": {
       "file": "vote-result-성동구-2.mp3",
       "caption": "2표로 성동구가 뽑혔습니다.",
-      "hash": "385ac8d5dd03fc0e"
+      "hash": "385ac8d5dd03fc0e",
+      "ms": 2112
     },
     "vote-result-성동구-3": {
       "file": "vote-result-성동구-3.mp3",
       "caption": "3표로 성동구가 뽑혔습니다.",
-      "hash": "974b25d66a8619b3"
+      "hash": "974b25d66a8619b3",
+      "ms": 2280
     },
     "vote-result-성동구-4": {
       "file": "vote-result-성동구-4.mp3",
       "caption": "4표로 성동구가 뽑혔습니다.",
-      "hash": "e03a4dc299870427"
+      "hash": "e03a4dc299870427",
+      "ms": 2280
     },
     "vote-result-성동구-5": {
       "file": "vote-result-성동구-5.mp3",
       "caption": "5표로 성동구가 뽑혔습니다.",
-      "hash": "625f3005211073ea"
+      "hash": "625f3005211073ea",
+      "ms": 2352
     },
     "vote-result-성동구-6": {
       "file": "vote-result-성동구-6.mp3",
       "caption": "6표로 성동구가 뽑혔습니다.",
-      "hash": "96e529b9ce963c82"
+      "hash": "96e529b9ce963c82",
+      "ms": 2352
     },
     "vote-result-광진구-1": {
       "file": "vote-result-광진구-1.mp3",
       "caption": "1표로 광진구가 뽑혔습니다.",
-      "hash": "004110a88c1dc029"
+      "hash": "004110a88c1dc029",
+      "ms": 2640
     },
     "vote-result-광진구-2": {
       "file": "vote-result-광진구-2.mp3",
       "caption": "2표로 광진구가 뽑혔습니다.",
-      "hash": "2dc41a92e2435780"
+      "hash": "2dc41a92e2435780",
+      "ms": 2208
     },
     "vote-result-광진구-3": {
       "file": "vote-result-광진구-3.mp3",
       "caption": "3표로 광진구가 뽑혔습니다.",
-      "hash": "701043902ffa1f24"
+      "hash": "701043902ffa1f24",
+      "ms": 2304
     },
     "vote-result-광진구-4": {
       "file": "vote-result-광진구-4.mp3",
       "caption": "4표로 광진구가 뽑혔습니다.",
-      "hash": "0e0f70dcca419f0b"
+      "hash": "0e0f70dcca419f0b",
+      "ms": 2400
     },
     "vote-result-광진구-5": {
       "file": "vote-result-광진구-5.mp3",
       "caption": "5표로 광진구가 뽑혔습니다.",
-      "hash": "70a54d7ab4147ab2"
+      "hash": "70a54d7ab4147ab2",
+      "ms": 2400
     },
     "vote-result-광진구-6": {
       "file": "vote-result-광진구-6.mp3",
       "caption": "6표로 광진구가 뽑혔습니다.",
-      "hash": "445538dd1b8768f2"
+      "hash": "445538dd1b8768f2",
+      "ms": 2400
     },
     "vote-result-동대문구-1": {
       "file": "vote-result-동대문구-1.mp3",
       "caption": "1표로 동대문구가 뽑혔습니다.",
-      "hash": "5919ac20cc19f7b6"
+      "hash": "5919ac20cc19f7b6",
+      "ms": 2328
     },
     "vote-result-동대문구-2": {
       "file": "vote-result-동대문구-2.mp3",
       "caption": "2표로 동대문구가 뽑혔습니다.",
-      "hash": "6452a13dc4325bb1"
+      "hash": "6452a13dc4325bb1",
+      "ms": 2352
     },
     "vote-result-동대문구-3": {
       "file": "vote-result-동대문구-3.mp3",
       "caption": "3표로 동대문구가 뽑혔습니다.",
-      "hash": "6b202644258f574a"
+      "hash": "6b202644258f574a",
+      "ms": 2376
     },
     "vote-result-동대문구-4": {
       "file": "vote-result-동대문구-4.mp3",
       "caption": "4표로 동대문구가 뽑혔습니다.",
-      "hash": "8cc0c3c498c09f1e"
+      "hash": "8cc0c3c498c09f1e",
+      "ms": 2400
     },
     "vote-result-동대문구-5": {
       "file": "vote-result-동대문구-5.mp3",
       "caption": "5표로 동대문구가 뽑혔습니다.",
-      "hash": "829af974ef0d765a"
+      "hash": "829af974ef0d765a",
+      "ms": 2472
     },
     "vote-result-동대문구-6": {
       "file": "vote-result-동대문구-6.mp3",
       "caption": "6표로 동대문구가 뽑혔습니다.",
-      "hash": "a89a1e83cd424ebe"
+      "hash": "a89a1e83cd424ebe",
+      "ms": 2376
     },
     "vote-result-중랑구-1": {
       "file": "vote-result-중랑구-1.mp3",
       "caption": "1표로 중랑구가 뽑혔습니다.",
-      "hash": "31764cf17058d4ce"
+      "hash": "31764cf17058d4ce",
+      "ms": 2136
     },
     "vote-result-중랑구-2": {
       "file": "vote-result-중랑구-2.mp3",
       "caption": "2표로 중랑구가 뽑혔습니다.",
-      "hash": "0d8accb1d4477235"
+      "hash": "0d8accb1d4477235",
+      "ms": 2160
     },
     "vote-result-중랑구-3": {
       "file": "vote-result-중랑구-3.mp3",
       "caption": "3표로 중랑구가 뽑혔습니다.",
-      "hash": "8187a8184c036d12"
+      "hash": "8187a8184c036d12",
+      "ms": 2160
     },
     "vote-result-중랑구-4": {
       "file": "vote-result-중랑구-4.mp3",
       "caption": "4표로 중랑구가 뽑혔습니다.",
-      "hash": "79bb6f0d07a8f3e2"
+      "hash": "79bb6f0d07a8f3e2",
+      "ms": 2400
     },
     "vote-result-중랑구-5": {
       "file": "vote-result-중랑구-5.mp3",
       "caption": "5표로 중랑구가 뽑혔습니다.",
-      "hash": "c8023fcd1fd0c59d"
+      "hash": "c8023fcd1fd0c59d",
+      "ms": 2352
     },
     "vote-result-중랑구-6": {
       "file": "vote-result-중랑구-6.mp3",
       "caption": "6표로 중랑구가 뽑혔습니다.",
-      "hash": "eeb1c97adf678bfc"
+      "hash": "eeb1c97adf678bfc",
+      "ms": 2328
     },
     "vote-result-성북구-1": {
       "file": "vote-result-성북구-1.mp3",
       "caption": "1표로 성북구가 뽑혔습니다.",
-      "hash": "ad911531cd63d89f"
+      "hash": "ad911531cd63d89f",
+      "ms": 2112
     },
     "vote-result-성북구-2": {
       "file": "vote-result-성북구-2.mp3",
       "caption": "2표로 성북구가 뽑혔습니다.",
-      "hash": "3a3362037cf2436a"
+      "hash": "3a3362037cf2436a",
+      "ms": 2136
     },
     "vote-result-성북구-3": {
       "file": "vote-result-성북구-3.mp3",
       "caption": "3표로 성북구가 뽑혔습니다.",
-      "hash": "44e3086d3bfe7ffe"
+      "hash": "44e3086d3bfe7ffe",
+      "ms": 2280
     },
     "vote-result-성북구-4": {
       "file": "vote-result-성북구-4.mp3",
       "caption": "4표로 성북구가 뽑혔습니다.",
-      "hash": "bcbbdf4a3b51ae0b"
+      "hash": "bcbbdf4a3b51ae0b",
+      "ms": 2328
     },
     "vote-result-성북구-5": {
       "file": "vote-result-성북구-5.mp3",
       "caption": "5표로 성북구가 뽑혔습니다.",
-      "hash": "cdd1b2ead334ec0c"
+      "hash": "cdd1b2ead334ec0c",
+      "ms": 2328
     },
     "vote-result-성북구-6": {
       "file": "vote-result-성북구-6.mp3",
       "caption": "6표로 성북구가 뽑혔습니다.",
-      "hash": "f7ee74bcf2e6a0cc"
+      "hash": "f7ee74bcf2e6a0cc",
+      "ms": 2280
     },
     "vote-result-강북구-1": {
       "file": "vote-result-강북구-1.mp3",
       "caption": "1표로 강북구가 뽑혔습니다.",
-      "hash": "cc58141213841740"
+      "hash": "cc58141213841740",
+      "ms": 2160
     },
     "vote-result-강북구-2": {
       "file": "vote-result-강북구-2.mp3",
       "caption": "2표로 강북구가 뽑혔습니다.",
-      "hash": "b20b57ee8df38819"
+      "hash": "b20b57ee8df38819",
+      "ms": 2208
     },
     "vote-result-강북구-3": {
       "file": "vote-result-강북구-3.mp3",
       "caption": "3표로 강북구가 뽑혔습니다.",
-      "hash": "9418577707daf11c"
+      "hash": "9418577707daf11c",
+      "ms": 2208
     },
     "vote-result-강북구-4": {
       "file": "vote-result-강북구-4.mp3",
       "caption": "4표로 강북구가 뽑혔습니다.",
-      "hash": "dd34ae74c84a16d4"
+      "hash": "dd34ae74c84a16d4",
+      "ms": 2352
     },
     "vote-result-강북구-5": {
       "file": "vote-result-강북구-5.mp3",
       "caption": "5표로 강북구가 뽑혔습니다.",
-      "hash": "7430e27477cbde5e"
+      "hash": "7430e27477cbde5e",
+      "ms": 2280
     },
     "vote-result-강북구-6": {
       "file": "vote-result-강북구-6.mp3",
       "caption": "6표로 강북구가 뽑혔습니다.",
-      "hash": "c3e671a29ea7b7ea"
+      "hash": "c3e671a29ea7b7ea",
+      "ms": 2376
     },
     "vote-result-도봉구-1": {
       "file": "vote-result-도봉구-1.mp3",
       "caption": "1표로 도봉구가 뽑혔습니다.",
-      "hash": "9b42f9e1deefa757"
+      "hash": "9b42f9e1deefa757",
+      "ms": 2160
     },
     "vote-result-도봉구-2": {
       "file": "vote-result-도봉구-2.mp3",
       "caption": "2표로 도봉구가 뽑혔습니다.",
-      "hash": "a026e22db142692e"
+      "hash": "a026e22db142692e",
+      "ms": 2568
     },
     "vote-result-도봉구-3": {
       "file": "vote-result-도봉구-3.mp3",
       "caption": "3표로 도봉구가 뽑혔습니다.",
-      "hash": "525993c46434a48f"
+      "hash": "525993c46434a48f",
+      "ms": 2256
     },
     "vote-result-도봉구-4": {
       "file": "vote-result-도봉구-4.mp3",
       "caption": "4표로 도봉구가 뽑혔습니다.",
-      "hash": "77e99d2ab1aba950"
+      "hash": "77e99d2ab1aba950",
+      "ms": 2376
     },
     "vote-result-도봉구-5": {
       "file": "vote-result-도봉구-5.mp3",
       "caption": "5표로 도봉구가 뽑혔습니다.",
-      "hash": "6590bc405dfa82ae"
+      "hash": "6590bc405dfa82ae",
+      "ms": 2352
     },
     "vote-result-도봉구-6": {
       "file": "vote-result-도봉구-6.mp3",
       "caption": "6표로 도봉구가 뽑혔습니다.",
-      "hash": "1e2a55627c5d395a"
+      "hash": "1e2a55627c5d395a",
+      "ms": 2352
     },
     "vote-result-노원구-1": {
       "file": "vote-result-노원구-1.mp3",
       "caption": "1표로 노원구가 뽑혔습니다.",
-      "hash": "b2a6f35831b830f4"
+      "hash": "b2a6f35831b830f4",
+      "ms": 2184
     },
     "vote-result-노원구-2": {
       "file": "vote-result-노원구-2.mp3",
       "caption": "2표로 노원구가 뽑혔습니다.",
-      "hash": "919dafa2edda354c"
+      "hash": "919dafa2edda354c",
+      "ms": 2160
     },
     "vote-result-노원구-3": {
       "file": "vote-result-노원구-3.mp3",
       "caption": "3표로 노원구가 뽑혔습니다.",
-      "hash": "879a3ab032a6aa1b"
+      "hash": "879a3ab032a6aa1b",
+      "ms": 2184
     },
     "vote-result-노원구-4": {
       "file": "vote-result-노원구-4.mp3",
       "caption": "4표로 노원구가 뽑혔습니다.",
-      "hash": "b2dac72f046ec703"
+      "hash": "b2dac72f046ec703",
+      "ms": 2352
     },
     "vote-result-노원구-5": {
       "file": "vote-result-노원구-5.mp3",
       "caption": "5표로 노원구가 뽑혔습니다.",
-      "hash": "a2d1d6f3875706f6"
+      "hash": "a2d1d6f3875706f6",
+      "ms": 2232
     },
     "vote-result-노원구-6": {
       "file": "vote-result-노원구-6.mp3",
       "caption": "6표로 노원구가 뽑혔습니다.",
-      "hash": "7858aab3c0447f3f"
+      "hash": "7858aab3c0447f3f",
+      "ms": 2232
     },
     "vote-result-은평구-1": {
       "file": "vote-result-은평구-1.mp3",
       "caption": "1표로 은평구가 뽑혔습니다.",
-      "hash": "44eab6dcd48b49ab"
+      "hash": "44eab6dcd48b49ab",
+      "ms": 2256
     },
     "vote-result-은평구-2": {
       "file": "vote-result-은평구-2.mp3",
       "caption": "2표로 은평구가 뽑혔습니다.",
-      "hash": "f29876ac62a4fbb3"
+      "hash": "f29876ac62a4fbb3",
+      "ms": 2208
     },
     "vote-result-은평구-3": {
       "file": "vote-result-은평구-3.mp3",
       "caption": "3표로 은평구가 뽑혔습니다.",
-      "hash": "6ee9262fc81c09c9"
+      "hash": "6ee9262fc81c09c9",
+      "ms": 2376
     },
     "vote-result-은평구-4": {
       "file": "vote-result-은평구-4.mp3",
       "caption": "4표로 은평구가 뽑혔습니다.",
-      "hash": "7a1ebcecc027d315"
+      "hash": "7a1ebcecc027d315",
+      "ms": 2736
     },
     "vote-result-은평구-5": {
       "file": "vote-result-은평구-5.mp3",
       "caption": "5표로 은평구가 뽑혔습니다.",
-      "hash": "a5b6768e9e516d17"
+      "hash": "a5b6768e9e516d17",
+      "ms": 2376
     },
     "vote-result-은평구-6": {
       "file": "vote-result-은평구-6.mp3",
       "caption": "6표로 은평구가 뽑혔습니다.",
-      "hash": "2a469454b402028f"
+      "hash": "2a469454b402028f",
+      "ms": 2328
     },
     "vote-result-서대문구-1": {
       "file": "vote-result-서대문구-1.mp3",
       "caption": "1표로 서대문구가 뽑혔습니다.",
-      "hash": "68c66f1e8c2d2896"
+      "hash": "68c66f1e8c2d2896",
+      "ms": 2256
     },
     "vote-result-서대문구-2": {
       "file": "vote-result-서대문구-2.mp3",
       "caption": "2표로 서대문구가 뽑혔습니다.",
-      "hash": "b404873e3da114f3"
+      "hash": "b404873e3da114f3",
+      "ms": 2664
     },
     "vote-result-서대문구-3": {
       "file": "vote-result-서대문구-3.mp3",
       "caption": "3표로 서대문구가 뽑혔습니다.",
-      "hash": "5b5bf9b44ea15bce"
+      "hash": "5b5bf9b44ea15bce",
+      "ms": 2280
     },
     "vote-result-서대문구-4": {
       "file": "vote-result-서대문구-4.mp3",
       "caption": "4표로 서대문구가 뽑혔습니다.",
-      "hash": "67285fe4eb97a4c9"
+      "hash": "67285fe4eb97a4c9",
+      "ms": 2376
     },
     "vote-result-서대문구-5": {
       "file": "vote-result-서대문구-5.mp3",
       "caption": "5표로 서대문구가 뽑혔습니다.",
-      "hash": "1965394e2987911c"
+      "hash": "1965394e2987911c",
+      "ms": 2424
     },
     "vote-result-서대문구-6": {
       "file": "vote-result-서대문구-6.mp3",
       "caption": "6표로 서대문구가 뽑혔습니다.",
-      "hash": "c66bd7e422f67044"
+      "hash": "c66bd7e422f67044",
+      "ms": 2472
     },
     "vote-result-마포구-1": {
       "file": "vote-result-마포구-1.mp3",
       "caption": "1표로 마포구가 뽑혔습니다.",
-      "hash": "2868ca3dd1b3a79f"
+      "hash": "2868ca3dd1b3a79f",
+      "ms": 2208
     },
     "vote-result-마포구-2": {
       "file": "vote-result-마포구-2.mp3",
       "caption": "2표로 마포구가 뽑혔습니다.",
-      "hash": "a9c0d342f021156d"
+      "hash": "a9c0d342f021156d",
+      "ms": 2208
     },
     "vote-result-마포구-3": {
       "file": "vote-result-마포구-3.mp3",
       "caption": "3표로 마포구가 뽑혔습니다.",
-      "hash": "d923680638dd1461"
+      "hash": "d923680638dd1461",
+      "ms": 2184
     },
     "vote-result-마포구-4": {
       "file": "vote-result-마포구-4.mp3",
       "caption": "4표로 마포구가 뽑혔습니다.",
-      "hash": "b13514320bd0daa4"
+      "hash": "b13514320bd0daa4",
+      "ms": 2352
     },
     "vote-result-마포구-5": {
       "file": "vote-result-마포구-5.mp3",
       "caption": "5표로 마포구가 뽑혔습니다.",
-      "hash": "dbf1ff10d7fd5db7"
+      "hash": "dbf1ff10d7fd5db7",
+      "ms": 2304
     },
     "vote-result-마포구-6": {
       "file": "vote-result-마포구-6.mp3",
       "caption": "6표로 마포구가 뽑혔습니다.",
-      "hash": "5db680520aa3ce47"
+      "hash": "5db680520aa3ce47",
+      "ms": 2328
     },
     "vote-result-양천구-1": {
       "file": "vote-result-양천구-1.mp3",
       "caption": "1표로 양천구가 뽑혔습니다.",
-      "hash": "a07a5cbbc2404593"
+      "hash": "a07a5cbbc2404593",
+      "ms": 2232
     },
     "vote-result-양천구-2": {
       "file": "vote-result-양천구-2.mp3",
       "caption": "2표로 양천구가 뽑혔습니다.",
-      "hash": "462965a53ad244b7"
+      "hash": "462965a53ad244b7",
+      "ms": 2232
     },
     "vote-result-양천구-3": {
       "file": "vote-result-양천구-3.mp3",
       "caption": "3표로 양천구가 뽑혔습니다.",
-      "hash": "35b5ab4a0007d9f1"
+      "hash": "35b5ab4a0007d9f1",
+      "ms": 2376
     },
     "vote-result-양천구-4": {
       "file": "vote-result-양천구-4.mp3",
       "caption": "4표로 양천구가 뽑혔습니다.",
-      "hash": "5babd31d05a96ae2"
+      "hash": "5babd31d05a96ae2",
+      "ms": 2352
     },
     "vote-result-양천구-5": {
       "file": "vote-result-양천구-5.mp3",
       "caption": "5표로 양천구가 뽑혔습니다.",
-      "hash": "ce9dc143cb8664bf"
+      "hash": "ce9dc143cb8664bf",
+      "ms": 2376
     },
     "vote-result-양천구-6": {
       "file": "vote-result-양천구-6.mp3",
       "caption": "6표로 양천구가 뽑혔습니다.",
-      "hash": "61c0d25bac392de4"
+      "hash": "61c0d25bac392de4",
+      "ms": 2376
     },
     "vote-result-강서구-1": {
       "file": "vote-result-강서구-1.mp3",
       "caption": "1표로 강서구가 뽑혔습니다.",
-      "hash": "201022622398ac26"
+      "hash": "201022622398ac26",
+      "ms": 2136
     },
     "vote-result-강서구-2": {
       "file": "vote-result-강서구-2.mp3",
       "caption": "2표로 강서구가 뽑혔습니다.",
-      "hash": "ecb5b3b6c364e1d3"
+      "hash": "ecb5b3b6c364e1d3",
+      "ms": 2160
     },
     "vote-result-강서구-3": {
       "file": "vote-result-강서구-3.mp3",
       "caption": "3표로 강서구가 뽑혔습니다.",
-      "hash": "dbf7b377b859bb25"
+      "hash": "dbf7b377b859bb25",
+      "ms": 2280
     },
     "vote-result-강서구-4": {
       "file": "vote-result-강서구-4.mp3",
       "caption": "4표로 강서구가 뽑혔습니다.",
-      "hash": "6ad197a98072feb9"
+      "hash": "6ad197a98072feb9",
+      "ms": 2304
     },
     "vote-result-강서구-5": {
       "file": "vote-result-강서구-5.mp3",
       "caption": "5표로 강서구가 뽑혔습니다.",
-      "hash": "9af7bb0f2a7999c9"
+      "hash": "9af7bb0f2a7999c9",
+      "ms": 2280
     },
     "vote-result-강서구-6": {
       "file": "vote-result-강서구-6.mp3",
       "caption": "6표로 강서구가 뽑혔습니다.",
-      "hash": "f8f53fbbc98877ff"
+      "hash": "f8f53fbbc98877ff",
+      "ms": 2352
     },
     "vote-result-구로구-1": {
       "file": "vote-result-구로구-1.mp3",
       "caption": "1표로 구로구가 뽑혔습니다.",
-      "hash": "f80452a1cacaccd7"
+      "hash": "f80452a1cacaccd7",
+      "ms": 2136
     },
     "vote-result-구로구-2": {
       "file": "vote-result-구로구-2.mp3",
       "caption": "2표로 구로구가 뽑혔습니다.",
-      "hash": "7d872e81e9da4cc6"
+      "hash": "7d872e81e9da4cc6",
+      "ms": 2112
     },
     "vote-result-구로구-3": {
       "file": "vote-result-구로구-3.mp3",
       "caption": "3표로 구로구가 뽑혔습니다.",
-      "hash": "89841e9df6dd5cd7"
+      "hash": "89841e9df6dd5cd7",
+      "ms": 2136
     },
     "vote-result-구로구-4": {
       "file": "vote-result-구로구-4.mp3",
       "caption": "4표로 구로구가 뽑혔습니다.",
-      "hash": "947049c458f59204"
+      "hash": "947049c458f59204",
+      "ms": 2376
     },
     "vote-result-구로구-5": {
       "file": "vote-result-구로구-5.mp3",
       "caption": "5표로 구로구가 뽑혔습니다.",
-      "hash": "1eb2b3be669c6b86"
+      "hash": "1eb2b3be669c6b86",
+      "ms": 2808
     },
     "vote-result-구로구-6": {
       "file": "vote-result-구로구-6.mp3",
       "caption": "6표로 구로구가 뽑혔습니다.",
-      "hash": "56ec5627485d367f"
+      "hash": "56ec5627485d367f",
+      "ms": 2256
     },
     "vote-result-금천구-1": {
       "file": "vote-result-금천구-1.mp3",
       "caption": "1표로 금천구가 뽑혔습니다.",
-      "hash": "04fa9ac95931b2f8"
+      "hash": "04fa9ac95931b2f8",
+      "ms": 2304
     },
     "vote-result-금천구-2": {
       "file": "vote-result-금천구-2.mp3",
       "caption": "2표로 금천구가 뽑혔습니다.",
-      "hash": "17cb6a60a2f59150"
+      "hash": "17cb6a60a2f59150",
+      "ms": 2208
     },
     "vote-result-금천구-3": {
       "file": "vote-result-금천구-3.mp3",
       "caption": "3표로 금천구가 뽑혔습니다.",
-      "hash": "44d4f4691beeb70c"
+      "hash": "44d4f4691beeb70c",
+      "ms": 2280
     },
     "vote-result-금천구-4": {
       "file": "vote-result-금천구-4.mp3",
       "caption": "4표로 금천구가 뽑혔습니다.",
-      "hash": "b08b74891e30ce2b"
+      "hash": "b08b74891e30ce2b",
+      "ms": 2400
     },
     "vote-result-금천구-5": {
       "file": "vote-result-금천구-5.mp3",
       "caption": "5표로 금천구가 뽑혔습니다.",
-      "hash": "c5663061b2977244"
+      "hash": "c5663061b2977244",
+      "ms": 2376
     },
     "vote-result-금천구-6": {
       "file": "vote-result-금천구-6.mp3",
       "caption": "6표로 금천구가 뽑혔습니다.",
-      "hash": "cf123edb66256857"
+      "hash": "cf123edb66256857",
+      "ms": 2400
     },
     "vote-result-영등포구-1": {
       "file": "vote-result-영등포구-1.mp3",
       "caption": "1표로 영등포구가 뽑혔습니다.",
-      "hash": "0e4757f72dde2347"
+      "hash": "0e4757f72dde2347",
+      "ms": 2304
     },
     "vote-result-영등포구-2": {
       "file": "vote-result-영등포구-2.mp3",
       "caption": "2표로 영등포구가 뽑혔습니다.",
-      "hash": "23d04afb76fc0a70"
+      "hash": "23d04afb76fc0a70",
+      "ms": 2256
     },
     "vote-result-영등포구-3": {
       "file": "vote-result-영등포구-3.mp3",
       "caption": "3표로 영등포구가 뽑혔습니다.",
-      "hash": "b105c3f8a574dc14"
+      "hash": "b105c3f8a574dc14",
+      "ms": 2352
     },
     "vote-result-영등포구-4": {
       "file": "vote-result-영등포구-4.mp3",
       "caption": "4표로 영등포구가 뽑혔습니다.",
-      "hash": "e2a928e73908500e"
+      "hash": "e2a928e73908500e",
+      "ms": 2664
     },
     "vote-result-영등포구-5": {
       "file": "vote-result-영등포구-5.mp3",
       "caption": "5표로 영등포구가 뽑혔습니다.",
-      "hash": "59823ddfd31fb97b"
+      "hash": "59823ddfd31fb97b",
+      "ms": 2472
     },
     "vote-result-영등포구-6": {
       "file": "vote-result-영등포구-6.mp3",
       "caption": "6표로 영등포구가 뽑혔습니다.",
-      "hash": "2dc9ecf1f2ffb68a"
+      "hash": "2dc9ecf1f2ffb68a",
+      "ms": 2496
     },
     "vote-result-동작구-1": {
       "file": "vote-result-동작구-1.mp3",
       "caption": "1표로 동작구가 뽑혔습니다.",
-      "hash": "cc8142f2963cc676"
+      "hash": "cc8142f2963cc676",
+      "ms": 2184
     },
     "vote-result-동작구-2": {
       "file": "vote-result-동작구-2.mp3",
       "caption": "2표로 동작구가 뽑혔습니다.",
-      "hash": "84fa6011b08ed699"
+      "hash": "84fa6011b08ed699",
+      "ms": 2208
     },
     "vote-result-동작구-3": {
       "file": "vote-result-동작구-3.mp3",
       "caption": "3표로 동작구가 뽑혔습니다.",
-      "hash": "5c4df46e362ee817"
+      "hash": "5c4df46e362ee817",
+      "ms": 2232
     },
     "vote-result-동작구-4": {
       "file": "vote-result-동작구-4.mp3",
       "caption": "4표로 동작구가 뽑혔습니다.",
-      "hash": "0bfe7b710ae23eeb"
+      "hash": "0bfe7b710ae23eeb",
+      "ms": 2448
     },
     "vote-result-동작구-5": {
       "file": "vote-result-동작구-5.mp3",
       "caption": "5표로 동작구가 뽑혔습니다.",
-      "hash": "89a2ebfc07768dd2"
+      "hash": "89a2ebfc07768dd2",
+      "ms": 2304
     },
     "vote-result-동작구-6": {
       "file": "vote-result-동작구-6.mp3",
       "caption": "6표로 동작구가 뽑혔습니다.",
-      "hash": "b455d259618f2b52"
+      "hash": "b455d259618f2b52",
+      "ms": 2304
     },
     "vote-result-관악구-1": {
       "file": "vote-result-관악구-1.mp3",
       "caption": "1표로 관악구가 뽑혔습니다.",
-      "hash": "766ab4fcf5ff1b3c"
+      "hash": "766ab4fcf5ff1b3c",
+      "ms": 2232
     },
     "vote-result-관악구-2": {
       "file": "vote-result-관악구-2.mp3",
       "caption": "2표로 관악구가 뽑혔습니다.",
-      "hash": "6eb69a3e9b880e14"
+      "hash": "6eb69a3e9b880e14",
+      "ms": 2160
     },
     "vote-result-관악구-3": {
       "file": "vote-result-관악구-3.mp3",
       "caption": "3표로 관악구가 뽑혔습니다.",
-      "hash": "b77679df278e5249"
+      "hash": "b77679df278e5249",
+      "ms": 2232
     },
     "vote-result-관악구-4": {
       "file": "vote-result-관악구-4.mp3",
       "caption": "4표로 관악구가 뽑혔습니다.",
-      "hash": "fc197598e0921708"
+      "hash": "fc197598e0921708",
+      "ms": 2256
     },
     "vote-result-관악구-5": {
       "file": "vote-result-관악구-5.mp3",
       "caption": "5표로 관악구가 뽑혔습니다.",
-      "hash": "b77698efde947c22"
+      "hash": "b77698efde947c22",
+      "ms": 2328
     },
     "vote-result-관악구-6": {
       "file": "vote-result-관악구-6.mp3",
       "caption": "6표로 관악구가 뽑혔습니다.",
-      "hash": "1a30bcb60d87c10e"
+      "hash": "1a30bcb60d87c10e",
+      "ms": 2280
     },
     "vote-result-서초구-1": {
       "file": "vote-result-서초구-1.mp3",
       "caption": "1표로 서초구가 뽑혔습니다.",
-      "hash": "9dbf34ca4918c5c7"
+      "hash": "9dbf34ca4918c5c7",
+      "ms": 2088
     },
     "vote-result-서초구-2": {
       "file": "vote-result-서초구-2.mp3",
       "caption": "2표로 서초구가 뽑혔습니다.",
-      "hash": "df4f51297b3ae1bb"
+      "hash": "df4f51297b3ae1bb",
+      "ms": 2160
     },
     "vote-result-서초구-3": {
       "file": "vote-result-서초구-3.mp3",
       "caption": "3표로 서초구가 뽑혔습니다.",
-      "hash": "6d7c458111d18100"
+      "hash": "6d7c458111d18100",
+      "ms": 2208
     },
     "vote-result-서초구-4": {
       "file": "vote-result-서초구-4.mp3",
       "caption": "4표로 서초구가 뽑혔습니다.",
-      "hash": "a4b9aea9c4576003"
+      "hash": "a4b9aea9c4576003",
+      "ms": 2304
     },
     "vote-result-서초구-5": {
       "file": "vote-result-서초구-5.mp3",
       "caption": "5표로 서초구가 뽑혔습니다.",
-      "hash": "bfd3bea8294507f0"
+      "hash": "bfd3bea8294507f0",
+      "ms": 2256
     },
     "vote-result-서초구-6": {
       "file": "vote-result-서초구-6.mp3",
       "caption": "6표로 서초구가 뽑혔습니다.",
-      "hash": "a696f630b0e8dad9"
+      "hash": "a696f630b0e8dad9",
+      "ms": 2304
     },
     "vote-result-강남구-1": {
       "file": "vote-result-강남구-1.mp3",
       "caption": "1표로 강남구가 뽑혔습니다.",
-      "hash": "bb4c26453cf3ab89"
+      "hash": "bb4c26453cf3ab89",
+      "ms": 2232
     },
     "vote-result-강남구-2": {
       "file": "vote-result-강남구-2.mp3",
       "caption": "2표로 강남구가 뽑혔습니다.",
-      "hash": "af45ab4b4650337f"
+      "hash": "af45ab4b4650337f",
+      "ms": 2232
     },
     "vote-result-강남구-3": {
       "file": "vote-result-강남구-3.mp3",
       "caption": "3표로 강남구가 뽑혔습니다.",
-      "hash": "8cce34e0467d0a88"
+      "hash": "8cce34e0467d0a88",
+      "ms": 2280
     },
     "vote-result-강남구-4": {
       "file": "vote-result-강남구-4.mp3",
       "caption": "4표로 강남구가 뽑혔습니다.",
-      "hash": "fd503abec132b890"
+      "hash": "fd503abec132b890",
+      "ms": 2352
     },
     "vote-result-강남구-5": {
       "file": "vote-result-강남구-5.mp3",
       "caption": "5표로 강남구가 뽑혔습니다.",
-      "hash": "a110288ef33676de"
+      "hash": "a110288ef33676de",
+      "ms": 2280
     },
     "vote-result-강남구-6": {
       "file": "vote-result-강남구-6.mp3",
       "caption": "6표로 강남구가 뽑혔습니다.",
-      "hash": "f72f654e25eb5fd6"
+      "hash": "f72f654e25eb5fd6",
+      "ms": 2328
     },
     "vote-result-송파구-1": {
       "file": "vote-result-송파구-1.mp3",
       "caption": "1표로 송파구가 뽑혔습니다.",
-      "hash": "ed21f6439d57dfcf"
+      "hash": "ed21f6439d57dfcf",
+      "ms": 2160
     },
     "vote-result-송파구-2": {
       "file": "vote-result-송파구-2.mp3",
       "caption": "2표로 송파구가 뽑혔습니다.",
-      "hash": "ddd798ba7eb91fc0"
+      "hash": "ddd798ba7eb91fc0",
+      "ms": 2160
     },
     "vote-result-송파구-3": {
       "file": "vote-result-송파구-3.mp3",
       "caption": "3표로 송파구가 뽑혔습니다.",
-      "hash": "dc58cb5d81fd9358"
+      "hash": "dc58cb5d81fd9358",
+      "ms": 2208
     },
     "vote-result-송파구-4": {
       "file": "vote-result-송파구-4.mp3",
       "caption": "4표로 송파구가 뽑혔습니다.",
-      "hash": "61789f57448011af"
+      "hash": "61789f57448011af",
+      "ms": 2280
     },
     "vote-result-송파구-5": {
       "file": "vote-result-송파구-5.mp3",
       "caption": "5표로 송파구가 뽑혔습니다.",
-      "hash": "7f32329a1ba78b1f"
+      "hash": "7f32329a1ba78b1f",
+      "ms": 2304
     },
     "vote-result-송파구-6": {
       "file": "vote-result-송파구-6.mp3",
       "caption": "6표로 송파구가 뽑혔습니다.",
-      "hash": "5856d6637d56b27d"
+      "hash": "5856d6637d56b27d",
+      "ms": 2304
     },
     "vote-result-강동구-1": {
       "file": "vote-result-강동구-1.mp3",
       "caption": "1표로 강동구가 뽑혔습니다.",
-      "hash": "38d771e7d84c25ce"
+      "hash": "38d771e7d84c25ce",
+      "ms": 2232
     },
     "vote-result-강동구-2": {
       "file": "vote-result-강동구-2.mp3",
       "caption": "2표로 강동구가 뽑혔습니다.",
-      "hash": "1a8a51e1e8d1d06a"
+      "hash": "1a8a51e1e8d1d06a",
+      "ms": 2256
     },
     "vote-result-강동구-3": {
       "file": "vote-result-강동구-3.mp3",
       "caption": "3표로 강동구가 뽑혔습니다.",
-      "hash": "ab22c6e181010c8e"
+      "hash": "ab22c6e181010c8e",
+      "ms": 2304
     },
     "vote-result-강동구-4": {
       "file": "vote-result-강동구-4.mp3",
       "caption": "4표로 강동구가 뽑혔습니다.",
-      "hash": "8a328587a4d2576d"
+      "hash": "8a328587a4d2576d",
+      "ms": 2472
     },
     "vote-result-강동구-5": {
       "file": "vote-result-강동구-5.mp3",
       "caption": "5표로 강동구가 뽑혔습니다.",
-      "hash": "ff1311794e58cb9c"
+      "hash": "ff1311794e58cb9c",
+      "ms": 2400
     },
     "vote-result-강동구-6": {
       "file": "vote-result-강동구-6.mp3",
       "caption": "6표로 강동구가 뽑혔습니다.",
-      "hash": "d760211a009c610c"
+      "hash": "d760211a009c610c",
+      "ms": 2352
     },
     "vote-none-종로구": {
       "file": "vote-none-종로구.mp3",
       "caption": "아무도 손을 들지 않아 종로구로 갑니다.",
-      "hash": "9873b25a82e9ba7d"
+      "hash": "9873b25a82e9ba7d",
+      "ms": 2760
     },
     "vote-none-중구": {
       "file": "vote-none-중구.mp3",
       "caption": "아무도 손을 들지 않아 중구로 갑니다.",
-      "hash": "b68c768ba679444f"
+      "hash": "b68c768ba679444f",
+      "ms": 2568
     },
     "vote-none-용산구": {
       "file": "vote-none-용산구.mp3",
       "caption": "아무도 손을 들지 않아 용산구로 갑니다.",
-      "hash": "a01b636a2bd9112d"
+      "hash": "a01b636a2bd9112d",
+      "ms": 2808
     },
     "vote-none-성동구": {
       "file": "vote-none-성동구.mp3",
       "caption": "아무도 손을 들지 않아 성동구로 갑니다.",
-      "hash": "f843f622a20814d0"
+      "hash": "f843f622a20814d0",
+      "ms": 2760
     },
     "vote-none-광진구": {
       "file": "vote-none-광진구.mp3",
       "caption": "아무도 손을 들지 않아 광진구로 갑니다.",
-      "hash": "e8d937fbbbf599cb"
+      "hash": "e8d937fbbbf599cb",
+      "ms": 2784
     },
     "vote-none-동대문구": {
       "file": "vote-none-동대문구.mp3",
       "caption": "아무도 손을 들지 않아 동대문구로 갑니다.",
-      "hash": "8efd8e66bf5ae1ae"
+      "hash": "8efd8e66bf5ae1ae",
+      "ms": 2952
     },
     "vote-none-중랑구": {
       "file": "vote-none-중랑구.mp3",
       "caption": "아무도 손을 들지 않아 중랑구로 갑니다.",
-      "hash": "e648482bd98562ca"
+      "hash": "e648482bd98562ca",
+      "ms": 2688
     },
     "vote-none-성북구": {
       "file": "vote-none-성북구.mp3",
       "caption": "아무도 손을 들지 않아 성북구로 갑니다.",
-      "hash": "13304daa5a41fc62"
+      "hash": "13304daa5a41fc62",
+      "ms": 2688
     },
     "vote-none-강북구": {
       "file": "vote-none-강북구.mp3",
       "caption": "아무도 손을 들지 않아 강북구로 갑니다.",
-      "hash": "90c03356935c3cad"
+      "hash": "90c03356935c3cad",
+      "ms": 2712
     },
     "vote-none-도봉구": {
       "file": "vote-none-도봉구.mp3",
       "caption": "아무도 손을 들지 않아 도봉구로 갑니다.",
-      "hash": "5b08e0a60b2160dd"
+      "hash": "5b08e0a60b2160dd",
+      "ms": 2760
     },
     "vote-none-노원구": {
       "file": "vote-none-노원구.mp3",
       "caption": "아무도 손을 들지 않아 노원구로 갑니다.",
-      "hash": "27e93f81a089d1e4"
+      "hash": "27e93f81a089d1e4",
+      "ms": 2808
     },
     "vote-none-은평구": {
       "file": "vote-none-은평구.mp3",
       "caption": "아무도 손을 들지 않아 은평구로 갑니다.",
-      "hash": "a4553f7a97e8a377"
+      "hash": "a4553f7a97e8a377",
+      "ms": 2760
     },
     "vote-none-서대문구": {
       "file": "vote-none-서대문구.mp3",
       "caption": "아무도 손을 들지 않아 서대문구로 갑니다.",
-      "hash": "c7794111d1309ea7"
+      "hash": "c7794111d1309ea7",
+      "ms": 2856
     },
     "vote-none-마포구": {
       "file": "vote-none-마포구.mp3",
       "caption": "아무도 손을 들지 않아 마포구로 갑니다.",
-      "hash": "6f42f64396d8c8c1"
+      "hash": "6f42f64396d8c8c1",
+      "ms": 2712
     },
     "vote-none-양천구": {
       "file": "vote-none-양천구.mp3",
       "caption": "아무도 손을 들지 않아 양천구로 갑니다.",
-      "hash": "1bcf186a4ca37985"
+      "hash": "1bcf186a4ca37985",
+      "ms": 2904
     },
     "vote-none-강서구": {
       "file": "vote-none-강서구.mp3",
       "caption": "아무도 손을 들지 않아 강서구로 갑니다.",
-      "hash": "9536d55eb0280b81"
+      "hash": "9536d55eb0280b81",
+      "ms": 2688
     },
     "vote-none-구로구": {
       "file": "vote-none-구로구.mp3",
       "caption": "아무도 손을 들지 않아 구로구로 갑니다.",
-      "hash": "a43d89a4833e6ce9"
+      "hash": "a43d89a4833e6ce9",
+      "ms": 2640
     },
     "vote-none-금천구": {
       "file": "vote-none-금천구.mp3",
       "caption": "아무도 손을 들지 않아 금천구로 갑니다.",
-      "hash": "6cb505a295a80bac"
+      "hash": "6cb505a295a80bac",
+      "ms": 2736
     },
     "vote-none-영등포구": {
       "file": "vote-none-영등포구.mp3",
       "caption": "아무도 손을 들지 않아 영등포구로 갑니다.",
-      "hash": "8291dfc7c11eb074"
+      "hash": "8291dfc7c11eb074",
+      "ms": 2904
     },
     "vote-none-동작구": {
       "file": "vote-none-동작구.mp3",
       "caption": "아무도 손을 들지 않아 동작구로 갑니다.",
-      "hash": "481418731088e8f6"
+      "hash": "481418731088e8f6",
+      "ms": 2760
     },
     "vote-none-관악구": {
       "file": "vote-none-관악구.mp3",
       "caption": "아무도 손을 들지 않아 관악구로 갑니다.",
-      "hash": "2e600d9edb6f249d"
+      "hash": "2e600d9edb6f249d",
+      "ms": 2688
     },
     "vote-none-서초구": {
       "file": "vote-none-서초구.mp3",
       "caption": "아무도 손을 들지 않아 서초구로 갑니다.",
-      "hash": "655b90cde046aee9"
+      "hash": "655b90cde046aee9",
+      "ms": 2712
     },
     "vote-none-강남구": {
       "file": "vote-none-강남구.mp3",
       "caption": "아무도 손을 들지 않아 강남구로 갑니다.",
-      "hash": "eea855ad8f9ff8ce"
+      "hash": "eea855ad8f9ff8ce",
+      "ms": 2736
     },
     "vote-none-송파구": {
       "file": "vote-none-송파구.mp3",
       "caption": "아무도 손을 들지 않아 송파구로 갑니다.",
-      "hash": "3e52aa3b53504b65"
+      "hash": "3e52aa3b53504b65",
+      "ms": 2664
     },
     "vote-none-강동구": {
       "file": "vote-none-강동구.mp3",
       "caption": "아무도 손을 들지 않아 강동구로 갑니다.",
-      "hash": "9de93db189296bfb"
+      "hash": "9de93db189296bfb",
+      "ms": 2784
     },
     "gu-202611-종로구": {
       "file": "gu-202611-종로구.mp3",
       "caption": "종로구는 11월 7건이 거래됐고 ㎡당 중위 840만 원으로 25개 구 중 22위입니다. 최고 거래가는 27.5억 원이었습니다.",
-      "hash": "a4e22ae243628314"
+      "hash": "a4e22ae243628314",
+      "ms": 11352
     },
     "gu-202611-중구": {
       "file": "gu-202611-중구.mp3",
       "caption": "2026년 11월 중구는 거래 17건, 취소 1건이었습니다. ㎡당 중위 가격은 1,327만 원으로 25개 구 중 6위입니다.",
-      "hash": "a197d7e7bda4bcc9"
+      "hash": "a197d7e7bda4bcc9",
+      "ms": 11040
     },
     "gu-202611-용산구": {
       "file": "gu-202611-용산구.mp3",
       "caption": "2026년 11월 용산구는 10건이 거래됐고 ㎡당 중위 1,738만 원으로 25개 구 중 2위입니다. 최고 거래가는 25.3억 원이었습니다.",
-      "hash": "ca94a076c1d1b5b0"
+      "hash": "ca94a076c1d1b5b0",
+      "ms": 12936
     },
     "gu-202611-성동구": {
       "file": "gu-202611-성동구.mp3",
       "caption": "성동구는 11월 22건이 거래됐고 ㎡당 중위 2,661만 원으로 25개 구 중 1위였습니다. 동별로는 성수동1가가 ㎡당 중위 3,718만 원으로 가장 높았습니다.",
-      "hash": "85ffb246a7522dea"
+      "hash": "85ffb246a7522dea",
+      "ms": 15600
     },
     "gu-202611-광진구": {
       "file": "gu-202611-광진구.mp3",
       "caption": "광진구 11월 거래는 16건, ㎡당 중위 1,026만 원으로 15위입니다. 3건 이상 거래된 동 중 구의동이 ㎡당 중위 1,094만 원으로 가장 높습니다.",
-      "hash": "ba0f54e1650ced16"
+      "hash": "ba0f54e1650ced16",
+      "ms": 13392
     },
     "gu-202611-동대문구": {
       "file": "gu-202611-동대문구.mp3",
       "caption": "11월 동대문구는 50건 거래됐고 ㎡당 중위 1,012만 원으로 25개 구 중 16위였습니다. 전농동이 ㎡당 중위 1,716만 원으로 가장 높았습니다.",
-      "hash": "8fae94d69c00cd84"
+      "hash": "8fae94d69c00cd84",
+      "ms": 13368
     },
     "gu-202611-중랑구": {
       "file": "gu-202611-중랑구.mp3",
       "caption": "중랑구는 11월 52건이 거래되었고 ㎡당 중위 1,027만 원으로 25개 구 중 14위입니다. 중화동은 ㎡당 중위 1,534만 원으로 가장 높습니다.",
-      "hash": "979ea7bc548d21d1"
+      "hash": "979ea7bc548d21d1",
+      "ms": 14016
     },
     "gu-202611-성북구": {
       "file": "gu-202611-성북구.mp3",
       "caption": "성북구 11월 거래는 75건, ㎡당 중위 1,444만 원으로 5위입니다. 3건 이상 거래된 동 중 하월곡동이 ㎡당 중위 1,483만 원으로 가장 높습니다.",
-      "hash": "c41827d10ec955be"
+      "hash": "c41827d10ec955be",
+      "ms": 13848
     },
     "gu-202611-강북구": {
       "file": "gu-202611-강북구.mp3",
       "caption": "2026년 11월 강북구는 57건 거래됐고 ㎡당 중위 607만 원으로 25개 구 중 25위였습니다. 미아동이 ㎡당 중위 865만 원으로 가장 높았습니다.",
-      "hash": "27a6b56c5396dc6e"
+      "hash": "27a6b56c5396dc6e",
+      "ms": 14304
     },
     "gu-202611-도봉구": {
       "file": "gu-202611-도봉구.mp3",
       "caption": "11월 도봉구는 57건이 거래됐고 ㎡당 중위 788만 원으로 25개 구 중 23위입니다. 창동이 ㎡당 중위 1,058만 원으로 가장 높았습니다.",
-      "hash": "b4264ab3271845f0"
+      "hash": "b4264ab3271845f0",
+      "ms": 13392
     },
     "gu-202611-노원구": {
       "file": "gu-202611-노원구.mp3",
       "caption": "11월 노원구는 29건 거래됐고 ㎡당 중위 1,181만 원으로 25개 구 중 8위입니다. 상계동은 ㎡당 중위 1,225만 원으로 가장 높았습니다.",
-      "hash": "498d12e4119d73e8"
+      "hash": "498d12e4119d73e8",
+      "ms": 13680
     },
     "gu-202611-은평구": {
       "file": "gu-202611-은평구.mp3",
       "caption": "은평구 11월 거래는 70건, ㎡당 중위 912만 원으로 19위입니다. 3건 이상 거래된 동 중 수색동이 ㎡당 중위 1,671만 원으로 가장 높습니다.",
-      "hash": "3e386d7b5e7bf6c1"
+      "hash": "3e386d7b5e7bf6c1",
+      "ms": 13896
     },
     "gu-202611-서대문구": {
       "file": "gu-202611-서대문구.mp3",
       "caption": "서대문구 11월 거래는 43건, ㎡당 중위 1,089만 원으로 11위입니다. 3건 이상 거래된 동 중 남가좌동이 ㎡당 중위 1,396만 원으로 가장 높습니다.",
-      "hash": "cd971e0e01226635"
+      "hash": "cd971e0e01226635",
+      "ms": 13848
     },
     "gu-202611-마포구": {
       "file": "gu-202611-마포구.mp3",
       "caption": "마포구 11월 거래는 25건, ㎡당 중위 985만 원으로 17위입니다. 3건 이상 거래된 동 중 공덕동이 ㎡당 중위 1,702만 원으로 가장 높습니다.",
-      "hash": "1f04dc084e945748"
+      "hash": "1f04dc084e945748",
+      "ms": 13536
     },
     "gu-202611-양천구": {
       "file": "gu-202611-양천구.mp3",
       "caption": "11월 양천구 거래는 49건, ㎡당 중위 1,139만 원으로 25개 구 중 10위였습니다. 신정동이 ㎡당 중위 1,460만 원으로 가장 높았습니다.",
-      "hash": "ef3e9cefa8524072"
+      "hash": "ef3e9cefa8524072",
+      "ms": 13560
     },
     "gu-202611-강서구": {
       "file": "gu-202611-강서구.mp3",
       "caption": "강서구 11월 거래는 82건, ㎡당 중위 878만 원으로 20위입니다. 3건 이상 거래된 동 중 염창동이 ㎡당 중위 1,484만 원으로 가장 높습니다.",
-      "hash": "43cbe78555a6f233"
+      "hash": "43cbe78555a6f233",
+      "ms": 14040
     },
     "gu-202611-구로구": {
       "file": "gu-202611-구로구.mp3",
       "caption": "2026년 11월 구로구는 29건이 거래되었고 취소는 없었습니다. ㎡당 중위 가격은 844만 원으로 25개 구 중 21위였습니다.",
-      "hash": "f209fbc2fa616403"
+      "hash": "f209fbc2fa616403",
+      "ms": 11808
     },
     "gu-202611-금천구": {
       "file": "gu-202611-금천구.mp3",
       "caption": "금천구 2026년 11월 거래는 33건, ㎡당 중위 680만 원으로 25개 구 중 24위입니다. 독산동이 ㎡당 중위 846만 원으로 가장 높았습니다.",
-      "hash": "a4070ed59441e5be"
+      "hash": "a4070ed59441e5be",
+      "ms": 14880
     },
     "gu-202611-영등포구": {
       "file": "gu-202611-영등포구.mp3",
       "caption": "영등포구 11월 거래는 42건, ㎡당 중위 1,034만 원으로 13위입니다. 3건 이상 거래된 동 중 당산동4가가 ㎡당 중위 1,352만 원으로 가장 높습니다.",
-      "hash": "95a269e4f5faa043"
+      "hash": "95a269e4f5faa043",
+      "ms": 14448
     },
     "gu-202611-동작구": {
       "file": "gu-202611-동작구.mp3",
       "caption": "동작구 2026년 11월 거래는 22건, ㎡당 중위 1,485만 원으로 25개 구 중 4위였습니다. 신대방동이 ㎡당 중위 1,565만 원으로 가장 높았습니다.",
-      "hash": "4d6c93836007283a"
+      "hash": "4d6c93836007283a",
+      "ms": 14736
     },
     "gu-202611-관악구": {
       "file": "gu-202611-관악구.mp3",
       "caption": "관악구 11월 거래는 70건, ㎡당 중위 934만 원으로 25개 구 중 18위입니다. 동별로는 남현동이 ㎡당 중위 1,032만 원으로 가장 높습니다.",
-      "hash": "4dc27d9a16909864"
+      "hash": "4dc27d9a16909864",
+      "ms": 13368
     },
     "gu-202611-서초구": {
       "file": "gu-202611-서초구.mp3",
       "caption": "서초구 11월 거래는 20건, ㎡당 중위 1,220만 원으로 7위입니다. 3건 이상 거래된 동 중 방배동이 ㎡당 중위 2,704만 원으로 가장 높습니다.",
-      "hash": "260de2f6093fa35a"
+      "hash": "260de2f6093fa35a",
+      "ms": 13128
     },
     "gu-202611-강남구": {
       "file": "gu-202611-강남구.mp3",
       "caption": "2026년 11월 강남구 거래는 32건, 취소는 2건이었습니다. ㎡당 중위 가격은 1,564만 원으로 25개 구 중 3위입니다.",
-      "hash": "78378d0d00f7e206"
+      "hash": "78378d0d00f7e206",
+      "ms": 11760
     },
     "gu-202611-송파구": {
       "file": "gu-202611-송파구.mp3",
       "caption": "송파구 11월 거래는 61건, ㎡당 중위 1,169만 원으로 25개 구 중 9위입니다. 동별로는 잠실동이 ㎡당 중위 3,137만 원으로 가장 높았습니다.",
-      "hash": "a71aad90b4abba8b"
+      "hash": "a71aad90b4abba8b",
+      "ms": 14496
     },
     "gu-202611-강동구": {
       "file": "gu-202611-강동구.mp3",
       "caption": "강동구 11월 거래는 44건, ㎡당 중위 가격은 1,065만 원으로 25개 구 중 12위입니다. 동별로는 고덕동이 ㎡당 중위 2,612만 원으로 가장 높습니다.",
-      "hash": "da865b57cebeed0e"
+      "hash": "da865b57cebeed0e",
+      "ms": 15000
     }
   }
 }
