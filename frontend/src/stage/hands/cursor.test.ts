@@ -85,3 +85,26 @@ describe("createCursorMapper", () => {
     expect(p).toEqual(mapToScreen({ x: 0.2, y: 0.3 }));
   });
 });
+
+describe("createCursorMapper 기본 beta", () => {
+  const flat = (x: number, y: number) => lmWith({ 0: [x, y], 5: [x, y], 9: [x, y], 13: [x, y], 17: [x, y] });
+  const opts = { mirror: false, margin: 0 };
+  const dt = 1000 / 60;
+
+  it("0->1 단위 계단은 200ms 안에 90% 따라간다", () => {
+    const m = createCursorMapper(opts);
+    let t = 0;
+    for (let i = 0; i < 30; i++, t += dt) m.map(flat(0, 0.5), t);
+    let p = { x: 0, y: 0 };
+    for (let k = 0; k * dt <= 200; k++, t += dt) p = m.map(flat(1, 0.5), t);
+    expect(p.x).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("정지 상태 +-0.01 지터는 입력 진폭의 50% 미만으로 줄인다", () => {
+    const m = createCursorMapper(opts);
+    const out: number[] = [];
+    for (let i = 0; i < 120; i++) out.push(m.map(flat(0.5 + (i % 2 ? 0.01 : -0.01), 0.5), i * dt).x);
+    const tail = out.slice(60);
+    expect(Math.max(...tail) - Math.min(...tail)).toBeLessThan(0.02 * 0.5);
+  });
+});

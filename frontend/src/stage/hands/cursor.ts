@@ -51,8 +51,10 @@ export function mapToScreen(p: Point, opts: { mirror?: boolean; margin?: number 
 export interface CursorMapper { map(lm: Vec3[], tMs: number): Point; reset(): void; }
 
 export function createCursorMapper(opts: { mirror?: boolean; margin?: number; minCutoff?: number; beta?: number } = {}): CursorMapper {
-  const fx = createOneEuro({ minCutoff: opts.minCutoff, beta: opts.beta });
-  const fy = createOneEuro({ minCutoff: opts.minCutoff, beta: opts.beta });
+  // 0..1 정규화 좌표는 속도가 작아 OneEuro 기본 beta(0.02)로는 지연이 커서 기본 3을 쓴다.
+  const beta = opts.beta ?? 3;
+  const fx = createOneEuro({ minCutoff: opts.minCutoff, beta });
+  const fy = createOneEuro({ minCutoff: opts.minCutoff, beta });
   return {
     map(lm, tMs) {
       const s = mapToScreen(palmCenter(lm), { mirror: opts.mirror, margin: opts.margin });
