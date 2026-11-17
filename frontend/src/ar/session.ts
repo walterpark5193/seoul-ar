@@ -4,7 +4,7 @@
 // Seoul scene group to `anchor`, registers `onFrame`, and calls `start()` from a tap handler
 // (iOS Safari needs HTTPS and a user gesture before the camera can start).
 import type { Camera, Scene, WebGLRenderer } from "three";
-import { Group, Quaternion, Vector3 } from "three";
+import { Group, Matrix4, Quaternion, Vector3 } from "three";
 import { MindARThree } from "mind-ar/dist/mindar-image-three.prod.js";
 import {
   INITIAL_FOLLOWER,
@@ -196,6 +196,21 @@ export function createArSession(opts: ArSessionOptions): ArSession {
   follower.add(inner);
   scene.add(follower);
 
+  // App callbacks are isolated: a throwing callback must not skip rendering or propagate into the
+  // animation loop. Each failing callback is logged once (not once per frame).
+  const reported = new WeakSet<object>();
+  const guard = <A extends unknown[]>(cb: (...args: A) => void, label: string): ((...args: A) => void) => {
+    return (...args: A): void => {
+      try {
+        cb(...args);
+      } catch (err) {
+        if (!reported.has(cb)) {
+          reported.add(cb);
+          console.error(`[ar] ${label} 콜백에서 오류가 났습니다 (이 콜백의 오류는 한 번만 기록합니다).`, err);
+        }
+      }
+    };
+  };
   const foundCbs: Array<() => void> = [];
   const lostCbs: Array<() => void> = [];
   const frameCbs: Array<(dt: number) => void> = [];
@@ -217,9 +232,15 @@ export function createArSession(opts: ArSessionOptions): ArSession {
   const tmpScale = new Vector3();
   const readMindArPose = (): { pose: Pose; scale: number } | null => {
     if (mindarAnchor.visible !== true) return null;
-    mindarAnchor.group.matrix.decompose(tmpPos, tmpQuat, tmpScale);
+    const matrix = mindarAnchor.group.matrix;
+    // MindAR's "invisible" matrix (all zeros but [15]) and our reset matrix have zero-length basis
+    // vectors. Check the raw elements: three's decompose() substitutes scale 1 for a zero scale.
+    const e = matrix.elements;
+    const basisLength = Math.hypot(e[0]!, e[1]!, e[2]!);
+    if (!Number.isFinite(basisLength) || basisLength <= 1e-9) return null;
+    matrix.decompose(tmpPos, tmpQuat, tmpScale);
     const scale = tmpScale.x;
-    if (!Number.isFinite(scale) || scale <= 0) return null; // MindAR's all-zero "invisible" matrix
+    if (!Number.isFinite(scale) || scale <= 0) return null;
     tmpQuat.normalize();
     return {
       pose: { position: [tmpPos.x, tmpPos.y, tmpPos.z], quaternion: [tmpQuat.x, tmpQuat.y, tmpQuat.z, tmpQuat.w] },
@@ -239,11 +260,16 @@ export function createArSession(opts: ArSessionOptions): ArSession {
     follower.visible = false;
     announcedFound = false;
   };
-  /** MindAR's stop() leaves the anchor flags and matrix as they were; a fresh start must not replay them. */
+  /**
+   * MindAR's stop() leaves the anchor flags and matrix as they were; a fresh start must not replay them.
+   * On target loss MindAR assigns its module-level "invisible" matrix to group.matrix *by reference*,
+   * so that object must never be mutated in place: assign a fresh zero-scale matrix instead (it fails
+   * the scale > 0 guard in readMindArPose just like MindAR's own lost state).
+   */
   const resetMindArAnchor = (): void => {
     mindarAnchor.visible = false;
     mindarAnchor.group.visible = false;
-    mindarAnchor.group.matrix.identity();
+    mindarAnchor.group.matrix = new Matrix4().set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
   };
 
   const tick = (time: number): void => {
@@ -488,9 +514,9 @@ export function createArSession(opts: ArSessionOptions): ArSession {
         emitFreeze(false);
       }
     },
-    onFound(cb) { foundCbs.push(cb); },
-    onLost(cb) { lostCbs.push(cb); },
-    onFrame(cb) { frameCbs.push(cb); },
+    onFound(cb) { foundCbs.push(guard(cb, "onFound")); },
+    onLost(cb) { lostCbs.push(guard(cb, "onLost")); },
+    onFrame(cb) { frameCbs.push(guard(cb, "onFrame")); },
     freeze() {
       if (frozen || !running) return; // nothing to freeze before the camera runs
       frozen = true;
@@ -517,9 +543,10 @@ export function createArSession(opts: ArSessionOptions): ArSession {
       return frozen;
     },
     onFreeze(cb) {
-      freezeCbs.push(cb);
+      const wrapped = guard(cb, "onFreeze");
+      freezeCbs.push(wrapped);
       return () => {
-        const i = freezeCbs.indexOf(cb);
+        const i = freezeCbs.indexOf(wrapped);
         if (i >= 0) freezeCbs.splice(i, 1);
       };
     },

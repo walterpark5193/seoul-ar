@@ -360,6 +360,29 @@ describe("createArSession wiring", () => {
       expect(follower.position.x).toBe(300); // snap, no slide from the stale pose
     });
 
+    it("resets the MindAR anchor by assigning a fresh matrix, never mutating the shared one MindAR assigned by reference", async () => {
+      const s = make();
+      const inst = fake.state.instances[0]!;
+      await s.start();
+      const a = inst.anchors[0]!;
+      // MindAR assigns its module-level "invisible" matrix object to group.matrix on every target loss.
+      const shared = new Matrix4().set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+      const before = shared.toArray();
+      a.visible = false;
+      a.group.visible = false;
+      a.group.matrix = shared;
+      s.stop();
+      expect(shared.toArray()).toEqual(before); // the shared constant is untouched
+      expect(a.group.matrix).not.toBe(shared); // replaced, not mutated
+      expect(a.visible).toBe(false);
+      await s.start();
+      // Even if MindAR flipped `visible` before writing a pose, the fresh matrix must still read as "nothing tracked".
+      a.visible = true;
+      a.group.visible = true;
+      inst.renderer.loop!(0);
+      expect(s.anchor.parent!.visible).toBe(false);
+    });
+
     it("3: stale MindAR anchor state after stop() -> start() does not resurrect the follower or fire onFound", async () => {
       const s = make();
       const inst = fake.state.instances[0]!;
@@ -381,6 +404,62 @@ describe("createArSession wiring", () => {
       expect(s.anchor.parent!.visible).toBe(true);
       expect(s.anchor.parent!.position.x).toBe(200);
       expect(found).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("callback isolation", () => {
+    it("a throwing onFrame callback is logged once, the other callbacks still run and rendering continues", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const s = make();
+        const inst = fake.state.instances[0]!;
+        const bad = vi.fn(() => { throw new Error("boom"); });
+        const good = vi.fn();
+        s.onFrame(bad);
+        s.onFrame(good);
+        await s.start();
+        const loop = inst.renderer.loop!;
+        for (let i = 0; i < 5; i++) expect(() => loop(i * 16)).not.toThrow();
+        expect(bad).toHaveBeenCalledTimes(5);
+        expect(good).toHaveBeenCalledTimes(5);
+        expect(inst.renderer.render).toHaveBeenCalledTimes(5);
+        expect(errorSpy).toHaveBeenCalledTimes(1); // once per callback, not once per frame
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it("throwing onFound/onLost callbacks are isolated: the others fire, rendering continues, each is logged once", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const s = make({ smoothing: { holdMs: 100 } });
+        const inst = fake.state.instances[0]!;
+        const badFound = vi.fn(() => { throw new Error("found boom"); });
+        const goodFound = vi.fn();
+        const badLost = vi.fn(() => { throw new Error("lost boom"); });
+        const goodLost = vi.fn();
+        s.onFound(badFound);
+        s.onFound(goodFound);
+        s.onLost(badLost);
+        s.onLost(goodLost);
+        await s.start();
+        const loop = inst.renderer.loop!;
+        observe(inst, { visible: true });
+        expect(() => loop(0)).not.toThrow();
+        expect(goodFound).toHaveBeenCalledTimes(1);
+        observe(inst, { visible: false });
+        loop(50);
+        expect(() => loop(200)).not.toThrow();
+        expect(goodLost).toHaveBeenCalledTimes(1);
+        observe(inst, { visible: true });
+        expect(() => loop(300)).not.toThrow(); // badFound throws a second time
+        expect(goodFound).toHaveBeenCalledTimes(2);
+        expect(badFound).toHaveBeenCalledTimes(2);
+        expect(inst.renderer.render).toHaveBeenCalledTimes(4);
+        expect(errorSpy).toHaveBeenCalledTimes(2); // one log line per failing callback
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
   });
 
