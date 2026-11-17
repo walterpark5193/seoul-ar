@@ -11,7 +11,7 @@ import type { DataIndex, GuData, Metric, Stat } from "../data/types";
 import type { ConnStatus, RealtimeClient, StateMessage } from "../realtime/types";
 import type { SeoulScene } from "../scene/seoulScene";
 import { NARRATION_IDS, diffEffects } from "../stage/effects";
-import { createCursorMapper, toNdc, type CursorMapper } from "../stage/hands/cursor";
+import { createCursorMapper, mapToScreen, palmCenter, toNdc, type CursorMapper } from "../stage/hands/cursor";
 import { DEFAULT_GESTURE_CONFIG, createGestureMachine, type GestureMachine } from "../stage/hands/gestureMachine";
 import { MODEL_PATH, startHandSource, type HandSource, type HandSourceError } from "../stage/hands/recognizer";
 import { createVoteCounter, type VoteCounter } from "../stage/hands/voteCounter";
@@ -19,9 +19,12 @@ import { attachPointer, keyToAction, type PointerHandlers, type UiAction } from 
 import { createNarrator, loadManifest, type AudioLike, type NarrationManifest, type Narrator } from "../stage/narrator";
 import { toStageMessage, toVoteMessage } from "../stage/net/messages";
 import type { StageChannel } from "../stage/net/stageChannel";
+import { createRotator, type Rotator } from "../stage/rotate";
 import { createStageRenderer } from "../stage/stageRenderer";
 import { defaultCandidates, initialStageState, parseVoteParam, reduceStage } from "../stage/stageState";
-import { VOTE_MAX, VOTE_TIMING, type Effect, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState } from "../stage/types";
+import {
+  VOTE_MAX, VOTE_TIMING, type Effect, type GestureEvent, type GestureOutput, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState,
+} from "../stage/types";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
 import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
 import { renderVotePanel } from "../stage/ui/votePanel";
@@ -44,6 +47,18 @@ export const SPREAD_METRIC: Metric = "price";
 export const RESULT_GUARD_MS = 1500;
 /** 주 손이 이 시간 이상 안 보여야 진짜로 놓친 것. gestureMachine이 추적 손을 기억하는 시간과 같다. */
 const CURSOR_GAP_MS = DEFAULT_GESTURE_CONFIG.releaseAfterMs;
+/** 큰 화면에 각도·배율을 보내는 최소 간격(초당 최대 5회, CONTRACTS-stage 13.6). 멈추면 마지막 값을 한 번 더 보낸다. */
+export const VIEW_PUBLISH_MS = 200;
+/** 휠 deltaY(픽셀 환산)를 이만큼 모을 때마다 확대 한 단계. 트랙패드의 잦은 작은 값이 한 번에 0.7~1.6을 넘지 않게(Ruling). */
+export const WHEEL_STEP_PX = 100;
+/**
+ * 두 손바닥 중심이 이보다 가까우면(화면 정규 좌표) 한 손이 두 번 잡힌 것으로 보고 두 손 회전에 쓰지 않는다.
+ * 맞붙인 두 주먹도 중심은 주먹 하나 폭(약 0.1)만큼 떨어진다. 거의 0인 거리를 확대 기준으로 잡으면 진짜 둘째 손이 들어오는 순간 1.6배로 튄다.
+ */
+const TWO_HAND_MIN_DIST = 0.04;
+/** WheelEvent.deltaMode 1(줄)·2(페이지)를 픽셀로 바꾸는 배수. */
+const WHEEL_LINE_PX = 16;
+const WHEEL_PAGE_PX = 800;
 
 const HAND_FAIL: Record<HandSourceError, string> = {
   denied: "카메라 권한이 거부되어 마우스로 진행합니다",
@@ -106,6 +121,24 @@ export function normalizeKey(key: string, code: string | undefined): string {
   return key;
 }
 
+/** WheelEvent의 deltaY를 픽셀 단위로(deltaMode 0 픽셀, 1 줄 ×16, 2 페이지 ×800). */
+export function wheelPixels(deltaY: number, deltaMode = 0): number {
+  return deltaY * (deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1);
+}
+
+/**
+ * 한 인식 프레임의 이벤트 순서. grab과 twoFist가 같은 프레임에 나면 twoFist를 먼저 보낸다:
+ * 리듀서가 돌리는 중의 grab을 무시하므로 두 주먹이 구 위에서 한꺼번에 쥐어져도 구를 들었다 내리지(해설·깜빡임) 않는다.
+ */
+export function orderGestureEvents(events: readonly GestureEvent[]): GestureEvent[] {
+  const g = events.findIndex((e) => e.type === "grab");
+  const t = events.findIndex((e) => e.type === "twoFist");
+  if (g < 0 || t < 0 || t < g) return [...events];
+  const out = events.filter((_, i) => i !== t);
+  out.splice(g, 0, events[t]!);
+  return out;
+}
+
 /** 상단 연결 표시: 두 채널(본체 state, 무대 stage)이 모두 열려야 "실시간 연결". */
 export function combineConn(a: ConnStatus, b: ConnStatus): ConnStatus {
   if (a === "open" && b === "open") return "open";
@@ -125,8 +158,12 @@ export interface StageUi {
   skeleton(frame: HandFrame | null): void;                          // null이면 지움
 }
 
-export type StageScene = Pick<SeoulScene, "setOverview" | "focus" | "setHover" | "lift" | "setLayout" | "pick">;
-export interface StageCamera { camera: Camera; setMode(mode: StageMode, instant?: boolean): void; }
+/** group: 회전기가 도는 각도를 수직 축(rotation.y)에 그대로 얹는다(큰 화면도 같은 부호). */
+export type StageScene = Pick<SeoulScene, "setOverview" | "focus" | "setHover" | "lift" | "setLayout" | "pick"> & { readonly group: { rotation: { y: number } } };
+/** onFrame: 렌더 루프 한 번마다(dt 초). 회전기 tick·확대를 여기서 적용한다. */
+export interface StageCamera {
+  camera: Camera; setMode(mode: StageMode, instant?: boolean): void; setZoom(z: number): void; onFrame(cb: (dt: number) => void): () => void;
+}
 export type StartResult = { ok: true; source: HandSource } | { ok: false; reason: HandSourceError };
 export interface StageClock { now(): number; every(ms: number, fn: () => void): () => void; }
 
@@ -159,11 +196,16 @@ export interface StageControllerDeps {
   gestures?: GestureMachine;
   cursor?: CursorMapper;
   counter?: VoteCounter;
+  rotator?: Rotator;
+  /** 움직임 줄이기: 정면 복귀(rotate.reset)를 보간 없이 즉시. */
+  reducedMotion?: boolean;
 }
 
 export interface KeyLike { key: string; code?: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; }
 /** 투표 패널 버튼의 data 속성(이벤트 위임) */
 export interface PanelTarget { set?: string | null; confirm?: boolean; method?: string | null; }
+/** 무대 포인터: 휠은 deltaMode(0 픽셀·1 줄·2 페이지)까지 받는다(attachPointer는 deltaY만 넘기므로 DOM 껍데기가 직접 잇는다). */
+export interface StagePointer extends PointerHandlers { wheel(deltaY: number, deltaMode?: number): void; }
 
 export interface StageController {
   readonly state: StageState;
@@ -173,7 +215,7 @@ export interface StageController {
   start(mode: InputMode): Promise<void>;
   /** 처리했으면 true(호출자가 preventDefault). */
   key(e: KeyLike): boolean;
-  readonly pointer: PointerHandlers;
+  readonly pointer: StagePointer;
   panel(t: PanelTarget): void;
   dispose(): void;
 }
@@ -185,6 +227,9 @@ const systemClock: StageClock = {
     return () => clearInterval(h);
   },
 };
+
+/** 이벤트가 어디서 왔나: 회전기에 넘길 점(손 커서·마우스)과 시간 기준(f.t·clock)이 갈린다. */
+type InputSrc = "hand" | "mouse" | "key";
 
 /** 손 인식 준비를 기다린 결과: 준비 결과, 시간 초과, 또는 "마우스로 계속"·화면 떠남으로 그만 기다림. */
 type HandWait = { kind: "result"; r: StartResult } | { kind: "timeout" } | { kind: "skip" };
@@ -198,6 +243,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   const gestures = deps.gestures ?? createGestureMachine();
   const cursor = deps.cursor ?? createCursorMapper();
   const counter = deps.counter ?? createVoteCounter();
+  const rotator = deps.rotator ?? createRotator();
+  const reducedMotion = deps.reducedMotion ?? false;
   const { scene, renderer, narrator, ui, index } = deps;
 
   let state: StageState = { ...initialStageState(deps.month, "mouse"), metric: deps.metric ?? "price" };
@@ -224,6 +271,15 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let mouseDown = false;
   let resultAt = -Infinity; // 투표 결과 화면에 들어온 시각(clock)
   let focusToken = 0;
+  // ----- 회전(계약 13): 잡은 쪽, 미룬 잡기, 이번 프레임의 두 손바닥 점, 관성 표시, 휠 누적, 큰 화면에 보낸 각도
+  let rotBy: "hand" | "mouse" | null = null;       // 지금 잡고 있는 입력(점·시간 기준이 이쪽을 따른다)
+  let pendingGrab: "one" | "two" | null = null;    // 잡을 점이 아직 없어 첫 점이 오면 잡는다
+  let frameT = 0;                                  // 마지막 인식 프레임의 f.t(손 회전의 시간 기준)
+  let twoPts: [Point, Point] | null = null;        // 이번 프레임 주 손·둘째 손 손바닥(화면 좌표). 정확히 두 손일 때만
+  let spinShown = false;                           // 마지막으로 spinState로 알린 회전기 관성 여부
+  let wheelAcc = 0;                                // 모은 휠 픽셀(부호 = 방향)
+  let sentView = { yaw: 0, zoom: 1 };              // 마지막 StageMessage에 실은 각도·배율
+  let sentAt = -Infinity;                          // 그때 시각(clock)
   const guCache = new Map<string, GuData>();                                   // 받은 구 자료(월|구)
   const guLoading = new Map<string, Promise<GuData | null>>();                  // 받는 중인 요청(같은 구를 두 번 받지 않게)
   const shown = new Map<UiPart, string | null>();
@@ -281,9 +337,21 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     deps.onState?.(msg);
     track("state", () => deps.realtime.publish(msg));
   };
+  /** 모든 StageMessage에 지금 각도·배율을 싣는다(큰 화면은 없으면 정면 0·1로 돌아가므로 들기·펼치기 메시지에도). */
   const publishStage = () => {
-    const msg = toStageMessage(state, clock.now());
+    const { yaw, zoom } = rotator.state;
+    sentView = { yaw, zoom };
+    sentAt = clock.now();
+    const msg = toStageMessage(state, sentAt, sentView);
     track("stage", () => deps.stageChannel.publish(msg));
+  };
+  /** 각도·배율이 마지막으로 보낸 값과 다르면 VIEW_PUBLISH_MS 간격으로 보낸다(처음 바뀐 렌더에 바로, 멈추면 남은 값을 한 번). */
+  const publishView = () => {
+    if (phase !== "running") return;
+    const { yaw, zoom } = rotator.state;
+    if (yaw === sentView.yaw && zoom === sentView.zoom) return;
+    if (clock.now() - sentAt < VIEW_PUBLISH_MS) return;
+    publishStage();
   };
   const publishVote = () => {
     if (!state.vote) return;
@@ -329,8 +397,29 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     });
   }
 
-  function run(fx: Effect): void {
+  /** 잡은 입력의 시간 기준: 손은 인식 프레임 시각(f.t), 마우스는 clock. 회전기 속도 표본이 한 기준으로만 쌓이게. */
+  const rotT = () => (rotBy === "hand" ? frameT : clock.now());
+  const clearHold = () => { rotBy = null; pendingGrab = null; };
+
+  function run(fx: Effect, src: InputSrc): void {
     switch (fx.type) {
+      case "rotate.grabOne": {
+        // grab은 손 프레임이나 마우스 누르기에서만 온다. 잡는 점: 손이면 손 커서, 마우스면 마지막 포인터 자리.
+        rotBy = src === "hand" ? "hand" : "mouse";
+        const at = rotBy === "hand" ? (handLost ? null : handPoint) : mousePoint;
+        pendingGrab = at ? null : "one";
+        if (at) rotator.grabOne(at, rotT());
+        return;
+      }
+      case "rotate.grabTwo":
+        // 주 손·둘째 손이 이번 프레임에 다 있어야 잡는다. 없으면 둘 다 보이는 첫 프레임에 잡는다.
+        rotBy = "hand";
+        pendingGrab = twoPts ? null : "two";
+        if (twoPts) rotator.grabTwo(twoPts[0], twoPts[1], frameT);
+        return;
+      case "rotate.release": rotator.release(rotT()); clearHold(); return;
+      case "rotate.catch": rotator.catch(); return;
+      case "rotate.reset": rotator.reset(reducedMotion); clearHold(); wheelAcc = 0; return;
       case "scene.layout":
         scene.setLayout(fx.mode, summary(), SPREAD_METRIC);
         renderer?.setMode(fx.mode);
@@ -357,10 +446,26 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   /** 결과 화면에 막 들어왔다: 손짓·포인터·키로 결과를 곧바로 지우지 않는다. */
   const resultGuarded = () => state.vote?.phase === "result" && clock.now() - resultAt < RESULT_GUARD_MS;
+  const GUARDED = new Set<StageEvent["type"]>(["grab", "spread", "victory", "twoFist"]);
 
-  function dispatch(e: StageEvent): void {
+  /**
+   * 회전기가 관성으로 돌기 시작하거나 멈추면 리듀서에 알린다(spinState). 놓은 바로 그 차례(dispatch 끝)와 매 렌더에서 부른다.
+   * 리듀서가 "돈다"를 받지 않으면(잡기·펼치기·투표 중) 회전기도 멈춰 둘이 어긋나지 않게 한다.
+   */
+  function syncSpin(): void {
+    const spinning = rotator.state.mode === "spinning";
+    if (spinning === spinShown) return;
+    spinShown = spinning;
+    dispatch({ type: "spinState", spinning });
+    if (spinning && !state.spinning) {
+      rotator.catch();
+      spinShown = false;
+    }
+  }
+
+  function dispatch(e: StageEvent, src: InputSrc = "key"): void {
     if (phase === "disposed") return;
-    if ((e.type === "grab" || e.type === "spread" || e.type === "victory") && resultGuarded()) return;
+    if (GUARDED.has(e.type) && resultGuarded()) return;
     const prev = state;
     const next = reduceStage(prev, e);
     if (next === prev) return;
@@ -377,7 +482,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     if (pv && nv && pv.round === nv.round && pv.phase === "counting" && nv.phase === "counting" && pv.method !== "camera" && nv.method === "camera") {
       counter.reset();
     }
-    for (const fx of diffEffects(prev, next)) run(fx);
+    for (const fx of diffEffects(prev, next, e)) run(fx, src); // 원인 이벤트: 돌리기만 한 지도의 브이도 정면 복귀
+    syncSpin();
     renderTop();
     renderHintsPart();
     renderVote();
@@ -396,6 +502,32 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   };
   const hoverTo = (gu: string | null) => { if (gu !== state.hover) dispatch({ type: "hover", gu }); };
 
+  /**
+   * 주 손·둘째 손의 손바닥 중심(커서와 같은 거울·가장자리 매핑). 정확히 두 손이 보이고 둘 다 있을 때만:
+   * 셋 이상이면 둘째 손이 프레임마다 바뀔 수 있고, 너무 가까우면 한 손이 두 번 잡힌 것이다.
+   */
+  function twoPalms(f: HandFrame, out: GestureOutput): [Point, Point] | null {
+    if (out.handCount !== 2 || out.primary === null || out.secondary === null) return null;
+    const a = f.hands[out.primary];
+    const b = f.hands[out.secondary];
+    if (!a || !b) return null;
+    const pa = mapToScreen(palmCenter(a.landmarks));
+    const pb = mapToScreen(palmCenter(b.landmarks));
+    return Math.hypot(pb.x - pa.x, pb.y - pa.y) < TWO_HAND_MIN_DIST ? null : [pa, pb];
+  }
+
+  /** 손으로 잡고 있으면 이번 프레임 점으로 돌린다(한 손: 커서, 두 손: 두 손바닥). 미룬 잡기는 점이 생긴 첫 프레임에. */
+  function followHands(cur: Point | null, t: number): void {
+    if (state.rotate === "one" && rotBy === "hand" && cur) {
+      if (pendingGrab === "one") { pendingGrab = null; rotator.grabOne(cur, t); }
+      else rotator.move(cur, t);
+    } else if (state.rotate === "two" && twoPts) {
+      // 두 손이 아닌 프레임(셋째 손·한 손 놓침)은 건너뛴다. 끝내는 것은 twoFistEnd가 맡는다.
+      if (pendingGrab === "two") { pendingGrab = null; rotator.grabTwo(twoPts[0], twoPts[1], t); }
+      else rotator.moveTwo(twoPts[0], twoPts[1], t);
+    }
+  }
+
   function onFrame(f: HandFrame): void {
     frameAt = clock.now(); // 프레임 시각 f.t(performance)와 섞지 않고 clock 한쪽으로만 잰다
     if (phase !== "running") return;
@@ -408,6 +540,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     if (preview !== "hidden") ui.skeleton(f);
     if (!out) return;
 
+    frameT = f.t;
     const p = out.primary === null ? undefined : f.hands[out.primary];
     gesture = p ? { name: p.gesture, score: p.score } : { name: "None", score: 0 };
     if (p) {
@@ -416,14 +549,16 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       if (handLost || (handSeenAt !== null && f.t - handSeenAt >= CURSOR_GAP_MS)) { cursor.reset(); handLost = false; }
       handPoint = cursor.map(p.landmarks, f.t);
       handSeenAt = f.t;
-      hoverTo(pickAt(handPoint));
+      if (state.rotate === "none") hoverTo(pickAt(handPoint)); // 돌리는 동안에는 구를 고르지 않는다(hover null 유지)
     } else if (!handLost && (handSeenAt === null || f.t - handSeenAt >= CURSOR_GAP_MS)) {
       // 추적 손이 잠깐(releaseAfterMs 미만) 안 보이는 동안에는 커서와 hover를 그대로 둔다.
       handLost = true;
       hoverTo(null);
     }
+    twoPts = twoPalms(f, out);
+    followHands(p ? handPoint : null, f.t); // 이벤트 앞: 놓는 프레임의 마지막 움직임까지 속도에 든다
     renderCursor();
-    for (const e of out.events) dispatch({ type: e.type });
+    for (const e of orderGestureEvents(out.events)) dispatch({ type: e.type }, "hand");
   }
 
   function attach(src: HandSource): void {
@@ -566,6 +701,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   function tick(): void {
     syncVisibility(); // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
+    if (!renderer) frameTick(VOTE_TICK_MS / 1000);
     const now = clock.now();
     if (source && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
     else if (source && state.input === "hands" && now - frameAt > HAND_STALL_MS) fallbackToMouse(HAND_STALL_TOAST);
@@ -575,22 +711,53 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   }
   const heartbeat = () => { publishState(); publishStage(); };
 
-  const pointer: PointerHandlers = {
+  /** 렌더 루프 한 번: 관성·정면 복귀를 진행하고 도시 group과 카메라 거리에 적용, 관성 변화를 알리고 큰 화면에 보낸다. */
+  function frameTick(dt: number): void {
+    const v = rotator.tick(dt);
+    scene.group.rotation.y = v.yaw;
+    renderer?.setZoom(v.zoom);
+    syncSpin();
+    publishView();
+  }
+
+  /** 휠: 지도 화면·든 구 없음·투표 진행 중 아님일 때만. 픽셀로 모아 WHEEL_STEP_PX마다 한 단계(방향이 바뀌면 새로 센다). */
+  function wheel(deltaY: number, deltaMode = 0): void {
+    if (phase !== "running") return;
+    const v = state.vote;
+    if (state.mode !== "map" || state.lifted !== null || (v !== null && v.phase !== "result")) { wheelAcc = 0; return; }
+    const px = wheelPixels(deltaY, deltaMode);
+    if (!Number.isFinite(px) || px === 0) return;
+    if (Math.sign(px) !== Math.sign(wheelAcc)) wheelAcc = 0;
+    wheelAcc += px;
+    while (Math.abs(wheelAcc) >= WHEEL_STEP_PX) {
+      const dir = Math.sign(wheelAcc);
+      rotator.wheel(dir);
+      wheelAcc -= dir * WHEEL_STEP_PX;
+    }
+  }
+
+  const pointer: StagePointer = {
     move(p) {
       if (phase !== "running") return;
       mousePoint = p;
-      hoverTo(pickAt(p));
+      if (state.rotate === "none") { hoverTo(pickAt(p)); return; } // 돌리는 동안에는 구를 고르지 않는다
+      if (state.rotate !== "one" || rotBy !== "mouse") return;
+      if (pendingGrab === "one") { pendingGrab = null; rotator.grabOne(p, clock.now()); }
+      else rotator.move(p, clock.now());
     },
+    // 누르기는 지금의 grab 길: 구 위면 들기, 빈 지도면 돌리기, 관성 중이면 잡기(리듀서 13.4).
     down() {
       if (phase !== "running") return;
       retryUnlock();
       mouseDown = true;
-      dispatch({ type: "grab" });
+      dispatch({ type: "grab" }, "mouse");
     },
     up() {
       if (phase !== "running" || !mouseDown) return;
       mouseDown = false;
-      dispatch({ type: "release" });
+      dispatch({ type: "release" }, "mouse");
+      // 돌리는 동안 건너뛴 hover를 포인터 아래에서 다시 고른다(움직이지 않고 놓아도 구가 밝아지게).
+      if (mousePoint && state.rotate === "none") hoverTo(pickAt(mousePoint));
     },
     leave() {
       if (phase !== "running") return;
@@ -598,11 +765,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       pointer.up();
       if (state.input === "mouse") hoverTo(null);
     },
+    wheel,
   };
 
   // ----- 처음 그림: 시작 화면 뒤로 전체 지도가 보인다.
   scene.setOverview(summary(), state.metric);
   renderer?.setMode("map", true);
+  // 회전기는 렌더 루프에서 진행한다. WebGL이 없으면(3D 없음) 틱 간격으로 진행해 관성이 멈추고 큰 화면도 따라간다.
+  if (renderer) stops.push(renderer.onFrame(frameTick));
   stops.push(narrator.onCaption((t) => setPart("caption", renderCaption(t))));
   stops.push(narrator.onBlocked(() => { if (phase !== "disposed") deps.toast(AUDIO_BLOCKED_TOAST); }));
   stops.push(deps.realtime.onStatus(() => renderTop()), deps.stageChannel.onStatus(() => renderTop()));
@@ -880,6 +1050,7 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
         return () => document.removeEventListener("visibilitychange", cb);
       },
       onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
+      reducedMotion: ctx.reducedMotion,
     });
     undo.push(() => controller.dispose());
 
@@ -905,7 +1076,15 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
       dom.parts.start.removeEventListener("click", onStart);
       dom.parts.vote.removeEventListener("click", onVote);
     });
-    undo.push(attachPointer(layer, controller.pointer));
+    // 휠은 deltaMode(줄·페이지 단위 장치)가 있어야 해서 attachPointer(deltaY만 넘김) 대신 여기서 받는다.
+    const { move, down, up, leave } = controller.pointer;
+    undo.push(attachPointer(layer, { move, down, up, leave }));
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault(); // 페이지가 스크롤·확대되지 않게(passive: false)
+      controller.pointer.wheel(ev.deltaY, ev.deltaMode);
+    };
+    layer.addEventListener("wheel", onWheel, { passive: false });
+    undo.push(() => layer.removeEventListener("wheel", onWheel));
     return teardown;
   } catch (err) {
     console.error("[stage] 무대 화면을 만들지 못함", err);

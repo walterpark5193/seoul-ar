@@ -6,13 +6,14 @@ import type { StateMessage } from "../realtime/types";
 import type { HandSource } from "../stage/hands/recognizer";
 import { createCursorMapper } from "../stage/hands/cursor";
 import { createVoteCounter } from "../stage/hands/voteCounter";
-import { ALLOWED_KEYS, type StageChannelMessage } from "../stage/net/messages";
+import { ALLOWED_KEYS, type StageChannelMessage, type StageMessage } from "../stage/net/messages";
+import { createRotator } from "../stage/rotate";
 import { createMockStageChannel } from "../stage/net/stageChannel";
 import { createNarrator, type AudioLike, type NarrationItem, type Narrator } from "../stage/narrator";
 import type { GestureName, HandFrame, HandObs, Point, Vec3 } from "../stage/types";
 import {
-  HAND_ERROR_LIMIT, HAND_START_TIMEOUT_MS, HEARTBEAT_MS, RESULT_GUARD_MS, VOTE_TICK_MS,
-  createStageController, normalizeKey, voteCandidates, voteTiming,
+  HAND_ERROR_LIMIT, HAND_START_TIMEOUT_MS, HEARTBEAT_MS, RESULT_GUARD_MS, VIEW_PUBLISH_MS, VOTE_TICK_MS,
+  createStageController, normalizeKey, orderGestureEvents, voteCandidates, voteTiming, wheelPixels,
   type StageControllerDeps, type StartResult, type UiPart,
 } from "./stageView";
 
@@ -91,6 +92,18 @@ function fakeScene(pick: (x: number, y: number) => string | null = () => "강남
   return {
     setOverview: vi.fn(), focus: vi.fn(), setHover: vi.fn(), lift: vi.fn(), setLayout: vi.fn(),
     pick: vi.fn((x: number, y: number) => pick(x, y)),
+    group: { rotation: { y: 0 } },
+  };
+}
+
+/** 렌더 루프 대신: render(dt)가 onFrame 구독자를 부른다(dt 초). */
+function fakeRenderer() {
+  const subs = new Set<(dt: number) => void>();
+  return {
+    camera: new PerspectiveCamera(), setMode: vi.fn(), setZoom: vi.fn(),
+    onFrame(cb: (dt: number) => void) { subs.add(cb); return () => { subs.delete(cb); }; },
+    render(dt: number) { for (const cb of [...subs]) cb(dt); },
+    get listeners() { return subs.size; },
   };
 }
 
@@ -203,6 +216,14 @@ function hand(gesture: GestureName, cx = 0.5, cy = 0.5, score = 0.9): HandObs {
   return { landmarks, gesture, score, handedness: "Right" };
 }
 
+/** 손바닥 폭이 두 배인 손(가장 큰 손으로 뽑힌다). 손바닥 중심은 같다. */
+function wideHand(gesture: GestureName, cx = 0.5, cy = 0.5): HandObs {
+  const h = hand(gesture, cx, cy);
+  h.landmarks[5] = [cx - 0.1, cy, 0];
+  h.landmarks[17] = [cx + 0.1, cy, 0];
+  return h;
+}
+
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 function setup(o: {
@@ -212,7 +233,7 @@ function setup(o: {
   const clock = fakeClock();
   const ch = channels();
   const scene = fakeScene(o.pick);
-  const renderer = { camera: new PerspectiveCamera(), setMode: vi.fn() };
+  const renderer = fakeRenderer();
   const narr = fakeNarrator();
   const view = fakeUi();
   const toast = vi.fn();
@@ -240,7 +261,28 @@ function setup(o: {
       clock.advance(step);
     }
   };
-  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, live, deps };
+  /** 손 프레임 + 렌더 한 번 + 시계를 step(ms)씩 함께 민다(카메라와 렌더 루프가 모두 도는 동안). */
+  const play = (ms: number, hands: HandObs[], step = 33) => {
+    for (let left = ms; left > 0; left -= step) {
+      const d = Math.min(step, left);
+      frame(hands, d);
+      renderer.render(d / 1000);
+      clock.advance(d);
+    }
+  };
+  /** 렌더 루프만 step(ms)씩(마우스 조작 사이의 시간). */
+  const glide = (ms: number, step = 16) => {
+    for (let left = ms; left > 0; left -= step) {
+      const d = Math.min(step, left);
+      renderer.render(d / 1000);
+      clock.advance(d);
+    }
+  };
+  const render = (dt = 1 / 60) => renderer.render(dt);
+  const yaw = () => scene.group.rotation.y;
+  /** 마지막으로 렌더러에 준 확대 배율(렌더 tick마다 준다). */
+  const zoom = () => renderer.setZoom.mock.calls.at(-1)?.[0] as number | undefined;
+  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, live, play, glide, render, yaw, zoom, deps };
 }
 
 describe("voteCandidates", () => {
@@ -317,7 +359,7 @@ describe("stage controller", () => {
     const [st, sg] = s.wire;
     expect(st!.msg).toEqual({ v: 1, type: "state", month: MONTH, gu: "강남구", metric: "price", ts: s.clock.now() });
     expect(Object.keys(st!.msg).sort()).toEqual([...STATE_KEYS].sort());
-    expect(sg!.msg).toEqual({ v: 1, type: "stage", mode: "map", lifted: null, ts: s.clock.now() });
+    expect(sg!.msg).toEqual({ v: 1, type: "stage", mode: "map", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1 });
     expect(Object.keys(sg!.msg).every((k) => ALLOWED_KEYS.stage.includes(k))).toBe(true);
     expect(s.loadGu).toHaveBeenCalledWith(MONTH, "강남구");
     await flush();
@@ -384,7 +426,7 @@ describe("stage controller", () => {
     expect(s.scene.setLayout).toHaveBeenLastCalledWith("spread", s.index.summary[MONTH], "price");
     expect(s.renderer.setMode).toHaveBeenLastCalledWith("spread");
     expect(s.narr.said.at(-1)).toEqual({ id: "spread-intro", interrupt: true, protect: false });
-    expect(s.wire.map((w) => w.msg)).toEqual([{ v: 1, type: "stage", mode: "spread", lifted: null, ts: s.clock.now() }]);
+    expect(s.wire.map((w) => w.msg)).toEqual([{ v: 1, type: "stage", mode: "spread", lifted: null, ts: s.clock.now(), yaw: 0, zoom: 1 }]);
     s.key(" ");
     expect(s.c.state.mode).toBe("map");
     expect(s.scene.setLayout).toHaveBeenLastCalledWith("map", s.index.summary[MONTH], "price");
@@ -1227,5 +1269,458 @@ describe("vote narration timing (F1)", () => {
     s.key("v");
     s.clock.advance(3770 + 2690 + 2000);
     expect(tn.log.map((e) => e.id).filter((id) => id.startsWith("vote-"))).toEqual(["vote-intro", "vote-intro", "vote-prompt-종로구"]);
+  });
+});
+
+describe("rotate and zoom (CONTRACTS-stage 13)", () => {
+  type S = ReturnType<typeof setup>;
+  /** 빈 곳에서 마우스로 x0 → x1 끌고, 멈췄다가 놓는다(관성 없음). */
+  const dragSlow = (s: S, x0: number, x1: number) => {
+    s.c.pointer.move({ x: x0, y: 0.5 });
+    s.c.pointer.down();
+    s.c.pointer.move({ x: (x0 + x1) / 2, y: 0.5 });
+    s.c.pointer.move({ x: x1, y: 0.5 });
+    s.glide(300);
+    s.c.pointer.up();
+  };
+  /** b가 a보다 얼마나 앞섰나((-π, π]로 감아서: yaw는 정규화돼 ±π에서 넘어간다). */
+  const turned = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+  /** 두 손 주먹(영상 x). 손바닥 중심의 화면 x = (1 - x - 0.1) / 0.8. */
+  const fists = (a: number, b: number) => [hand("Closed_Fist", a, 0.5), hand("Closed_Fist", b, 0.5)];
+
+  it("fist on empty drags rotation", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    s.frames(4, [hand("Open_Palm", 0.6, 0.5)]);
+    s.frames(6, [hand("Closed_Fist", 0.6, 0.5)]); // 빈 곳에서 주먹 확정
+    expect(s.c.state).toMatchObject({ rotate: "one", lifted: null, hover: null });
+    // 손을 화면 오른쪽으로 화면 폭의 1/4(영상 x는 거울이라 줄어든다) → 약 45°, 오른쪽이면 yaw 증가
+    for (let i = 1; i <= 10; i++) s.play(33, [hand("Closed_Fist", 0.6 - i * 0.02, 0.5)]);
+    s.play(500, [hand("Closed_Fist", 0.4, 0.5)]); // 쥔 채 멈추면 멈춘다(커서 필터가 따라붙는다)
+    expect(s.yaw()).toBeGreaterThan(Math.PI / 4 - 0.02);
+    expect(s.yaw()).toBeLessThan(Math.PI / 4 + 0.02);
+    s.play(300, [hand("Open_Palm", 0.4, 0.5)]); // 천천히 놓으면 그 각도에 남는다
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: false });
+    const held = s.yaw();
+    s.play(1000, [hand("Open_Palm", 0.4, 0.5)]);
+    expect(s.yaw()).toBe(held);
+    expect(s.scene.lift).not.toHaveBeenCalled();
+  });
+
+  it("flick then fist catches", async () => {
+    let under: string | null = null;
+    const s = setup({ pick: () => under });
+    await s.c.start("hands");
+    s.frames(4, [hand("Open_Palm", 0.8, 0.5)]);
+    s.frames(6, [hand("Closed_Fist", 0.8, 0.5)]);
+    expect(s.c.state.rotate).toBe("one");
+    let x = 0.8;
+    for (let i = 0; i < 6; i++) s.play(33, [hand("Closed_Fist", (x -= 0.04), 0.5)]);
+    // 밀면서 편다: 놓기가 확정되는 동안에도 손은 움직이고 있다
+    for (let i = 0; i < 8 && s.c.state.rotate === "one"; i++) s.play(33, [hand("Open_Palm", (x -= 0.04), 0.5)]);
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: true }); // 놓은 같은 차례에 spinState
+    const a = s.yaw();
+    s.play(500, [hand("Open_Palm", x, 0.5)]);
+    expect(turned(a, s.yaw())).toBeGreaterThan(0.5); // 놓은 뒤에도 관성으로 돈다(0.5초에 약 75°)
+    under = "강남구";
+    s.play(400, [hand("Open_Palm", x, 0.5)]); // 쿨다운(800ms)이 지난다
+    expect(s.c.state).toMatchObject({ spinning: true, hover: "강남구" }); // 관성 중에는 hover가 갱신된다
+    for (let i = 0; i < 8 && s.c.state.spinning; i++) s.play(33, [hand("Closed_Fist", x, 0.5)]);
+    // 구 위에서 쥐어도 잡기만 한다(들지 않음), 그대로 쥐고 있으면 이어서 돌릴 수 있다
+    expect(s.c.state).toMatchObject({ spinning: false, rotate: "one", lifted: null, hover: null });
+    expect(s.scene.lift).not.toHaveBeenCalled();
+    const caught = s.yaw();
+    s.render(0.5);
+    expect(s.yaw()).toBe(caught); // 그 자리에서 멈췄다
+  });
+
+  it("two fists rotate and zoom", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    s.frames(6, fists(0.4, 0.6)); // 화면 0.625·0.375: 중점 0.5, 거리 0.25
+    expect(s.c.state.rotate).toBe("two");
+    s.frame(fists(0.275, 0.525)); // 화면 0.78125·0.46875: 중점 +0.125 → 22.5°, 거리 0.3125 → 1.25배
+    s.render();
+    expect(s.yaw()).toBeCloseTo(Math.PI / 8, 9);
+    expect(s.zoom()).toBeCloseTo(1.25, 9);
+    s.frame(fists(0.32, 0.48)); // 화면 0.725·0.525: 중점 그대로, 거리 0.2 → 0.8배
+    s.render();
+    expect(s.yaw()).toBeCloseTo(Math.PI / 8, 9);
+    expect(s.zoom()).toBeCloseTo(0.8, 9);
+    s.play(300, fists(0.32, 0.48));
+    s.play(300, [hand("Closed_Fist", 0.32, 0.5), hand("Open_Palm", 0.48, 0.5)]); // 한 손을 펴면 끝
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: false, lifted: null });
+    s.render(0.5);
+    expect(s.yaw()).toBeCloseTo(Math.PI / 8, 9); // 각도·배율은 남는다
+    expect(s.zoom()).toBeCloseTo(0.8, 9);
+  });
+
+  it("three hands during a two-fist rotation do not jump yaw or zoom", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    s.frames(6, fists(0.4, 0.6));
+    s.frame(fists(0.275, 0.525));
+    s.render();
+    const y0 = s.yaw();
+    const z0 = s.zoom();
+    // 셋째 손(손바닥이 커서 둘째 손으로 뽑힌다)이 잠깐 보인다: 그 프레임들은 건너뛴다(끝내지도 않음)
+    s.frames(4, [wideHand("Open_Palm", 0.85, 0.3), ...fists(0.275, 0.525)]);
+    s.render();
+    expect(s.c.state.rotate).toBe("two");
+    expect(s.yaw()).toBe(y0);
+    expect(s.zoom()).toBe(z0);
+    s.frames(2, fists(0.275, 0.525)); // 두 손으로 돌아오면 같은 자리에서 이어진다
+    s.render();
+    expect(s.c.state.rotate).toBe("two");
+    expect(s.yaw()).toBeCloseTo(y0, 9);
+    expect(s.zoom()).toBeCloseTo(z0!, 9);
+  });
+
+  it("mouse drag rotates and wheel zooms", async () => {
+    let under: string | null = null;
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.2, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state).toMatchObject({ rotate: "one", lifted: null });
+    s.c.pointer.move({ x: 0.45, y: 0.5 });
+    s.c.pointer.move({ x: 0.7, y: 0.5 }); // 화면 폭의 절반 → 90°
+    s.render();
+    expect(s.yaw()).toBeCloseTo(Math.PI / 2, 9);
+    s.glide(300); // 멈췄다 떼면 관성 없음
+    s.c.pointer.up();
+    expect(s.c.state).toMatchObject({ rotate: "none", spinning: false });
+    s.render(0.5);
+    expect(s.yaw()).toBeCloseTo(Math.PI / 2, 9);
+    s.c.pointer.wheel(-100); // 위로 한 칸: 확대
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    s.c.pointer.wheel(100);
+    s.c.pointer.wheel(100); // 아래로 두 칸: 축소
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1 / 1.1, 9);
+    // 빠르게 끌다 떼면 관성, 도는 중 클릭은 잡기만 한다(구 위여도 들지 않음)
+    s.c.pointer.down();
+    for (let i = 1; i <= 6; i++) {
+      s.c.pointer.move({ x: 0.7 - i * 0.05, y: 0.5 });
+      s.glide(16);
+    }
+    s.c.pointer.up();
+    expect(s.c.state.spinning).toBe(true);
+    const a = s.yaw();
+    s.glide(100);
+    expect(turned(a, s.yaw())).toBeLessThan(0); // 왼쪽으로 밀었으니 yaw가 줄며 돈다
+    under = "강남구";
+    s.c.pointer.move({ x: 0.4, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state).toMatchObject({ spinning: false, rotate: "one", lifted: null });
+    const caught = s.yaw();
+    s.render(0.5);
+    expect(s.yaw()).toBe(caught);
+    s.c.pointer.up();
+    expect(s.c.state.hover).toBe("강남구"); // 놓으면 포인터 아래 구를 다시 고른다
+    expect(s.scene.lift).not.toHaveBeenCalled();
+  });
+
+  it("spread resets yaw to 0", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    dragSlow(s, 0.2, 0.7);
+    s.c.pointer.wheel(-100);
+    s.render();
+    expect(s.yaw()).toBeCloseTo(Math.PI / 2, 9);
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    s.key(" ");
+    expect(s.c.state).toMatchObject({ mode: "spread", rotate: "none", spinning: false });
+    s.render(0.3); // 부드럽게 정면으로
+    expect(s.yaw()).toBeGreaterThan(0);
+    expect(s.yaw()).toBeLessThan(Math.PI / 2);
+    s.render(0.4);
+    expect(s.yaw()).toBe(0);
+    expect(s.zoom()).toBe(1);
+    // 펼친 화면에서는 끌기·휠이 돌리거나 확대하지 않는다
+    s.c.pointer.move({ x: 0.2, y: 0.5 });
+    s.c.pointer.down();
+    s.c.pointer.move({ x: 0.8, y: 0.5 });
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.c.state.rotate).toBe("none");
+    expect(s.yaw()).toBe(0);
+    expect(s.zoom()).toBe(1);
+    s.c.pointer.up();
+
+    // 움직임 줄이기: 정면 복귀가 즉시
+    const r = setup({ pick: () => null, extra: { reducedMotion: true } });
+    await r.c.start("mouse");
+    dragSlow(r, 0.2, 0.7);
+    r.render();
+    expect(r.yaw()).toBeCloseTo(Math.PI / 2, 9);
+    r.key(" ");
+    r.render(0.001);
+    expect(r.yaw()).toBe(0);
+  });
+
+  it("victory resets rotated map", async () => {
+    const rotator = createRotator();
+    const reset = vi.spyOn(rotator, "reset");
+    const s = setup({ pick: () => null, extra: { rotator } });
+    await s.c.start("mouse");
+    dragSlow(s, 0.2, 0.7);
+    s.c.pointer.wheel(-100);
+    s.render();
+    // 돌리기만 한 지도: 상태는 처음과 같다(focus·lifted 없음, 잡기·관성 없음)
+    expect(s.c.state).toMatchObject({ mode: "map", rotate: "none", spinning: false, focus: null, lifted: null, vote: null });
+    expect(s.yaw()).toBeCloseTo(Math.PI / 2, 9);
+    s.key("Escape");
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenLastCalledWith(false);
+    s.render(0.7);
+    expect(s.yaw()).toBe(0);
+    expect(s.zoom()).toBe(1);
+  });
+
+  it("rotation publishes at most 5Hz with yaw zoom", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    s.glide(1000); // 시작 발행에서 충분히 지났다
+    s.wire.length = 0;
+    const sent = () => s.wire.filter((w) => w.msg.type === "stage").map((w) => w.msg as StageMessage);
+    s.c.pointer.move({ x: 0.1, y: 0.5 });
+    s.c.pointer.down();
+    expect(sent()).toHaveLength(0); // 빈 곳 잡기만으로는 보내지 않는다
+    const start = s.clock.now();
+    for (let i = 1; i <= 60; i++) { // 약 1초 동안 매 렌더마다 조금씩 끈다
+      s.c.pointer.move({ x: 0.1 + i * 0.005, y: 0.5 });
+      s.glide(16);
+    }
+    const during = sent();
+    expect(during[0]!.ts).toBe(start); // 처음 바뀐 렌더에서 바로(앞쪽)
+    expect(during.length).toBeLessThanOrEqual(Math.floor((s.clock.now() - start) / VIEW_PUBLISH_MS) + 1);
+    expect(during.length).toBeGreaterThanOrEqual(4);
+    for (let i = 1; i < during.length; i++) expect(during[i]!.ts - during[i - 1]!.ts).toBeGreaterThanOrEqual(VIEW_PUBLISH_MS);
+    for (const m of during) {
+      expect(m).toMatchObject({ mode: "map", lifted: null, zoom: 1 });
+      expect(m.yaw).toBeGreaterThan(0);
+      expect(Object.keys(m).every((k) => ALLOWED_KEYS.stage.includes(k))).toBe(true);
+    }
+    // 멈추면 마지막 각도로 한 번 더, 그 뒤로는 조용하다
+    s.glide(1000);
+    const all = sent();
+    expect(all).toHaveLength(during.length + 1);
+    expect(all.at(-1)!.yaw).toBe(s.yaw());
+    expect(all.at(-1)!.ts - during.at(-1)!.ts).toBeGreaterThanOrEqual(VIEW_PUBLISH_MS);
+    s.c.pointer.up();
+    s.glide(1000);
+    expect(sent()).toHaveLength(all.length);
+    // 휠 확대도 같은 길로 나간다
+    s.c.pointer.wheel(-100);
+    s.glide(16);
+    expect(sent().at(-1)).toMatchObject({ yaw: s.yaw(), zoom: s.zoom() });
+    expect(s.zoom()).toBeCloseTo(1.1, 9);
+    // 하트비트에도 각도·배율이 실린다
+    s.wire.length = 0;
+    s.clock.advance(HEARTBEAT_MS);
+    expect(sent().at(-1)).toMatchObject({ yaw: s.yaw(), zoom: s.zoom() });
+    await flush();
+    expect(s.c.publishFailed).toBe(false); // 모의 채널(toWire)이 모두 받아들였다
+  });
+
+  it("no hover while rotating", async () => {
+    let under: string | null = null;
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.2, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state.rotate).toBe("one");
+    under = "강남구";
+    s.scene.pick.mockClear();
+    s.c.pointer.move({ x: 0.4, y: 0.5 });
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    expect(s.scene.pick).not.toHaveBeenCalled();
+    expect(s.c.state.hover).toBeNull();
+    expect(s.scene.setHover).not.toHaveBeenCalledWith("강남구");
+    s.c.pointer.up();
+    expect(s.c.state.hover).toBe("강남구");
+
+    // 손: 주먹으로 돌리는 동안 커서가 구 위를 지나도 고르지 않는다
+    let below: string | null = null;
+    const h = setup({ pick: () => below });
+    await h.c.start("hands");
+    h.frames(6, [hand("Closed_Fist", 0.6, 0.5)]);
+    expect(h.c.state.rotate).toBe("one");
+    below = "강남구";
+    h.scene.pick.mockClear();
+    h.frames(6, [hand("Closed_Fist", 0.5, 0.5)]);
+    expect(h.scene.pick).not.toHaveBeenCalled();
+    expect(h.c.state.hover).toBeNull();
+    expect(h.view.cursors.at(-1)!.cls).not.toContain("is-hover");
+    h.frames(8, [hand("Open_Palm", 0.5, 0.5)]); // 놓으면 다음 프레임부터 다시 고른다
+    expect(h.c.state.rotate).toBe("none");
+    h.frame([hand("Open_Palm", 0.5, 0.5)]);
+    expect(h.c.state.hover).toBe("강남구");
+  });
+
+  it("lifted blocks rotation", async () => {
+    const s = setup(); // 어디든 강남구
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.2, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state.lifted).toBe("강남구");
+    s.c.pointer.move({ x: 0.9, y: 0.5 });
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.c.state.rotate).toBe("none");
+    expect(s.yaw()).toBe(0);
+    expect(s.zoom()).toBe(1);
+    s.c.pointer.up();
+    expect(s.c.state.focus).toBe("강남구");
+    // 투표 중에도 휠은 확대하지 않는다
+    s.key("v");
+    s.c.pointer.wheel(-300);
+    s.render();
+    expect(s.zoom()).toBe(1);
+
+    // 손: 구 위 주먹은 들어올리기, 든 채 끌어도 돌지 않는다
+    const h = setup();
+    await h.c.start("hands");
+    h.frames(6, [hand("Closed_Fist", 0.6, 0.5)]);
+    expect(h.c.state).toMatchObject({ lifted: "강남구", rotate: "none" });
+    h.play(400, [hand("Closed_Fist", 0.3, 0.5)]);
+    expect(h.yaw()).toBe(0);
+  });
+
+  it("wheel trackpad burst steps at most once per 100 units", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("mouse");
+    const z = () => { s.render(); return s.zoom(); };
+    for (let i = 0; i < 24; i++) s.c.pointer.wheel(-4); // 트랙패드: 작은 값이 몰려 온다(96)
+    expect(z()).toBe(1);
+    for (let i = 0; i < 6; i++) s.c.pointer.wheel(-4); // 120 → 한 단계
+    expect(z()).toBeCloseTo(1.1, 9);
+    for (let i = 0; i < 20; i++) s.c.pointer.wheel(-4); // 200 → 두 단계
+    expect(z()).toBeCloseTo(1.21, 9);
+    s.c.pointer.wheel(-60);
+    s.c.pointer.wheel(50); // 방향이 바뀌면 새로 센다
+    expect(z()).toBeCloseTo(1.21, 9);
+    s.c.pointer.wheel(50); // 100 → 축소 한 단계
+    expect(z()).toBeCloseTo(1.1, 9);
+    // 줄 단위(deltaMode 1, ×16)
+    s.c.pointer.wheel(-3, 1);
+    s.c.pointer.wheel(-3, 1); // 96
+    expect(z()).toBeCloseTo(1.1, 9);
+    s.c.pointer.wheel(-3, 1); // 144 → 한 단계
+    expect(z()).toBeCloseTo(1.21, 9);
+    // 페이지 단위(deltaMode 2, ×800): 여덟 단계지만 0.7에서 멈춘다
+    s.c.pointer.wheel(1, 2);
+    expect(z()).toBeCloseTo(0.7, 9);
+  });
+
+  it("twoFist over a gu rotates without lifting", async () => {
+    const s = setup(); // 어디든 강남구
+    await s.c.start("hands");
+    s.frames(3, [hand("Open_Palm", 0.4, 0.5)]);
+    expect(s.c.state.hover).toBe("강남구");
+    const said = s.narr.said.length;
+    s.wire.length = 0;
+    // 두 손이 같은 프레임에 주먹이 된다: grab과 twoFist가 함께 나도 두 주먹이 먼저라 구를 들지 않는다
+    s.frames(6, fists(0.4, 0.6));
+    expect(s.c.state).toMatchObject({ rotate: "two", lifted: null, focus: null, hover: null });
+    expect(s.scene.lift).not.toHaveBeenCalled();
+    expect(s.narr.said.slice(said)).toEqual([]);
+    expect(s.wire).toHaveLength(0); // 들었다 내린 깜빡임도 나가지 않는다
+
+    // 한 손 주먹으로 든 뒤 다른 손도 주먹: 든 구는 고르지 않은 채 내려가고 돌린다(리듀서 규칙)
+    const t = setup();
+    await t.c.start("hands");
+    t.frames(6, [hand("Closed_Fist", 0.4, 0.5)]);
+    expect(t.c.state.lifted).toBe("강남구");
+    t.frames(6, fists(0.4, 0.7));
+    expect(t.c.state).toMatchObject({ rotate: "two", lifted: null, focus: null });
+    expect(t.scene.lift).toHaveBeenLastCalledWith(null);
+    t.frame(fists(0.3, 0.6)); // 둘 다 화면 오른쪽으로 0.125 → 22.5°
+    t.render();
+    expect(t.yaw()).toBeCloseTo(Math.PI / 8, 9);
+  });
+
+  it("primary null blocks grabTwo", async () => {
+    const rotator = createRotator();
+    const grabTwo = vi.spyOn(rotator, "grabTwo");
+    const moveTwo = vi.spyOn(rotator, "moveTwo");
+    const s = setup({ pick: () => null, extra: { rotator } });
+    await s.c.start("hands");
+    s.frames(3, [hand("Open_Palm", 0.5, 0.5)]); // 주 손을 기억한다(300ms)
+    // 기억한 손목에서 먼 두 주먹: 기억하는 동안 주 손은 null, 둘째 손만 있다
+    const far = fists(0.15, 0.85);
+    s.frames(6, far); // 198ms: twoFist
+    expect(s.c.state.rotate).toBe("two");
+    s.frames(3, far); // 297ms: 아직 주 손 없음
+    expect(grabTwo).not.toHaveBeenCalled();
+    expect(moveTwo).not.toHaveBeenCalled();
+    s.render();
+    expect(s.yaw()).toBe(0);
+    s.frame(far); // 330ms: 기억이 끝나 가장 큰 손이 주 손 → 두 손이 다 있어 이제 잡는다
+    expect(grabTwo).toHaveBeenCalledTimes(1);
+    s.frame(fists(0.1, 0.8));
+    expect(moveTwo).toHaveBeenCalledTimes(1);
+    s.render();
+    expect(s.yaw()).toBeCloseTo(0.0625 * Math.PI, 9); // 중점 0.5 → 0.5625
+  });
+
+  it("a doubly-detected hand does not become a near-zero zoom baseline", async () => {
+    const rotator = createRotator();
+    const grabTwo = vi.spyOn(rotator, "grabTwo");
+    const s = setup({ pick: () => null, extra: { rotator } });
+    await s.c.start("hands");
+    s.frames(6, fists(0.5, 0.505)); // 같은 주먹이 두 번 잡혔다: twoFist는 나지만 잡지 않는다
+    expect(s.c.state.rotate).toBe("two");
+    expect(grabTwo).not.toHaveBeenCalled();
+    s.frame(fists(0.4, 0.6)); // 진짜 두 손: 이 거리를 기준으로 잡는다(1.6배로 튀지 않음)
+    expect(grabTwo).toHaveBeenCalledTimes(1);
+    s.render();
+    expect(s.zoom()).toBe(1);
+    s.frame(fists(0.375, 0.625)); // 거리 0.25 → 0.3125
+    s.render();
+    expect(s.zoom()).toBeCloseTo(1.25, 9);
+  });
+
+  it("without WebGL the vote tick drives the rotator; dispose stops the render loop subscription", async () => {
+    const s = setup({ extra: { renderer: null } }); // pick 없음 → 어디서나 빈 곳
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.2, y: 0.5 });
+    s.c.pointer.down();
+    for (let i = 1; i <= 6; i++) { s.c.pointer.move({ x: 0.2 + i * 0.05, y: 0.5 }); s.clock.advance(16); }
+    s.c.pointer.up();
+    s.clock.advance(VOTE_TICK_MS);
+    expect(s.c.state.spinning).toBe(true); // 틱에서 spinState
+    s.clock.advance(5000);
+    expect(s.c.state.spinning).toBe(false); // 관성이 끝난다
+    expect(s.scene.group.rotation.y).not.toBe(0);
+    const r = setup();
+    expect(r.renderer.listeners).toBe(1);
+    r.c.dispose();
+    expect(r.renderer.listeners).toBe(0);
+  });
+
+  it("wheelPixels and orderGestureEvents", () => {
+    expect(wheelPixels(-4)).toBe(-4);
+    expect(wheelPixels(3, 1)).toBe(48);
+    expect(wheelPixels(-1, 2)).toBe(-800);
+    expect(orderGestureEvents([{ type: "grab" }, { type: "twoFist" }])).toEqual([{ type: "twoFist" }, { type: "grab" }]);
+    expect(orderGestureEvents([{ type: "release" }, { type: "grab" }, { type: "twoFist" }, { type: "spread" }]))
+      .toEqual([{ type: "release" }, { type: "twoFist" }, { type: "grab" }, { type: "spread" }]);
+    expect(orderGestureEvents([{ type: "grab" }])).toEqual([{ type: "grab" }]);
+    expect(orderGestureEvents([{ type: "twoFistEnd" }, { type: "twoFist" }])).toEqual([{ type: "twoFistEnd" }, { type: "twoFist" }]);
+  });
+
+  it("two fists held through the end of a camera vote do not rotate on the result screen", async () => {
+    const s = setup({ pick: () => null });
+    await s.c.start("hands");
+    const two = fists(0.4, 0.6);
+    s.key("v");
+    for (let k = 0; k < 2000 && s.c.state.vote?.phase !== "result"; k++) s.live(33, two);
+    expect(s.c.state.vote?.phase).toBe("result");
+    s.live(RESULT_GUARD_MS - 100, two); // 결과 직후 1.5초는 twoFist도 받지 않는다(그 뒤에는 래치로 다시 나지 않는다)
+    expect(s.c.state.rotate).toBe("none");
+    expect(s.c.state.vote?.phase).toBe("result");
   });
 });
