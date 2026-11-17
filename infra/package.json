@@ -5,7 +5,7 @@
   "type": "commonjs",
   "bin": { "seoul-ar-infra": "bin/app.js" },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "synth": "cdk synth --strict",
     "deploy": "cdk deploy --require-approval never --outputs-file cdk-outputs.json",
     "destroy": "cdk destroy"
