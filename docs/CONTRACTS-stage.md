@@ -268,7 +268,7 @@ export const NARRATION_IDS; // 3.2와 같은 구조(JS)
 export const NATIVE_COUNT = ["", "한", "두", "세", "네", "다섯", "여섯"];
 // tools/narration/facts.mjs
 export function buildFacts(index, guDataByName, month); // → Facts[] (GU_ORDER 순)
-// Facts = { gu, month, n, cancelled, medPerM2, rankPrice, maxAmt, topDong, topDongMedPerM2, totalGus: 25 }
+// Facts = { gu, month, n, cancelled, medPerM2, rankPrice, maxAmt, topDong, topDongMedPerM2, topDongBasis: "min3" | "maxN" | null, totalGus: 25 }  (TOP_DONG_MIN_N = 3)
 // rankPrice: medPerM2 내림차순 1부터(null이면 null). topDong: dongs 중 n≥3인 것의 medPerM2 최대(없으면 n 최대, 그것도 없으면 null)
 // tools/narration/templates.mjs
 export function templateLines(gus, month); // → { id, caption, speech }[] : 고정 4 + prompt 25 + result 150 + none 25 = 204
@@ -282,7 +282,7 @@ export function allowedNumbers(facts);              // 자막에 허용되는 �
 export function validateScript(facts, script);      // → { ok, errors: string[] }
 export function fallbackScript(facts);              // 템플릿 해설(데이터 없음 포함)
 export async function writeScripts(factsList, { client, modelId, retries = 2, log });
-// → { items: { [id]: { caption, speech, source: "bedrock" | "template" } }, failures: string[] }
+// → { items: { [id]: { caption, speech, source: "bedrock" | "template" | "edited" } }, failures: string[] }  ("edited" = 사람이 고친 문장)
 // CLI: node tools/narration/write.mjs --data frontend/public/data --month 202611 --out tools/narration/scripts.json
 // tools/narration/synth.mjs  (Polly)
 export function speechHash(text, voice, engine);    // sha1 hex 앞 16자
@@ -292,7 +292,7 @@ export async function synthAll(lines, { client, outDir, voice = "Seoyeon", engin
 // hash는 실제 사용 엔진 기준으로 기록, 건너뛰기 비교는 요청 엔진 기준(대체 항목은 다음 실행에 generative 재시도). CLI는 이전 manifest와 병합, --scripts를 못 읽으면 exit 1(Ruling)
 // CLI: node tools/narration/synth.mjs --scripts tools/narration/scripts.json --data frontend/public/data --month 202611 --out frontend/public/narration
 ```
-- 5.4 문장 규칙: 존댓말 두 문장, caption 90자 이내, 사실표 숫자만, 건물명·지번·본번·부번 금지, 투자 권유·과장("폭등", "대박", "꼭 사야") 금지, 데이터 없음(n 0)이면 "이번 달 거래가 없었습니다" 취지.
+- 5.4 문장 규칙: 존댓말 두 문장, caption 90자 이내, 사실표 숫자만, 건물명·지번·본번·부번 금지, 투자 권유·과장("폭등", "대박", "꼭 사야") 금지, 데이터 없음(n 0)이면 "이번 달 거래가 없었습니다" 취지. 동 서술: topDongBasis가 "min3"이면 "거래 3건 이상인 동 가운데" 단서를 반드시 붙이고, "maxN"·null이면 동 이름을 쓰지 않는다(validateScript가 거절)(Ruling, Task 20 리뷰).
 - `allowedNumbers`: n, cancelled, rankPrice, totalGus(25), medPerM2·topDongMedPerM2(쉼표 형식과 원형), maxAmt를 억 단위 소수 첫째 자리(예 52.6)와 원형, 월 표기(2026, 11). 자막 속 숫자 토큰(`\d[\d,]*(\.\d+)?`)이 전부 이 집합에 있어야 ok.
 - 실제 호출은 `@aws-sdk/client-bedrock-runtime`의 `ConverseCommand`, `@aws-sdk/client-polly`의 `SynthesizeSpeechCommand`(`OutputFormat: "mp3"`, `LanguageCode: "ko-KR"`, `AudioStream.transformToByteArray()`). region us-east-1. 테스트는 가짜 client(`send`)를 주입한다.
 
