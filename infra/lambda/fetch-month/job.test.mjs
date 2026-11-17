@@ -56,6 +56,7 @@ describe("acquireLock / releaseLock", () => {
     assert.equal(out.ok, false);
     assert.equal(out.holder.jobId, "old");
     assert.equal(out.holder.month, "202609");
+    assert.equal(out.holder.kind, null);
     assert.equal(store.json(LOCK_KEY).jobId, "old");
   });
 
@@ -90,6 +91,14 @@ describe("acquireLock / releaseLock", () => {
     const out = await acquireLock(store, { jobId: "j6", month: "202610", nowMs: NOW });
     assert.equal(out.ok, false);
     assert.equal(store.json(LOCK_KEY).jobId, "rival");
+  });
+
+  test("kind 를 주면 잠금에 남기고 보유자 정보로 돌려준다", async () => {
+    const store = fakeStore();
+    await acquireLock(store, { jobId: "n1", month: "202611", nowMs: NOW, kind: "narration" });
+    assert.equal(store.json(LOCK_KEY).kind, "narration");
+    const out = await acquireLock(store, { jobId: "x", month: "202610", nowMs: NOW });
+    assert.deepEqual(out, { ok: false, holder: { jobId: "n1", month: "202611", kind: "narration" } });
   });
 
   test("S3 오류는 그대로 올린다", async () => {

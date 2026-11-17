@@ -114,10 +114,10 @@ test("makeDefaultDeps: 런타임 내장 SDK 네 개를 불러 엮는다", async 
 
 test("bedrockConverser: Converse 요청 모양, 응답 텍스트 이어 붙이기, 타임아웃 signal", async () => {
   const sent = [];
-  const client = { send: async (cmd, opts) => { sent.push({ cmd, opts }); return { output: { message: { content: [{ text: '{"a":' }, { text: ' "b"}' }] } } }; } };
+  const client = { send: async (cmd, opts) => { sent.push({ cmd, opts }); return { stopReason: "end_turn", output: { message: { content: [{ text: '{"a":' }, { text: ' "b"}' }] } } }; } };
   const converse = bedrockConverser({ client, ConverseCommand: command("Converse") });
-  const text = await converse({ modelId: "anthropic.claude-haiku-5-5", system: "규칙", prompt: "질문", maxTokens: 400 });
-  assert.equal(text, '{"a": "b"}');
+  const out = await converse({ modelId: "anthropic.claude-haiku-5-5", system: "규칙", prompt: "질문", maxTokens: 400 });
+  assert.deepEqual(out, { text: '{"a": "b"}', stopReason: "end_turn" });
   assert.deepEqual(sent[0].cmd.input, {
     modelId: "anthropic.claude-haiku-5-5",
     system: [{ text: "규칙" }],
@@ -133,7 +133,7 @@ test("makeDefaultDeps: Bedrock 런타임은 첫 converse 때만 불러온다(API
   const anyModule = new Proxy({}, { get: (_, name) => (name === "then" ? undefined : String(name).endsWith("Client") ? Client : command(String(name))) });
   const deps = await makeDefaultDeps({ BUCKET: "b" }, { importModule: async (n) => { imported.push(n); return anyModule; } });
   assert.equal(imported.includes("@aws-sdk/client-bedrock-runtime"), false);
-  assert.equal(await deps.converse({ modelId: "m", system: "s", prompt: "p", maxTokens: 10 }), "ok");
+  assert.equal((await deps.converse({ modelId: "m", system: "s", prompt: "p", maxTokens: 10 })).text, "ok");
   assert.equal(imported.filter((n) => n === "@aws-sdk/client-bedrock-runtime").length, 1);
   await deps.converse({ modelId: "m", system: "s", prompt: "p", maxTokens: 10 });
   assert.equal(imported.filter((n) => n === "@aws-sdk/client-bedrock-runtime").length, 1);

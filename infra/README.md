@@ -75,7 +75,8 @@ unset SEOUL_API_KEY PRESENTER_PASSCODE
 
 보안 권장:
 - 서울 API 는 HTTP 로만 열려 있다(확인함: 8088 포트는 TLS 핸드셰이크가 실패하고 443 은 응답하지 않는다). 그래서 키가 `openapi.seoul.go.kr` 까지 평문으로 간다. **이 앱 전용 키**를 발급해 쓰고 행사가 끝나면 **폐기·재발급**한다.
-- 발표자 암호는 **12자 이상**으로 정한다. 같은 접속(IP)에서 10분 안에 10번 틀리면 10분 동안 429 로 막는다(아래 표).
+- 발표자 암호는 **12자 이상**으로 정한다. 같은 접속(IP, IPv6 는 /64)에서 10분 안에 10번 시도해 틀리면 10분 동안 429 로 막는다(아래 표).
+- 행사장 와이파이처럼 관객과 같은 공인 IP(NAT)를 쓰면, 관객 누군가가 10번 틀려도 발표자까지 10분 막힌다. 발표자는 **휴대폰 핫스폿** 같은 다른 회선을 쓰고, 암호는 **처음부터 정확히** 넣는다.
 
 ### 2. 엔드포인트 `POST /api/fetch-month` (와 `POST /api/narrate-month`, 7절)
 
@@ -89,7 +90,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 | 400 | `{"error": "bad_month" \| "bad_request", "message"}` | YYYYMM 형식, 200601 이상, 한국 시간 이번 달 이하가 아님 / 본문이 JSON 이 아님 |
 | 401 | `{"error": "unauthorized", "message"}` | 암호 헤더 없음 또는 불일치(sha256 다이제스트를 `timingSafeEqual` 로 비교). 월 검사보다 먼저 |
 | 409 | `{"error": "busy", "message", "jobId"?, "month"?}` | 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시) |
-| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속 IP 에서 10분 안에 암호를 10번 틀림 → 10분 잠금. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`), 기록은 `data/jobs/_auth/<sha256(ip)>.json`(no-store), 맞히면 초기화. 기록 저장소 오류는 통과(fail-open) |
+| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: `data/jobs/_auth/<HMAC-SHA256(ip, sha256(발표자 암호))>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). API 함수는 동시 실행 2개로 제한(병렬 대입 상한) |
 | 405 / 500 | `{"error", "message"}` | POST 아님 / 설정·잠금·작업자 호출 실패 |
 
 `message` 는 모두 한국어 한 문장이고 키·URL 이 없다.
@@ -98,7 +99,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 
 Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch)를 쓴다.
 
-- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → IP 잠금(429) → 암호(401, 60초 캐시) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
+- `FetchMonthApi` (Function URL, 256 MB, 15 초, 동시 실행 2): 경로·메서드 → 암호 읽기(60초 캐시) → 시도 셈(잠금이면 429, 기록 실패면 401) → 암호 비교(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
 - `SeoulArStack-FetchMonthWorker` (512 MB, 600 초, 비동기 재시도 0, 5분 안에 시작 못 한 이벤트는 버림): 페이로드 `{jobId, month}`.
   1. SSM 에서 서울 API 키를 읽는다.
   2. 25구를 동시에 4개씩: `RCPT_YR = month[:4]`, `CGG_NM = 구` 로 1000건씩 페이지 호출. 페이지가 1000건 미만이거나, 페이지의 **가장 최근** `CTRT_DAY` 가 그 달 1일보다 앞서거나(정렬 순서가 확인되지 않아 페이지 전체가 지난 뒤에만 멈춘다), `list_total_count` 에 닿거나, 30페이지면 멈춘다. `CTRT_DAY[:6] === month` 인 행만 남긴다. `INFO-200` 은 빈 결과. 네트워크·429·5xx·형식 오류는 1.5초 쉬고 한 번 다시 시도한다. 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다.
@@ -140,9 +141,11 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 
 달마다 `data/{month}/narration.json`(`{v, month, generatedAt, model, items}`, `Cache-Control: no-cache`)을 만든다. 키는 `"서울 전체"`와 25구, 값은 한국어 한 문장(80자 이내).
 
-- 언제: (a) 월 수집이 `done` 된 뒤 같은 작업자 호출 안에서 자동으로(수집 잠금은 이미 풀린 뒤라 잠금 없이 돈다. narration.json 만 쓰고 index 는 건드리지 않는다. 진행은 `/seoul/jobs` 에 `kind: "narration"`, jobId `{수집 jobId}-narration`, 기록 `data/jobs/{그 jobId}.json`). 실패해도 수집 결과는 그대로다. (b) 이미 있는 달은 `POST /api/narrate-month` `{"month"}` + `x-presenter-key` → 202 `{jobId, month}`. 검사와 잠금은 fetch-month 와 같고, index 에 없는 달이면 400 `no_data`.
-- 어떻게: Bedrock Converse 로 한 번에 26개를 JSON 으로 받고, 코드로 검증한다(80자, 줄바꿈 없음, 금지어 `추천|매수|매도|사세요|팔세요|오를|내릴|전망|유망|투자하`, 번지·지번 숫자, 키 유효성). 누락·실패 항목만 구별로 1회 다시 만들고, 그래도 안 되면 그 키를 뺀다. 한 작업 호출은 30회 이하(보통 1회, 최대 27회). 입력은 집계 숫자(구별 total, ㎡당 상위 법정동 3개, 서울 합계)뿐이다.
-- 모델: env `BEDROCK_MODEL_ID`, 기본 `anthropic.claude-haiku-5-5`. 바꾸려면 `npx cdk deploy -c bedrockModelId=<ID>`(예: `us.anthropic.claude-haiku-4-5-20251001-v1:0`). on-demand 호출이 안 되는 모델이면 작업자가 `us.` 인퍼런스 프로파일로 한 번 바꿔 부르고, 실제로 쓴 ID 를 `model` 에 적는다.
+- 언제: (a) 월 수집이 `done` 된 뒤 같은 작업자 호출 안에서 자동으로(수집 잠금을 푼 뒤 `{수집 jobId}-narration` 으로 다시 잠근다. 그동안 "해설 생성"은 409 "{월} 해설을 만드는 중입니다". 다른 작업이 잠금을 잡고 있으면 자동 해설은 건너뛴다. 진행은 `/seoul/jobs` 에 `kind: "narration"`, jobId `{수집 jobId}-narration`, 기록 `data/jobs/{그 jobId}.json`). 실패해도 수집 결과는 그대로다. (b) 이미 있는 달은 `POST /api/narrate-month` `{"month"}` + `x-presenter-key` → 202 `{jobId, month}`. 검사와 잠금은 fetch-month 와 같고, index 에 없는 달이면 400 `no_data`.
+- 어떻게: Bedrock Converse 로 한 번에 26개를 JSON 으로 받고, 코드로 검증한다(80자, 줄바꿈 없음, 금지어 `추천|매수|매도|사세요|팔세요|오를|내릴|전망|유망|투자하`, 번지·지번 숫자, 한글이 있어야 함, `{`·`"` 로 시작하는 JSON 조각·`<키>:` 조각·"죄송" 거절 문구는 거름, 키 유효성). 누락·실패 항목만 구별로 1회 다시 만들고, 그래도 안 되면 그 키를 뺀다. 한 작업 호출은 30회 이하(보통 1회, 최대 27회). 입력은 집계 숫자(구별 total, ㎡당 상위 법정동 3개, 서울 합계)뿐이다. 일괄 응답의 `stopReason` 을 로그에 남기고 `max_tokens` 면 잘렸다고 경고한다.
+- 읽지 못한(없거나 깨진) 구 파일은 "거래 없음"으로 지어내지 않고 그 키를 뺀다. 구가 하나라도 빠지면 서울 합계가 틀리므로 "서울 전체"도 뺀다.
+- 재시도 중 제한 시간(남은 90초)에 걸리면 거기서 멈추고 지금까지 통과한 항목만 저장한 뒤 `done`(빠진 키 이름을 `message` 로)을 알린다.
+- 모델: env `BEDROCK_MODEL_ID`, 기본 `us.anthropic.claude-haiku-5-5`(인퍼런스 프로파일. 이 계정·리전에서 실제 Converse 로 확인: 기반 모델 ID `anthropic.claude-haiku-5-5` 는 on-demand 호출이 안 된다). 바꾸려면 `npx cdk deploy -c bedrockModelId=<ID>`(예: `us.anthropic.claude-haiku-4-5-20251001-v1:0`). on-demand 호출이 안 되는 모델이면 작업자가 `us.` 인퍼런스 프로파일로 한 번 바꿔 부르고, 실제로 쓴 ID 를 `model` 에 적는다.
 - IAM: 작업자만 `bedrock:InvokeModel`, 대상은 `arn:aws:bedrock:*::foundation-model/<기반 모델>` 과 `arn:aws:bedrock:us-east-1:<계정>:inference-profile/us.<기반 모델>` 둘뿐. 공개 함수(API)에는 Bedrock 권한이 없다.
 - 계정에서 그 모델 접근이 막혀 있으면 작업은 `error`("Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요")로 끝난다. Bedrock 콘솔 Model access 에서 Anthropic Claude Haiku 를 켠다(처음이면 사용 목적 양식).
 
@@ -152,4 +155,4 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 - 접수연도(`RCPT_YR`)로 거르므로, 11·12월에 계약하고 다음 해에 신고한 거래는 빠진다. 다음 해까지 뒤지면 그 해 전체를 넘겨야 해서 하지 않고, `done` 메시지로 알린다.
 - 거래가 많은 오래된 달은 30페이지(30,000건, 접수연도 전체 기준) 안에 다 못 받을 수 있다. 그 구는 `truncated: true` 가 되고 `done` 메시지에 이름이 나온다.
 - `truncated` 의 뜻: 실시간 수집(이 Lambda)은 "페이지 상한에 닿아 끝까지 받지 못함", 저장소 스냅샷(tools/data, MCP 1,000건 상한)은 집계 코드 그대로 "그 달 행이 1000건 이상".
-- 서울 API 의 정렬 순서(계약일 순인지)는 확인하지 못했다. 멈춤 규칙은 어느 순서여도 그 달을 빠뜨리지 않게 잡았다(계약일 순이면 구마다 한 페이지를 더 받는다).
+- 서울 API 의 정렬 순서는 확인하지 못했다. 멈춤 규칙("페이지의 가장 최근 계약일이 그 달 1일보다 앞서면 멈춤")은 계약일 **내림차순**(구마다 한 페이지를 더 받는다)과 계약일이 **섞인 페이지**(접수일 순 등)에는 안전하다. 계약일 **오름차순**이면 첫 페이지부터 지난달 이전이라 바로 멈춰 덜 모은다. 실제 API 를 한 번 불러 순서를 보면 결론이 난다.

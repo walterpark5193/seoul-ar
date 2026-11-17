@@ -50,17 +50,19 @@ export function isLockFresh(lock, nowMs) {
   return Math.abs(nowMs - lock.ts) < LOCK_STALE_MS;
 }
 
-function lockText({ jobId, month, nowMs }) {
-  return JSON.stringify({ v: 1, jobId, month, ts: nowMs, startedAt: new Date(nowMs).toISOString() });
+function lockText({ jobId, month, nowMs, kind }) {
+  const lock = { v: 1, jobId, month, ts: nowMs, startedAt: new Date(nowMs).toISOString() };
+  if (kind) lock.kind = kind; // "narration" 이면 409 문구가 "해설을 만드는 중"
+  return JSON.stringify(lock);
 }
 
 /**
  * 잠금을 잡는다. 없으면 IfNoneMatch "*", 있으면 읽어서 stale/해제면 IfMatch(etag) 로 덮어쓴다.
  * 두 요청이 겹쳐도 조건부 쓰기 하나만 성공한다.
- * @returns {{ok: true} | {ok: false, holder: {jobId, month} | null}}
+ * @returns {{ok: true} | {ok: false, holder: {jobId, month, kind} | null}}
  */
-export async function acquireLock(store, { jobId, month, nowMs }) {
-  const text = lockText({ jobId, month, nowMs });
+export async function acquireLock(store, { jobId, month, nowMs, kind }) {
+  const text = lockText({ jobId, month, nowMs, kind });
   try {
     await store.put(LOCK_KEY, text, { ...JSON_PUT, ifNoneMatch: "*" });
     return { ok: true };
@@ -71,7 +73,10 @@ export async function acquireLock(store, { jobId, month, nowMs }) {
   if (!cur) return { ok: false, holder: null }; // 사이에 지워졌다: 다음 요청에 맡긴다
   const lock = parseJson(cur.text);
   if (isLockFresh(lock, nowMs)) {
-    return { ok: false, holder: { jobId: String(lock.jobId ?? ""), month: typeof lock.month === "string" ? lock.month : null } };
+    return {
+      ok: false,
+      holder: { jobId: String(lock.jobId ?? ""), month: typeof lock.month === "string" ? lock.month : null, kind: typeof lock.kind === "string" ? lock.kind : null },
+    };
   }
   try {
     await store.put(LOCK_KEY, text, { ...JSON_PUT, ifMatch: cur.etag });

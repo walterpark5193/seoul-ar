@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash, createHmac } from "node:crypto";
 import { validateMonth, currentMonthKst, passcodeMatches, createHandler, MIN_MONTH } from "./index.mjs";
 import { LOCK_KEY, INDEX_KEY, isLockFresh } from "./job.mjs";
 import { aggregateRows, buildIndex } from "./aggregate.mjs";
@@ -818,13 +819,37 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     assert.equal((await h(right())).statusCode, 202);
   });
 
-  test("기록은 data/jobs/_auth/<sha256(ip)>.json, no-store, 원래 IP 는 안 남긴다", async () => {
+  test("기록 키는 HMAC-SHA256(ip, sha256(발표자 암호)), no-store, 원래 IP 와 sha256(ip) 는 안 남긴다", async () => {
     const f = fakeDeps({ nowMs: NOW });
     await createHandler(f.deps)(wrong());
     const put = f.deps.store.puts.find((p) => p.key.startsWith("data/jobs/_auth/"));
-    assert.match(put.key, /^data\/jobs\/_auth\/[0-9a-f]{64}\.json$/);
+    const secret = createHash("sha256").update(PASS, "utf8").digest();
+    const expected = createHmac("sha256", secret).update("198.51.100.10", "utf8").digest("hex");
+    assert.equal(put.key, `data/jobs/_auth/${expected}.json`);
+    assert.notEqual(expected, createHash("sha256").update("198.51.100.10").digest("hex"));
     assert.equal(put.opts.cacheControl, "no-store");
     assert.ok(!put.text.includes("198.51.100.10") && !put.key.includes("198.51.100.10"));
+    assert.equal(put.opts.ifNoneMatch, "*", "첫 기록은 IfNoneMatch");
+  });
+
+  test("동시에 들어온 시도도 잃지 않는다: 기록된 횟수 + 기록 못 해 거절한 횟수 = 시도 수 (ETag 조건부 쓰기)", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    const res = await Promise.all(Array.from({ length: 12 }, () => h(wrong())));
+    assert.ok(res.every((r) => r.statusCode === 401 || r.statusCode === 429));
+    const rec = JSON.parse([...f.deps.store.objects.entries()].find(([k]) => k.startsWith("data/jobs/_auth/"))[1].text);
+    const unrecorded = f.logs.filter((l) => l.msg.startsWith("암호 시도를 기록하지 못해 거절")).length;
+    assert.equal(rec.count + unrecorded, 12, JSON.stringify({ count: rec.count, unrecorded }));
+    assert.ok(f.deps.store.puts.filter((p) => p.key.startsWith("data/jobs/_auth/")).slice(1).every((p) => p.opts.ifMatch), "갱신은 IfMatch");
+  });
+
+  test("IPv6 는 /64 로 센다: 같은 /64 의 다른 주소가 한 셈, 다른 /64 는 따로", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    const v6 = (addr, key) => post({ month: "202610" }, { "cloudfront-viewer-address": `${addr}:443`, "x-presenter-key": key });
+    for (let i = 0; i < 10; i++) await h(v6(i % 2 ? "2001:db8:1:2::10" : "2001:0db8:0001:0002:aaaa:bbbb:cccc:dddd", "wrong"));
+    assert.equal((await h(v6("2001:db8:1:2:ffff::1", PASS))).statusCode, 429);
+    assert.equal((await h(v6("2001:db8:1:3::1", PASS))).statusCode, 202);
   });
 
   test("성공하면 초기화: 9번 틀리고 1번 맞히고 9번 더 틀려도 잠기지 않는다", async () => {
@@ -877,12 +902,76 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     assert.equal((await h(right())).statusCode, 429);
   });
 
-  test("기록 저장소 오류는 통과시킨다(fail-open) + warn", async () => {
+  test("시도를 기록하지 못하면 암호를 비교하지 않고 401 (fail-closed)", async () => {
     const f = fakeDeps({ nowMs: NOW });
     f.deps.store.failPut = (key) => (key.startsWith("data/jobs/_auth/") ? new Error("SlowDown") : null);
     const h = createHandler(f.deps);
-    assert.equal((await h(wrong())).statusCode, 401);
-    assert.equal((await h(right())).statusCode, 202);
-    assert.ok(f.logs.some((l) => l.level === "warn"));
+    assert.equal((await h(right())).statusCode, 401);
+    assert.equal(f.invokes.length, 0);
+    assert.ok(f.logs.some((l) => l.level === "warn" && l.msg.startsWith("암호 시도를 기록하지 못해 거절")));
+  });
+});
+
+
+// ---- 11a fix round 1 + hardening ----
+describe("11a fix: 해설 작업에서 읽지 못한 구 파일은 그 키를 뺀다", () => {
+  test("깨진 중구 파일 → narration 에 중구(와 서울 전체) 없음, 프롬프트에도 없음, done 메시지에 이름", async () => {
+    const store = storeWith202611();
+    store.objects.set("data/202611/중구.json", { text: "{broken", etag: '"b"', opts: {} });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    const h = createHandler(f.deps);
+    await h(narratePost("202611"));
+    await h(f.invokes[0].payload);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal("중구" in n.items, false);
+    assert.equal("서울 전체" in n.items, false);
+    assert.equal(Object.keys(n.items).length, 24);
+    assert.ok(!f.deps.converse.calls[0].prompt.includes('"중구"'));
+    assert.match(f.published.at(-1).message, /중구/);
+  });
+});
+
+describe("11a fix: 자동 해설은 {jobId}-narration 잠금을 잡는다", () => {
+  test("해설 중에는 잠금이 kind narration 으로 잡혀 있고, 그동안 narrate-month 는 409 '해설을 만드는 중'", async () => {
+    let during = null;
+    let lockDuring = null;
+    const f = workerSetup({ env: NARR_ENV });
+    f.deps.converse = fakeConverse(async () => {
+      lockDuring = f.deps.store.json(LOCK_KEY);
+      during = parse(await createHandler(f.deps)(narratePost("202610")));
+      return bulkReply();
+    });
+    await startedJob(f);
+    assert.equal(lockDuring.jobId, "job-0001-aaaa-narration");
+    assert.equal(lockDuring.kind, "narration");
+    assert.equal(during.status, 409);
+    assert.match(during.body.message, /2026년 10월 해설을 만드는 중입니다/);
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+    assert.equal(f.deps.store.json("data/jobs/job-0001-aaaa-narration.json").state, "done");
+  });
+
+  test("다른 작업이 잠금을 잡고 있으면 자동 해설을 건너뛴다(info 로그, Bedrock 호출 없음)", async () => {
+    const f = workerSetup({ env: NARR_ENV });
+    const realPublish = f.deps.publish;
+    f.deps.publish = async (m) => {
+      await realPublish(m);
+      if (m.state === "done" && m.kind === undefined) {
+        f.deps.store.objects.set(LOCK_KEY, { text: JSON.stringify({ v: 1, jobId: "other-job-1", month: "202609", ts: NOW }), etag: '"o"', opts: {} });
+      }
+    };
+    await startedJob(f);
+    assert.equal(f.deps.converse.calls.length, 0);
+    assert.ok(f.logs.some((l) => l.level === "info" && /자동 해설을 건너/.test(l.msg)));
+    assert.equal(f.deps.store.json(LOCK_KEY).jobId, "other-job-1");
+  });
+});
+
+describe("11a fix: 409 문구", () => {
+  test("잠금 주인이 해설 작업이면 '{월} 해설을 만드는 중입니다'", async () => {
+    const store = fakeStore({ [LOCK_KEY]: { v: 1, jobId: "n-1-narration", month: "202611", kind: "narration", ts: NOW - 1000 } });
+    const f = fakeDeps({ nowMs: NOW, store });
+    const res = parse(await createHandler(f.deps)(post({ month: "202610" })));
+    assert.equal(res.status, 409);
+    assert.match(res.body.message, /^2026년 11월 해설을 만드는 중입니다/);
   });
 });

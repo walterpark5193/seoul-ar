@@ -12,16 +12,27 @@ export const FORBIDDEN_RE = /추천|매수|매도|사세요|팔세요|오를|내
 const LOT_RE = /번지|본번|부번|\d+-\d+/; // 번지·지번(316-1) 같은 개별 필지 표기
 const GEO_PREFIX_RE = /^(us|eu|apac|global|us-gov|jp|au|ca)\./;
 const KEY_SET = new Set(NARRATION_KEYS);
+const HANGUL_RE = /[가-힣]/;
+// '"강남구": …', '서울 전체: …' 처럼 키 이름에 바로 콜론이 붙은 조각(JSON 이나 목록이 문장으로 새어 나온 것)
+const KEY_PREFIX_RE = new RegExp(`(?:^|[\\s{,])"?(?:${NARRATION_KEYS.join("|")})"?\\s*:`);
 
 export const narrationKey = (month) => `data/${month}/narration.json`;
 
-/** 문장 하나 검증. 앞뒤 공백·따옴표를 걷어 낸 text 를 돌려준다. */
+/**
+ * 문장 하나 검증. 앞뒤 공백을 걷어 낸 text 를 돌려준다.
+ * 해설이 아닌 원문(구별 재시도의 한 줄 대체 경로로 들어올 수 있다)도 거른다:
+ * { 나 " 로 시작(JSON 조각), 한글이 없음, '<키>:' 조각, '죄송'(거절 문구).
+ */
 export function validateSentence(value) {
   if (typeof value !== "string") return { ok: false, reason: "type" };
-  const text = value.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
+  const text = value.trim();
   if (text === "") return { ok: false, reason: "empty" };
+  if (/^[{"]/.test(text)) return { ok: false, reason: "json" };
   if (/[\r\n]/.test(text)) return { ok: false, reason: "multiline" };
   if ([...text].length > MAX_CHARS) return { ok: false, reason: "length" };
+  if (!HANGUL_RE.test(text)) return { ok: false, reason: "hangul" };
+  if (KEY_PREFIX_RE.test(text)) return { ok: false, reason: "key" };
+  if (text.includes("죄송")) return { ok: false, reason: "refusal" };
   if (FORBIDDEN_RE.test(text)) return { ok: false, reason: "forbidden" };
   if (LOT_RE.test(text)) return { ok: false, reason: "lot" };
   return { ok: true, text };
@@ -44,10 +55,11 @@ export function parseJsonObject(text) {
 const statFacts = (t) => ({ n: t.n, cancelled: t.cancelled, medPerM2: t.medPerM2, medAmt: t.medAmt, maxAmt: t.maxAmt });
 
 /** 모델에 넘길 사실 묶음: 서울 합계와 구별 total, ㎡당 중앙값 상위 법정동 3개. 금액은 만원, ㎡당은 만원/㎡. */
-export function buildFacts(month, perGu) {
+export function buildFacts(month, perGu, skip = new Set()) {
   const byGu = new Map(perGu.map((g) => [g.gu, g]));
   const gus = {};
   for (const gu of GU_ORDER) {
+    if (skip.has(gu)) continue; // 읽지 못한 구는 사실에 넣지 않는다
     const g = byGu.get(gu);
     const total = g?.total ?? { n: 0, cancelled: 0, medPerM2: null, medAmt: null, maxAmt: null };
     gus[gu] = {
@@ -55,12 +67,13 @@ export function buildFacts(month, perGu) {
       topDongs: (g?.dongs ?? []).slice(0, 3).map((d) => ({ name: d.name, n: d.n, medPerM2: d.medPerM2 })),
     };
   }
-  const ranked = GU_ORDER.filter((gu) => gus[gu].medPerM2 !== null).sort((a, b) => gus[b].medPerM2 - gus[a].medPerM2);
+  const present = Object.keys(gus);
+  const ranked = present.filter((gu) => gus[gu].medPerM2 !== null).sort((a, b) => gus[b].medPerM2 - gus[a].medPerM2);
   const pick = (list) => list.map((gu) => ({ gu, medPerM2: gus[gu].medPerM2 }));
   const seoul = {
-    n: GU_ORDER.reduce((s, gu) => s + gus[gu].n, 0),
-    cancelled: GU_ORDER.reduce((s, gu) => s + gus[gu].cancelled, 0),
-    maxAmt: GU_ORDER.reduce((m, gu) => (gus[gu].maxAmt !== null && (m === null || gus[gu].maxAmt > m) ? gus[gu].maxAmt : m), null),
+    n: present.reduce((s, gu) => s + gus[gu].n, 0),
+    cancelled: present.reduce((s, gu) => s + gus[gu].cancelled, 0),
+    maxAmt: present.reduce((m, gu) => (gus[gu].maxAmt !== null && (m === null || gus[gu].maxAmt > m) ? gus[gu].maxAmt : m), null),
     highestMedPerM2: pick(ranked.slice(0, 3)),
     lowestMedPerM2: pick(ranked.slice(-3).reverse()),
   };
@@ -81,14 +94,15 @@ export const SYSTEM_PROMPT = [
   "- 출력은 JSON 객체 하나만. 설명이나 코드 울타리 없이.",
 ].join("\n");
 
-function bulkPrompt(facts) {
+function bulkPrompt(facts, wanted) {
+  const data = wanted.includes(SEOUL_KEY) ? facts : { ...facts, seoul: undefined };
   return [
     `${monthLabel(facts.month)} 서울 매매 실거래 집계(JSON):`,
-    JSON.stringify(facts),
+    JSON.stringify(data),
     "",
-    `키 목록(정확히 이 ${NARRATION_KEYS.length}개): ${NARRATION_KEYS.join(", ")}`,
-    `"서울 전체"는 seoul 값, 각 구는 gus 의 그 구 값으로 쓴다.`,
-    '형식: {"서울 전체": "문장", "종로구": "문장", ...}',
+    `키 목록(정확히 이 ${wanted.length}개): ${wanted.join(", ")}`,
+    wanted.includes(SEOUL_KEY) ? `"서울 전체"는 seoul 값, 각 구는 gus 의 그 구 값으로 쓴다.` : "각 구는 gus 의 그 구 값으로 쓴다.",
+    `형식: {${wanted.slice(0, 2).map((k) => `"${k}": "문장"`).join(", ")}, ...}`,
   ].join("\n");
 }
 
@@ -106,16 +120,26 @@ function needsInferenceProfile(e) {
   return e?.name === "ValidationException" && /inference profile/i.test(String(e?.message ?? ""));
 }
 
+/** converse 응답: 문자열(테스트) 또는 { text, stopReason }(aws.mjs). */
+function toReply(out) {
+  return typeof out === "string" ? { text: out, stopReason: undefined } : { text: String(out?.text ?? ""), stopReason: out?.stopReason };
+}
+
 /**
- * 26개 해설을 만든다. 첫 일괄 호출의 예외(권한 없음 등)는 그대로 올린다(재시도 26번을 하지 않는다).
+ * 26개 해설을 만든다. 첫 일괄 호출의 예외(권한 없음 등)와 첫 호출 전 마감은 그대로 올린다(재시도 26번을 하지 않는다).
+ * 재시도 중 마감(beforeCall 이 던짐)이면 거기서 멈추고 지금까지 통과한 항목만 돌려준다(stoppedEarly: true).
+ * skip: 읽지 못한 구 키. 만들지도 다시 시도하지도 않고 missing 에 넣는다. 구가 하나라도 빠지면 서울 합계가 틀리므로 서울 전체도 뺀다.
  * @param {object} o
  * @param {(args: {modelId, system, prompt, maxTokens}) => Promise<string>} o.converse
  * @param {(p: {done: number, total: number, key?: string}) => void} [o.onProgress]
  * @param {() => void} [o.beforeCall] 호출마다 먼저 부른다(작업자 마감 검사)
  * @returns {Promise<{narration: {v, month, generatedAt, model, items}, missing: string[], calls: number}>}
  */
-export async function generateNarration({ converse, modelId, month, perGu, generatedAt, maxCalls = MAX_CALLS, onProgress = () => {}, beforeCall = () => {}, log = () => {} }) {
-  const facts = buildFacts(month, perGu);
+export async function generateNarration({ converse, modelId, month, perGu, generatedAt, maxCalls = MAX_CALLS, skip: skipKeys = [], onProgress = () => {}, beforeCall = () => {}, log = () => {} }) {
+  const skip = new Set(skipKeys.filter((k) => KEY_SET.has(k)));
+  if ([...skip].some((k) => k !== SEOUL_KEY)) skip.add(SEOUL_KEY);
+  const wanted = NARRATION_KEYS.filter((k) => !skip.has(k));
+  const facts = buildFacts(month, perGu, skip);
   let model = modelId;
   let calls = 0;
   const total = NARRATION_KEYS.length;
@@ -137,23 +161,34 @@ export async function generateNarration({ converse, modelId, month, perGu, gener
 
   const items = {};
   beforeCall();
-  const bulk = parseJsonObject(await call(bulkPrompt(facts), 4000));
+  const reply = toReply(await call(bulkPrompt(facts, wanted), 4000));
+  log("info", "일괄 해설 응답", { stopReason: reply.stopReason ?? null });
+  if (reply.stopReason === "max_tokens") log("warn", "일괄 해설 응답이 maxTokens 에서 잘림: 빠진 항목은 구별로 다시 만든다", {});
+  const bulk = parseJsonObject(reply.text);
   if (!bulk) log("warn", "일괄 응답을 JSON 으로 읽지 못해 구별로 다시 만든다", {});
-  for (const key of NARRATION_KEYS) {
+  for (const key of wanted) {
     const v = validateSentence(bulk?.[key]);
     if (v.ok) items[key] = v.text;
     else if (bulk && key in bulk) log("warn", "해설 검증 실패", { key, reason: v.reason });
   }
-  let done = Object.keys(items).length;
+  let done = Object.keys(items).length + skip.size;
   onProgress({ done, total });
 
-  for (const key of NARRATION_KEYS.filter((k) => !(k in items))) {
-    if (calls < maxCalls) {
-      beforeCall();
+  let stopped = false;
+  for (const key of wanted.filter((k) => !(k in items))) {
+    if (!stopped && calls < maxCalls) {
       try {
-        const out = await call(singlePrompt(key, facts), 400);
-        const obj = parseJsonObject(out);
-        const v = validateSentence(obj ? obj[key] : out); // JSON 이 아니면 한 줄 문장으로 본다
+        beforeCall();
+      } catch (e) {
+        stopped = true;
+        log("warn", "마감: 남은 해설 재시도를 멈추고 지금까지 만든 것만 쓴다", { error: String(e?.name ?? "Error") });
+      }
+    }
+    if (!stopped && calls < maxCalls) {
+      try {
+        const out = toReply(await call(singlePrompt(key, facts), 400));
+        const obj = parseJsonObject(out.text);
+        const v = validateSentence(obj ? obj[key] : out.text); // JSON 이 아니면 한 줄 문장으로 본다(원문 필터는 validateSentence)
         if (v.ok) items[key] = v.text;
         else log("warn", "해설 재생성도 검증 실패: 생략", { key, reason: v.reason });
       } catch (e) {
@@ -170,5 +205,6 @@ export async function generateNarration({ converse, modelId, month, perGu, gener
     narration: { v: 1, month, generatedAt, model, items: ordered },
     missing: NARRATION_KEYS.filter((k) => !(k in ordered)),
     calls,
+    stoppedEarly: stopped,
   };
 }

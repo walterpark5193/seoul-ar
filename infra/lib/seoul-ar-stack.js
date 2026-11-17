@@ -17,7 +17,8 @@ const SSM_API_KEY_NAME = "/seoul-ar/seoul-api-key";
 const SSM_PASSCODE_NAME = "/seoul-ar/presenter-passcode";
 const FETCH_MONTH_DIR = path.join(__dirname, "..", "lambda", "fetch-month");
 // AI 해설 모델(CONTRACTS 12.2). 바꾸려면: npx cdk deploy -c bedrockModelId=<모델 또는 us. 인퍼런스 프로파일 ID>
-const DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-haiku-5-5";
+// 이 계정·리전에서 확인됨(실제 Converse): 기반 모델 ID 는 on-demand 불가, us. 인퍼런스 프로파일은 된다.
+const DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-5-5";
 const GEO_PREFIX_RE = /^(us|eu|apac|global|us-gov|jp|au|ca)\./;
 
 class SeoulArStack extends cdk.Stack {
@@ -196,6 +197,7 @@ class SeoulArStack extends cdk.Stack {
       code,
       memorySize: 256,
       timeout: cdk.Duration.seconds(15),
+      reservedConcurrentExecutions: 2, // 병렬 암호 대입 상한(셋째 동시 요청은 Lambda 가 429 로 거절)
       logGroup: logGroup("FetchMonthApiLogs"),
       environment: {
         BUCKET: bucket.bucketName,

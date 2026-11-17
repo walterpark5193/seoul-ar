@@ -76,7 +76,7 @@ export function lambdaInvoker({ client, InvokeCommand }) {
   };
 }
 
-/** Bedrock Converse 한 번. 응답 텍스트 조각을 이어 붙여 돌려준다. temperature 는 넣지 않는다(모델별 제약을 피한다). */
+/** Bedrock Converse 한 번 → { text, stopReason }. 텍스트 조각은 이어 붙인다. temperature 는 넣지 않는다(모델별 제약을 피한다). */
 export function bedrockConverser({ client, ConverseCommand, timeoutMs = 60_000 }) {
   return async function converse({ modelId, system, prompt, maxTokens }) {
     const r = await client.send(new ConverseCommand({
@@ -85,7 +85,7 @@ export function bedrockConverser({ client, ConverseCommand, timeoutMs = 60_000 }
       messages: [{ role: "user", content: [{ text: prompt }] }],
       inferenceConfig: { maxTokens },
     }), { abortSignal: AbortSignal.timeout(timeoutMs) });
-    return (r?.output?.message?.content ?? []).map((part) => part?.text ?? "").join("");
+    return { text: (r?.output?.message?.content ?? []).map((part) => part?.text ?? "").join(""), stopReason: r?.stopReason };
   };
 }
 

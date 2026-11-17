@@ -123,13 +123,19 @@ test("fetch-month worker: Node.js 22, 512 MB, 600 s, worker env", () => {
   assert.equal(w.Properties.Timeout, 600);
   const env = w.Properties.Environment.Variables;
   assert.deepEqual(Object.keys(env).sort(), ["BEDROCK_MODEL_ID", "BUCKET", "DISTRIBUTION_ID", "EVENTS_API_KEY", "EVENTS_HTTP_ENDPOINT", "SSM_API_KEY_NAME"]);
-  assert.equal(env.BEDROCK_MODEL_ID, "anthropic.claude-haiku-5-5");
+  // 계정에서 확인됨: 기반 모델 ID 는 on-demand 불가, us. 인퍼런스 프로파일은 된다(11a fix)
+  assert.equal(env.BEDROCK_MODEL_ID, "us.anthropic.claude-haiku-5-5");
   assert.deepEqual(env.BUCKET, { Ref: logicalId("AWS::S3::Bucket") });
   assert.deepEqual(env.DISTRIBUTION_ID, { Ref: logicalId("AWS::CloudFront::Distribution") });
   assert.equal(env.SSM_API_KEY_NAME, "/seoul-ar/seoul-api-key");
   assert.ok(JSON.stringify(env.EVENTS_HTTP_ENDPOINT).includes("Dns.Http"));
   assert.ok(JSON.stringify(env.EVENTS_HTTP_ENDPOINT).includes("/event"));
   assert.deepEqual(env.EVENTS_API_KEY["Fn::GetAtt"][1], "ApiKey");
+});
+
+test("fetch-month api: 동시 실행 2개로 제한(병렬 암호 대입 상한)", () => {
+  assert.equal(fetchMonthFns().api[1].Properties.ReservedConcurrentExecutions, 2);
+  assert.equal(fetchMonthFns().worker[1].Properties.ReservedConcurrentExecutions, undefined);
 });
 
 test("fetch-month api: Node.js 22, env, SELF_FUNCTION_NAME 은 작업자 이름(리터럴, 순환 없음)", () => {
@@ -401,6 +407,7 @@ test("IAM 작업자: bedrock:InvokeModel 은 그 모델과 us. 인퍼런스 프�
   assert.ok(res.includes(":bedrock:*::foundation-model/anthropic.claude-haiku-5-5"), res);
   assert.ok(res.includes(":bedrock:us-east-1:557395122774:inference-profile/us.anthropic.claude-haiku-5-5"), res);
   assert.equal([].concat(br.Resource).length, 2);
+  assert.ok(!res.includes("us.us."), res);
   assert.equal(findStatement(statementsOf(fetchMonthFns().api), "bedrock:InvokeModel"), undefined, "공개 함수에는 Bedrock 권한 없음");
 });
 

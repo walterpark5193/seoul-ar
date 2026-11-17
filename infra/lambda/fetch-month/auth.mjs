@@ -1,13 +1,17 @@
-// 발표자 암호 무차별 대입 방어 (9a fix round 1, S2).
-// 접속 IP 마다 실패 횟수를 data/jobs/_auth/<sha256(ip)>.json 에 둔다(Cache-Control: no-store, 원래 IP 는 쓰지 않는다).
-// 첫 실패부터 10분 창 안에 10번 틀리면 그때부터 10분 동안 429. 맞히면 초기화.
-// 저장소 오류는 통과시킨다(fail-open): S3 가 잠깐 안 되면 발표자가 막히지 않게. 호출자가 warn 을 남긴다.
-import { createHash } from "node:crypto";
+// 발표자 암호 무차별 대입 방어 (9a fix S2, 11a 강화).
+// 접속(IP, IPv6 는 /64)마다 시도 횟수를 data/jobs/_auth/<HMAC-SHA256(ip, sha256(발표자 암호))>.json 에 둔다.
+//   - 키는 HMAC 이라 공개 경로(/data/jobs/_auth/*)로 읽혀도 IP 를 거꾸로 찾을 수 없다. 원래 주소는 어디에도 쓰지 않는다.
+//   - 시도는 암호를 비교하기 "전에" 센다(ETag 조건부 쓰기: 처음 IfNoneMatch "*", 갱신 IfMatch). 경합이면 3번까지 다시.
+//     기록하지 못하면 비교하지 않고 거절한다(fail-closed). 맞히면 셈을 지운다.
+//   - 첫 시도부터 10분 창 안에 10번째 시도에서 잠그고, 그 시도도 틀리면 10분 동안 429.
+import { createHash, createHmac } from "node:crypto";
+import { isPrecondition } from "./job.mjs";
 
 export const AUTH_PREFIX = "data/jobs/_auth/";
 export const AUTH_MAX_FAILS = 10;
 export const AUTH_WINDOW_MS = 10 * 60 * 1000;
 export const AUTH_LOCK_MS = 10 * 60 * 1000;
+export const AUTH_WRITE_TRIES = 3;
 const AUTH_PUT = Object.freeze({ contentType: "application/json; charset=utf-8", cacheControl: "no-store" });
 
 function headerValue(headers, name) {
@@ -18,38 +22,64 @@ function headerValue(headers, name) {
 }
 
 /**
- * 접속한 사람의 IP. CloudFront 가 붙이는 CloudFront-Viewer-Address("ip:port", ALL_VIEWER_EXCEPT_HOST_HEADER 가 넘긴다)를
- * 먼저 쓴다. CloudFront 뒤에서 requestContext.http.sourceIp 는 CloudFront 엣지 주소라서 대체값으로만 쓴다.
+ * 접속한 사람의 IP. CloudFront 가 붙이는 CloudFront-Viewer-Address("ip:port", IPv6 는 "addr:port" 또는 "[addr]:port")를
+ * 먼저 쓴다(ALL_VIEWER_EXCEPT_HOST_HEADER 가 넘긴다). CloudFront 뒤에서 sourceIp 는 엣지 주소라 대체값으로만 쓴다.
  */
 export function clientIp(event) {
   const viewer = headerValue(event?.headers, "cloudfront-viewer-address");
-  if (typeof viewer === "string" && viewer.trim() !== "") return viewer.trim().replace(/:\d+$/, "");
+  if (typeof viewer === "string" && viewer.trim() !== "") {
+    const v = viewer.trim();
+    const bracket = /^\[([^\]]+)\]/.exec(v);
+    return bracket ? bracket[1] : v.replace(/:\d+$/, "");
+  }
   const ip = event?.requestContext?.http?.sourceIp;
   return typeof ip === "string" && ip !== "" ? ip : "unknown";
 }
 
-export const authKey = (ip) => `${AUTH_PREFIX}${createHash("sha256").update(ip, "utf8").digest("hex")}.json`;
+function expandIpv6(ip) {
+  const [head, tail = null] = ip.split("::");
+  const a = head ? head.split(":") : [];
+  const b = tail === null ? [] : tail ? tail.split(":") : [];
+  const fill = tail === null ? [] : new Array(Math.max(0, 8 - a.length - b.length)).fill("0");
+  const groups = [...a, ...fill, ...b];
+  return groups.length === 8 && groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g)) ? groups : null;
+}
+
+/** 셈의 단위: IPv4 는 그대로, IPv6 는 /64 접두사(한 사람이 보통 /64 하나를 쓴다), IPv4-mapped 는 IPv4. */
+export function keyMaterial(ip) {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (mapped) return mapped[1];
+  if (!ip.includes(":")) return ip;
+  const groups = expandIpv6(ip);
+  if (!groups) return ip;
+  return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+}
+
+/** HMAC 비밀값: 발표자 암호의 sha256 다이제스트(이미 메모리에 있다). 암호를 바꾸면 셈도 새로 시작한다. */
+export const passcodeSecret = (passcode) => createHash("sha256").update(String(passcode), "utf8").digest();
+
+export const authKey = (ip, secret) => `${AUTH_PREFIX}${createHmac("sha256", secret).update(keyMaterial(ip), "utf8").digest("hex")}.json`;
 
 /**
- * 기록 읽기. 없으면 null. API 역할에는 s3:ListBucket 이 없어서 없는 키를 읽으면 S3 가 404 대신 403 을 준다.
- * data/jobs/* GetObject 는 허용돼 있으므로 이 접두사의 403 은 "없음"으로 본다.
+ * 기록 읽기 → { record, etag }. 없으면 record null.
+ * API 역할에는 s3:ListBucket 이 없어서 없는 키를 읽으면 S3 가 404 대신 403 을 준다. 이 접두사의 403 은 "없음"이다.
  */
-export async function loadAuth(store, ip) {
-  const key = authKey(ip);
+export async function loadAuth(store, key) {
   let cur;
   try {
     cur = await store.get(key);
   } catch (e) {
-    if (e?.name === "AccessDenied" || e?.$metadata?.httpStatusCode === 403) return { key, record: null };
+    if (e?.name === "AccessDenied" || e?.$metadata?.httpStatusCode === 403) return { record: null, etag: null };
     throw e;
   }
+  if (!cur) return { record: null, etag: null };
   let record = null;
   try {
-    record = cur ? JSON.parse(cur.text) : null;
+    record = JSON.parse(cur.text);
   } catch {
     record = null;
   }
-  return { key, record: record && typeof record === "object" ? record : null };
+  return { record: record && typeof record === "object" ? record : null, etag: cur.etag ?? null };
 }
 
 /** 잠겨 있으면 남은 ms, 아니면 0. */
@@ -58,19 +88,45 @@ export function lockRemainingMs(record, nowMs) {
   return typeof until === "number" && until > nowMs ? until - nowMs : 0;
 }
 
-/** 실패 한 번을 센다. 창(첫 실패부터 10분)이 지났으면 새로 센다. 10번째에서 잠근다. */
-export async function noteFailure(store, { key, record }, nowMs) {
-  const fresh = typeof record?.windowStart === "number" && typeof record?.count === "number" && nowMs - record.windowStart < AUTH_WINDOW_MS;
-  const windowStart = fresh ? record.windowStart : nowMs;
-  const count = (fresh ? record.count : 0) + 1;
-  const lockedUntil = count >= AUTH_MAX_FAILS ? nowMs + AUTH_LOCK_MS : 0;
-  const next = { v: 1, windowStart, count, lockedUntil };
-  await store.put(key, JSON.stringify(next), AUTH_PUT);
-  return next;
+function writeOpts(etag) {
+  return etag ? { ...AUTH_PUT, ifMatch: etag } : { ...AUTH_PUT, ifNoneMatch: "*" };
 }
 
-/** 맞히면 초기화(셀 것이 있을 때만 쓴다). */
-export async function noteSuccess(store, { key, record }) {
-  if (!record || (!record.count && !record.lockedUntil)) return;
-  await store.put(key, JSON.stringify({ v: 1, windowStart: 0, count: 0, lockedUntil: 0 }), AUTH_PUT);
+/**
+ * 비교 전에 시도 하나를 센다. 잠겨 있으면 { ok: false, lockedMs }, 기록했으면 { ok: true, record, etag }.
+ * 조건부 쓰기가 AUTH_WRITE_TRIES 번 모두 어긋나거나 저장소 오류면 던진다(호출자는 비교 없이 거절).
+ */
+export async function registerAttempt(store, key, nowMs) {
+  for (let i = 0; i < AUTH_WRITE_TRIES; i++) {
+    const { record, etag } = await loadAuth(store, key);
+    const lockedMs = lockRemainingMs(record, nowMs);
+    if (lockedMs > 0) return { ok: false, lockedMs };
+    const fresh = typeof record?.windowStart === "number" && typeof record?.count === "number" && record.count > 0
+      && nowMs - record.windowStart < AUTH_WINDOW_MS;
+    const windowStart = fresh ? record.windowStart : nowMs;
+    const count = (fresh ? record.count : 0) + 1;
+    const next = { v: 1, windowStart, count, lockedUntil: count >= AUTH_MAX_FAILS ? nowMs + AUTH_LOCK_MS : 0 };
+    try {
+      const out = await store.put(key, JSON.stringify(next), writeOpts(etag));
+      return { ok: true, record: next, etag: out?.etag ?? null };
+    } catch (e) {
+      if (!isPrecondition(e)) throw e;
+    }
+  }
+  throw new Error("암호 시도 기록 경합: 조건부 쓰기가 계속 어긋남");
+}
+
+/** 맞히면 셈을 지운다. 방금 쓴 etag 로 시작하고, 어긋나면 다시 읽어 3번까지. */
+export async function clearAttempts(store, key, etag) {
+  let tag = etag;
+  for (let i = 0; i < AUTH_WRITE_TRIES; i++) {
+    try {
+      await store.put(key, JSON.stringify({ v: 1, windowStart: 0, count: 0, lockedUntil: 0 }), writeOpts(tag));
+      return;
+    } catch (e) {
+      if (!isPrecondition(e)) throw e;
+      tag = (await loadAuth(store, key)).etag;
+    }
+  }
+  throw new Error("암호 시도 기록 경합: 초기화 실패");
 }

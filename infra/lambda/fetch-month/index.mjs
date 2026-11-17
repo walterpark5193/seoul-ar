@@ -20,7 +20,7 @@ import {
 } from "./job.mjs";
 import { jobMessage, createReporter } from "./publish.mjs";
 import { generateNarration, narrationKey, NARRATION_KEYS } from "./narrate.mjs";
-import { clientIp, loadAuth, lockRemainingMs, noteFailure, noteSuccess } from "./auth.mjs";
+import { clientIp, authKey, passcodeSecret, registerAttempt, clearAttempts } from "./auth.mjs";
 
 export const MIN_MONTH = "200601";
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -122,18 +122,6 @@ async function handleHttp(event, deps, passcodeCache) {
   if (!kind) return fail(404, "not_found", "알 수 없는 경로입니다.");
   if (method !== "POST") return fail(405, "method_not_allowed", "POST 요청만 받습니다.");
 
-  // IP 별 암호 실패 잠금(10분에 10번 → 10분 429). 기록을 못 읽거나 못 쓰면 통과시킨다.
-  let auth = null;
-  try {
-    auth = await loadAuth(store, clientIp(event));
-  } catch (e) {
-    log("warn", "암호 실패 기록을 읽지 못함(검사 없이 진행)", errFields(e));
-  }
-  const lockedMs = auth ? lockRemainingMs(auth.record, deps.now()) : 0;
-  if (lockedMs > 0) {
-    return fail(429, "too_many_attempts", "잠시 후 다시 시도해 주세요.", {}, { "retry-after": String(Math.ceil(lockedMs / 1000)) });
-  }
-
   let expected;
   try {
     expected = await readPasscode(deps, passcodeCache);
@@ -141,23 +129,27 @@ async function handleHttp(event, deps, passcodeCache) {
     log("error", "발표자 암호 파라미터를 읽지 못함", errFields(e));
     return fail(500, "config", "서버 설정을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
   }
+  // IP(IPv6 는 /64) 별 시도 셈: 비교 전에 ETag 조건부 쓰기로 센다. 10분 창에 10번 → 10분 429.
+  // 셈을 기록하지 못하면 비교하지 않고 거절한다(fail-closed). 키는 HMAC(ip, sha256(암호)).
+  const attemptKey = authKey(clientIp(event), passcodeSecret(expected));
+  let attempt;
+  try {
+    attempt = await registerAttempt(store, attemptKey, deps.now());
+  } catch (e) {
+    log("warn", "암호 시도를 기록하지 못해 거절(비교하지 않음)", errFields(e));
+    return fail(401, "unauthorized", "암호를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  }
+  if (!attempt.ok) {
+    return fail(429, "too_many_attempts", "잠시 후 다시 시도해 주세요.", {}, { "retry-after": String(Math.ceil(attempt.lockedMs / 1000)) });
+  }
   if (!passcodeMatches(header(event.headers, "x-presenter-key"), expected)) {
-    if (auth) {
-      try {
-        const rec = await noteFailure(store, auth, deps.now());
-        if (rec.lockedUntil) log("warn", "암호 실패가 많아 이 접속을 10분 잠근다", { count: rec.count });
-      } catch (e) {
-        log("warn", "암호 실패 기록을 쓰지 못함", errFields(e));
-      }
-    }
+    if (attempt.record.lockedUntil) log("warn", "암호 실패가 많아 이 접속을 10분 잠근다", { count: attempt.record.count });
     return fail(401, "unauthorized", "발표자 암호가 맞지 않습니다.");
   }
-  if (auth) {
-    try {
-      await noteSuccess(store, auth);
-    } catch (e) {
-      log("warn", "암호 실패 기록을 초기화하지 못함", errFields(e));
-    }
+  try {
+    await clearAttempts(store, attemptKey, attempt.etag);
+  } catch (e) {
+    log("warn", "암호 시도 기록을 초기화하지 못함", errFields(e));
   }
 
   const body = parseBody(event);
@@ -175,16 +167,19 @@ async function handleHttp(event, deps, passcodeCache) {
 
   let lock;
   try {
-    lock = await acquireLock(store, { jobId, month, nowMs });
+    lock = await acquireLock(store, { jobId, month, nowMs, ...(kind === "narration" ? { kind: "narration" } : {}) });
   } catch (e) {
     log("error", "잠금 확인 실패", errFields(e));
     return fail(500, "lock", "작업 잠금을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
   }
   if (!lock.ok) {
     const holder = lock.holder;
-    const message = holder?.month && /^\d{6}$/.test(holder.month)
-      ? `${monthLabel(holder.month)} 데이터를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.`
-      : "다른 달을 가져오는 중입니다. 잠시 뒤 다시 시도해 주세요.";
+    const label = holder?.month && /^\d{6}$/.test(holder.month) ? monthLabel(holder.month) : null;
+    const message = !label
+      ? "다른 달을 가져오는 중입니다. 잠시 뒤 다시 시도해 주세요."
+      : holder.kind === "narration"
+        ? `${label} 해설을 만드는 중입니다. 끝난 뒤 다시 시도해 주세요.`
+        : `${label} 데이터를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.`;
     return fail(409, "busy", message, holder?.jobId && holder.month ? { jobId: holder.jobId, month: holder.month } : {});
   }
 
@@ -235,7 +230,7 @@ function missingNote(missing) {
  * 해설 생성 → data/{month}/narration.json → /data/{month}/narration.json 무효화. 진행은 send 로(kind narration).
  * 실패는 사용자용 JobError 로 정리해 던진다.
  */
-async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline }) {
+async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip = [] }) {
   const { env, store, log } = deps;
   if (!env.BEDROCK_MODEL_ID || typeof deps.converse !== "function") {
     throw new JobError("AI 해설 설정(BEDROCK_MODEL_ID)이 없어 해설을 만들지 못했습니다.");
@@ -247,6 +242,7 @@ async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline
       modelId: env.BEDROCK_MODEL_ID,
       month,
       perGu,
+      skip,
       generatedAt: new Date(deps.now()).toISOString(),
       beforeCall: checkDeadline,
       log,
@@ -273,6 +269,7 @@ async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline
       log("warn", "CloudFront 무효화 실패", errFields(e));
     }
   }
+  if (result.stoppedEarly) log("warn", "마감에 걸려 지금까지 만든 해설만 저장", { jobId, month, missing: result.missing });
   log("info", "해설 완료", { jobId, month, calls: result.calls, missing: result.missing, model: result.narration.model });
   return result;
 }
@@ -282,17 +279,35 @@ function narrationSender(deps, jobId, month) {
   return (fields) => report(jobMessage({ kind: "narration", jobId, month, total: NARR_TOTAL, ...fields, ts: deps.now() }));
 }
 
-/** 수집 끝 자동 해설. 어떤 경우에도 던지지 않는다(수집 결과는 이미 done). */
+/**
+ * 수집 끝 자동 해설. {jobId}-narration 으로 잠금을 잡는다(그동안 "해설 생성" 버튼은 409).
+ * 잠금이 잡혀 있으면 건너뛴다. 어떤 경우에도 던지지 않는다(수집 결과는 이미 done).
+ */
 async function autoNarrate({ deps, jobId, month, perGu, checkDeadline }) {
+  let lock;
+  try {
+    lock = await acquireLock(deps.store, { jobId, month, nowMs: deps.now(), kind: "narration" });
+  } catch (e) {
+    deps.log("warn", "자동 해설 잠금을 확인하지 못해 건너뜀", errFields(e));
+    return;
+  }
+  if (!lock.ok) {
+    deps.log("info", "다른 작업이 잠금을 잡고 있어 자동 해설을 건너뜀", { holder: lock.holder?.jobId ?? null });
+    return;
+  }
   const send = narrationSender(deps, jobId, month);
+  let terminal;
   try {
     const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });
-    await send({ state: "done", done: NARR_TOTAL, ...missingNote(result.missing) });
+    terminal = { state: "done", done: NARR_TOTAL, ...missingNote(result.missing) };
   } catch (e) {
     const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";
     if (!(e instanceof JobError)) deps.log("error", "자동 해설 실패", errFields(e));
-    await send({ state: "error", done: 0, message });
+    terminal = { state: "error", done: 0, message };
+  } finally {
+    await safeRelease(deps, jobId);
   }
+  await send(terminal);
 }
 
 /** 이미 있는 달의 해설 작업(POST /api/narrate-month). 잠금은 API 가 잡았고 여기서 finally 로 푼다. */
@@ -319,14 +334,21 @@ async function runNarrateJob(event, deps, context) {
     if (!Array.isArray(index?.months) || !index.months.includes(month)) {
       throw new JobError("이 달의 데이터가 없어 해설을 만들 수 없습니다. 먼저 월을 가져와 주세요.");
     }
-    const perGu = await mapPool(GU_ORDER, 8, async (gu) => {
+    // 읽지 못한(없거나 깨진) 구 파일은 "거래 없음"으로 지어내지 않고 그 키를 뺀다(그러면 서울 전체도 뺀다).
+    const unreadable = [];
+    const perGu = (await mapPool(GU_ORDER, 8, async (gu) => {
       const cur = await store.get(guKey(month, gu)).catch((e) => { log("warn", "구 파일 읽기 실패", { gu, ...errFields(e) }); return null; });
       let data = null;
       try { data = cur ? JSON.parse(cur.text) : null; } catch { data = null; }
-      if (!data?.total || !Array.isArray(data.dongs)) return aggregateRows([], { month, gu, generatedAt: String(index.generatedAt ?? "") });
+      if (!data?.total || !Array.isArray(data.dongs)) {
+        unreadable.push(gu);
+        log("warn", "구 파일을 읽지 못해 그 해설을 뺀다", { gu });
+        return null;
+      }
       return { ...data, gu, month };
-    });
-    const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });
+    })).filter(Boolean);
+    if (perGu.length === 0) throw new JobError("이 달의 구 파일을 읽지 못해 해설을 만들 수 없습니다.");
+    const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip: unreadable });
     terminal = { state: "done", done: NARR_TOTAL, ...missingNote(result.missing) };
   } catch (e) {
     const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";

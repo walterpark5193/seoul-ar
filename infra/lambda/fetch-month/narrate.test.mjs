@@ -26,14 +26,34 @@ describe("상수와 키", () => {
 });
 
 describe("validateSentence", () => {
-  test("한국어 한 문장, 앞뒤 공백과 따옴표는 걷어 낸다", () => {
-    assert.deepEqual(validateSentence("  \"강남구 10월: ㎡당 중앙값 3,750만원입니다.\" "), { ok: true, text: "강남구 10월: ㎡당 중앙값 3,750만원입니다." });
+  test("한국어 한 문장, 앞뒤 공백은 걷어 낸다. 계약서 예시 문장은 통과", () => {
+    assert.deepEqual(validateSentence("  강남구 10월: ㎡당 중앙값 3,750만원입니다. "), { ok: true, text: "강남구 10월: ㎡당 중앙값 3,750만원입니다." });
+    assert.equal(validateSentence("강남구 11월: ㎡당 중앙값 1,564만원, 압구정동이 가장 높습니다.").ok, true);
+    assert.equal(validateSentence("11월 서울 매매 1,014건, ㎡당 중앙값은 1,200만원입니다.").ok, true);
+  });
+
+  test("해설이 아닌 원문은 거절: 한글 없음, { 나 \" 로 시작, '<키>:' 조각, '죄송'", () => {
+    const cases = {
+      "Gangnam had 3 trades in October.": "hangul",
+      "1,234": "hangul",
+      "{\"강남구\": \"강남구 10월 거래 3건입니다.\"": "json",
+      "\"강남구 10월 거래 3건입니다.\"": "json",
+      "강남구: 10월 거래 3건입니다.": "key",
+      "결과는 \"중구\": 거래 없음": "key",
+      "서울 전체: 거래 1,014건": "key",
+      "죄송합니다만 그 요청은 도와드릴 수 없습니다.": "refusal",
+    };
+    for (const [s, reason] of Object.entries(cases)) {
+      const v = validateSentence(s);
+      assert.equal(v.ok, false, s);
+      assert.equal(v.reason, reason, s);
+    }
   });
 
   test("80자까지는 통과, 81자는 거절 (코드 포인트로 센다)", () => {
     assert.equal(validateSentence("가".repeat(80)).ok, true);
     assert.equal(validateSentence("가".repeat(81)).ok, false);
-    assert.equal(validateSentence("😀".repeat(80)).ok, true);
+    assert.equal(validateSentence("가" + "😀".repeat(79)).ok, true);
   });
 
   test("빈 값, 문자열 아님, 줄바꿈은 거절", () => {
@@ -176,10 +196,47 @@ describe("generateNarration", () => {
     assert.equal(Object.keys(out.narration.items).length, 25);
   });
 
-  test("beforeCall 이 던지면(마감) 멈춘다", async () => {
-    const converse = fakeConverse(() => "JSON 아님");
+  test("첫 호출 전 마감이면 던진다(모은 것이 없다)", async () => {
+    const converse = fakeConverse(() => bulkReply());
+    await assert.rejects(generateNarration(base(converse, { beforeCall: () => { throw new Error("마감"); } })), /마감/);
+    assert.equal(converse.calls.length, 0);
+  });
+
+  test("재시도 중 마감이면 거기서 멈추고 지금까지 통과한 항목을 돌려준다 (stoppedEarly)", async () => {
+    const converse = fakeConverse((c) => (c.single === null ? "죄송합니다, 지금은 답할 수 없습니다." : JSON.stringify({ [c.single]: `${c.single} 10월 요약입니다.` })));
     let n = 0;
-    await assert.rejects(generateNarration(base(converse, { beforeCall: () => { if (++n === 3) throw new Error("마감"); } })), /마감/);
+    const out = await generateNarration(base(converse, { beforeCall: () => { if (++n === 3) throw new Error("마감"); } }));
     assert.equal(converse.calls.length, 2);
+    assert.equal(out.stoppedEarly, true);
+    assert.deepEqual(Object.keys(out.narration.items), ["서울 전체"]);
+    assert.equal(out.missing.length, 25);
+  });
+
+  test("skip 키(읽지 못한 구 파일)는 만들지도 다시 시도하지도 않고 missing 에 넣는다. 구를 빼면 서울 전체도 뺀다", async () => {
+    const converse = fakeConverse(() => bulkReply()); // 모델이 빼라는 키까지 써 와도 버린다
+    const progress = [];
+    const out = await generateNarration(base(converse, { skip: ["중구"], onProgress: (p) => progress.push(p) }));
+    assert.equal(converse.calls.length, 1);
+    assert.equal("중구" in out.narration.items, false);
+    assert.equal("서울 전체" in out.narration.items, false);
+    assert.deepEqual(out.missing, ["서울 전체", "중구"]);
+    assert.equal(Object.keys(out.narration.items).length, 24);
+    const prompt = converse.calls[0].prompt;
+    assert.ok(!prompt.includes('"중구"'), "중구 사실을 넘기지 않는다");
+    assert.ok(!/키 목록[^\n]*서울 전체/.test(prompt), "서울 전체를 요청하지 않는다");
+    assert.equal(progress.at(-1).done, 26);
+  });
+
+  test("일괄 응답의 stopReason 을 남기고 max_tokens 면 잘렸다고 경고한다", async () => {
+    const logs = [];
+    const converse = fakeConverse(() => ({ text: bulkReply(), stopReason: "max_tokens" }));
+    const out = await generateNarration(base(converse, { log: (level, msg, fields) => logs.push({ level, msg, fields }) }));
+    assert.equal(Object.keys(out.narration.items).length, 26);
+    assert.ok(logs.some((l) => l.fields?.stopReason === "max_tokens"));
+    assert.ok(logs.some((l) => l.level === "warn" && /잘림/.test(l.msg)));
+    const quiet = [];
+    await generateNarration(base(fakeConverse(() => ({ text: bulkReply(), stopReason: "end_turn" })), { log: (level, msg, fields) => quiet.push({ level, msg, fields }) }));
+    assert.ok(quiet.some((l) => l.fields?.stopReason === "end_turn"));
+    assert.ok(!quiet.some((l) => /잘림/.test(l.msg)));
   });
 });
