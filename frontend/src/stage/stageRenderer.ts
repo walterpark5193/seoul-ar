@@ -42,6 +42,8 @@ const CAMERA_SECONDS = 0.8;
 const MAX_DT = 0.1;
 const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 1.6;
+/** setPan 범위(계약 13.8: panX ∈ [−1, 1]). */
+const PAN_MAX = 1;
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const mix3 = (a: Vec3, b: Vec3, t: number): Vec3 => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
@@ -56,6 +58,11 @@ export interface StageRenderer {
   setMode(mode: StageMode, instant?: boolean): void;
   /** target에서 카메라까지 거리를 1/z배로. 0.7~1.6 클램프. 모드 보간·resize 뒤에도 유지. */
   setZoom(z: number): void;
+  /**
+   * 계약 13.8: 카메라 위치와 target을 카메라 오른쪽 축으로 p·W1만큼 옮긴다. W1 = tan(hfov/2)·D1은 지금 기본 포즈
+   * (화면 비율 맞춤·모드 보간 포함)의 확대 1배 절반 폭. setZoom 뒤에 적용, [−1, 1] 클램프, 모드 보간·resize 뒤에도 유지.
+   */
+  setPan(p: number): void;
   onFrame(cb: (dt: number) => void): () => void; resize(): void; dispose(): void;
 }
 
@@ -92,13 +99,24 @@ export function createStageRenderer(
   let elapsed = CAMERA_SECONDS; // >= CAMERA_SECONDS면 보간 끝
 
   let zoom = 1;
-  // current는 확대 전 기준 포즈(보간 대상). 카메라에만 확대를 얹는다.
+  let pan = 0;
+  // current는 확대 전 기준 포즈(보간 대상). 카메라에만 확대(target 쪽으로 1/zoom)와 옆 이동(pan·W1)을 얹는다.
   const apply = (p: CameraPose) => {
     current = p;
-    const [tx, ty, tz] = p.target;
-    camera.position.set(tx + (p.pos[0] - tx) / zoom, ty + (p.pos[1] - ty) / zoom, tz + (p.pos[2] - tz) / zoom);
-    camera.lookAt(...p.target);
     if (camera.fov !== p.fov) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
+    const [px, py, pz] = p.target;
+    const dx = p.pos[0] - px, dy = p.pos[1] - py, dz = p.pos[2] - pz;
+    let tx = px, tz = pz;
+    if (pan !== 0) {
+      // 오른쪽 축 = 시선(−d) × 위(0,1,0) = (dz, 0, −dx). three lookAt의 카메라 x축과 같다.
+      const len = Math.hypot(dz, dx);
+      const [rx, rz] = len > 1e-9 ? [dz / len, -dx / len] : [1, 0];
+      const w1 = Math.tan((p.fov * Math.PI) / 360) * camera.aspect * Math.hypot(dx, dy, dz);
+      tx += rx * pan * w1;
+      tz += rz * pan * w1;
+    }
+    camera.position.set(tx + dx / zoom, py + dy / zoom, tz + dz / zoom);
+    camera.lookAt(tx, py, tz);
   };
   apply(MAP_POSE);
   const poseFor = (m: StageMode) => (m === "spread" ? spreadPoseFor(camera.aspect) : mapPoseFor(camera.aspect));
@@ -119,6 +137,11 @@ export function createStageRenderer(
 
   const setZoom = (z: number) => {
     zoom = Number.isFinite(z) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) : 1;
+    apply(current);
+  };
+
+  const setPan = (v: number) => {
+    pan = Number.isFinite(v) ? Math.min(PAN_MAX, Math.max(-PAN_MAX, v)) : 0;
     apply(current);
   };
 
@@ -151,7 +174,7 @@ export function createStageRenderer(
   });
 
   return {
-    world, camera, canvas, setMode, setZoom, resize,
+    world, camera, canvas, setMode, setZoom, setPan, resize,
     onFrame(cb) { listeners.add(cb); return () => { listeners.delete(cb); }; },
     dispose() {
       renderer.setAnimationLoop(null);

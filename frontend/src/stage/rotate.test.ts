@@ -47,7 +47,7 @@ describe("DEFAULT_ROTATE", () => {
     });
   });
   it("initial state", () => {
-    expect(createRotator().state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(createRotator().state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
   });
 });
 
@@ -69,7 +69,7 @@ describe("one hand", () => {
     const r = createRotator();
     r.move(P(0.9), 0);
     r.moveTwo(P(0.1), P(0.9), 0);
-    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
     // 잡은 점이 기준: 잡기 전 커서 위치에서 튀지 않음
     r.grabOne(P(0.2), 10);
     expect(r.state.yaw).toBe(0);
@@ -216,7 +216,7 @@ describe("release and inertia", () => {
     const yaw = r.state.yaw;
     expect(yaw).not.toBe(0);
     r.catch();
-    expect(r.state).toEqual({ yaw, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw, zoom: 1, mode: "idle", panX: 0 });
     expect(r.tick(1).yaw).toBe(yaw);
   });
   it("catch when idle or held is a no-op", () => {
@@ -235,7 +235,7 @@ describe("release and inertia", () => {
     r.tick(0.1);
     const yaw = r.state.yaw;
     r.grabOne(P(0.7), t + 100);
-    expect(r.state).toEqual({ yaw, zoom: 1, mode: "one" });
+    expect(r.state).toEqual({ yaw, zoom: 1, mode: "one", panX: 0 });
     expect(r.tick(0.5).yaw).toBe(yaw); // 관성 없음
     r.move(P(0.8), t + 150);           // 그대로 끌면 이어서 돌림
     expect(deg(dAng(yaw, r.state.yaw))).toBeCloseTo(18, 6);
@@ -246,7 +246,7 @@ describe("release and inertia", () => {
   it("release when not held is a no-op", () => {
     const r = createRotator();
     r.release(0);
-    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
     flick(r);
     r.release(200);
     expect(r.state.mode).toBe("spinning");
@@ -360,8 +360,8 @@ describe("reset", () => {
       prevYaw = s.yaw;
       prevZoom = s.zoom;
     }
-    expect(a.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle" }); // 0.6초
-    expect(a.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(a.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 }); // 0.6초
+    expect(a.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
 
     // 170° + 18° = 188° = −172° → 0: 음수 쪽으로(±180°를 넘지 않음)
     const b = at170();
@@ -383,13 +383,13 @@ describe("reset", () => {
     const c = at170();
     c.wheel(1);
     c.reset(true);
-    expect(c.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
-    expect(c.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(c.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
+    expect(c.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
   });
   it("reset at rest is immediately idle", () => {
     const r = createRotator();
     r.reset();
-    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
   });
   it("reset while spinning stops spin", () => {
     const r = createRotator();
@@ -398,14 +398,14 @@ describe("reset", () => {
     r.reset();
     expect(r.state.mode).toBe("resetting");
     for (let i = 0; i < 7; i++) r.tick(0.1);
-    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
     expect(r.tick(0.5).yaw).toBe(0); // 남은 관성 없음
 
     const q = createRotator();
     flick(q);
     q.tick(0.1);
     q.reset(true);
-    expect(q.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(q.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
     expect(q.tick(0.5).yaw).toBe(0);
   });
   it("reset drops hold", () => {
@@ -413,7 +413,7 @@ describe("reset", () => {
     drag(r, 0.4, 0.5, 0, 50);
     r.reset(true);
     r.move(P(0.9), 60);
-    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle" });
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
   });
   it("catch during reset keeps angle", () => {
     const r = createRotator();
@@ -498,5 +498,228 @@ describe("robustness", () => {
     const s = r.state as { yaw: number };
     s.yaw = 3;
     expect(r.state.yaw).toBe(0);
+  });
+});
+
+// ---- 13.8 펼침 화면 확대: 가리키는 곳 기준(panX), 회전 잠금 ----
+
+/** 기준점 s(ndc x) 아래에 보이는 장면 위치(W1 단위): panX + s/zoom. */
+const sceneAt = (r: Rotator, s: number) => r.state.panX + s / r.state.zoom;
+const panLimit = (z: number) => (z <= 1 ? 0 : 1 - 1 / z);
+
+describe("zoomAt (13.8)", () => {
+  it("keeps the scene point under the anchor fixed (pure formula)", () => {
+    const r = createRotator();
+    // 클램프에 걸리지 않는 순서(각 단계 뒤 |panX| < 1 − 1/z를 같이 확인)
+    const steps: [number, number][] = [[1.6, -0.9], [1.4, -0.9], [1.6, 0.6], [1.25, -0.3], [1.45, 0.95]];
+    for (const [z, s] of steps) {
+      const before = sceneAt(r, s);
+      r.zoomAt(z, s);
+      expect(r.state.zoom).toBeCloseTo(z, 12);
+      expect(Math.abs(r.state.panX)).toBeLessThan(panLimit(z));
+      expect(sceneAt(r, s)).toBeCloseTo(before, 12);
+    }
+    // 첫 단계 값: panX = s/1 − s/1.6
+    const q = createRotator();
+    q.zoomAt(1.6, -0.9);
+    expect(q.state.panX).toBeCloseTo(-0.9 + 0.9 / 1.6, 12);
+    expect(q.state.panX).toBeLessThan(0); // 왼쪽(1위 쪽)을 본다
+  });
+  it("centre anchor keeps panX 0", () => {
+    const r = createRotator();
+    for (const z of [1.2, 1.6, 0.8, 1.4, 1]) {
+      r.zoomAt(z, 0);
+      expect(r.state.panX).toBe(0);
+    }
+  });
+  it("clamps |panX| ≤ 1 − 1/z, panX 0 when z ≤ 1, zoom to [zoomMin, zoomMax]", () => {
+    const r = createRotator();
+    r.zoomAt(1.6, -1);
+    expect(r.state.panX).toBeCloseTo(-(1 - 1 / 1.6), 12); // 끝 기준이면 딱 한계
+    r.zoomAt(1.2, 1); // 공식대로면 −0.583 → 한계 −(1 − 1/1.2)
+    expect(r.state.zoom).toBeCloseTo(1.2, 12);
+    expect(r.state.panX).toBeCloseTo(-(1 - 1 / 1.2), 12);
+    r.zoomAt(0.9, -0.5);
+    expect(r.state.panX).toBe(0);
+    r.zoomAt(1.5, 0.8);
+    r.zoomAt(1, 0.8);
+    expect(r.state.panX).toBe(0);
+    r.zoomAt(5, -1);
+    expect(r.state.zoom).toBe(1.6);
+    r.zoomAt(0.1, -1);
+    expect(r.state.zoom).toBe(0.7);
+    expect(r.state.panX).toBe(0);
+
+    // 무작위 순서에서도 늘 한계 안(결정적 의사난수)
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const g = createRotator();
+    for (let i = 0; i < 500; i++) {
+      g.zoomAt(0.5 + 1.5 * rnd(), rnd() * 2 - 1);
+      const { zoom, panX } = g.state;
+      expect(zoom).toBeGreaterThanOrEqual(0.7);
+      expect(zoom).toBeLessThanOrEqual(1.6);
+      expect(Math.abs(panX)).toBeLessThanOrEqual(panLimit(zoom) + 1e-12);
+      if (zoom <= 1) expect(panX).toBe(0);
+    }
+  });
+  it("bad input: non-finite z ignored, non-finite anchor = centre, anchor clamped to [−1, 1]", () => {
+    const r = createRotator();
+    r.zoomAt(NaN, -0.5);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
+    r.zoomAt(1.4, NaN);
+    expect(r.state.zoom).toBeCloseTo(1.4, 12);
+    expect(r.state.panX).toBe(0);
+    const a = createRotator();
+    const b = createRotator();
+    a.zoomAt(1.6, -5);
+    b.zoomAt(1.6, -1);
+    expect(a.state.panX).toBeCloseTo(b.state.panX, 12);
+  });
+  it("keeps yaw and mode (spin continues)", () => {
+    const r = createRotator();
+    flick(r);
+    const yaw = r.state.yaw;
+    r.zoomAt(1.3, 0.5);
+    expect(r.state.mode).toBe("spinning");
+    expect(r.state.yaw).toBe(yaw);
+  });
+});
+
+describe("wheel with anchor (13.8)", () => {
+  it("wheel(deltaY, anchor) zooms one step anchored at the pointer", () => {
+    const r = createRotator();
+    const before = sceneAt(r, -0.9);
+    r.wheel(-1, -0.9);
+    expect(r.state.zoom).toBeCloseTo(1.1, 12);
+    expect(r.state.panX).toBeCloseTo(-0.9 + 0.9 / 1.1, 12);
+    expect(sceneAt(r, -0.9)).toBeCloseTo(before, 12);
+    const b2 = sceneAt(r, -0.9);
+    r.wheel(-1, -0.9);
+    expect(r.state.zoom).toBeCloseTo(1.21, 12);
+    expect(sceneAt(r, -0.9)).toBeCloseTo(b2, 12);
+    // 기준점 없는 휠은 가운데 기준: panX 그대로(확대는 한계를 넓히기만)
+    const p = r.state.panX;
+    r.wheel(-1);
+    expect(r.state.zoom).toBeCloseTo(1.331, 12);
+    expect(r.state.panX).toBe(p);
+    // 1배로 돌아오면 0
+    r.wheel(1, 0.3);
+    r.wheel(1, 0.3);
+    r.wheel(1, 0.3);
+    expect(r.state.zoom).toBeCloseTo(1, 12);
+    expect(r.state.panX).toBe(0);
+  });
+  it("map: anchor 0 (default) never pans", () => {
+    const r = createRotator();
+    for (const d of [-1, -1, -1, 1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1]) {
+      r.wheel(d);
+      expect(r.state.panX).toBe(0);
+    }
+  });
+});
+
+describe("two hands zoom at midpoint (13.8)", () => {
+  it("yaw locked: moveTwo zooms anchored at the midpoint ndc (x·2 − 1), no yaw", () => {
+    const r = createRotator();
+    r.setYawLocked(true);
+    r.grabTwo(P(0.05), P(0.15), 0); // 중점 0.1 → ndc −0.8, 거리 0.1
+    const before = sceneAt(r, -0.8);
+    r.moveTwo(P(0.025), P(0.175), 16); // 거리 0.15 → 1.5배
+    expect(r.state.zoom).toBeCloseTo(1.5, 12);
+    expect(r.state.panX).toBeCloseTo(-0.8 + 0.8 / 1.5, 12);
+    expect(sceneAt(r, -0.8)).toBeCloseTo(before, 12);
+    expect(r.state.yaw).toBe(0);
+    // 중점이 옮겨 가면 새 중점이 기준(누적): 중점 0.2 → ndc −0.6
+    const b2 = sceneAt(r, -0.6);
+    r.moveTwo(P(0.12), P(0.28), 33); // 거리 0.16 → 1.6배
+    expect(r.state.zoom).toBeCloseTo(1.6, 12);
+    expect(sceneAt(r, -0.6)).toBeCloseTo(b2, 12);
+    expect(r.state.yaw).toBe(0);
+    r.release(50);
+    expect(r.state.mode).toBe("idle");
+    expect(r.state.panX).toBeCloseTo(b2 + 0.6 / 1.6, 12); // 놓아도 그대로
+  });
+  it("yaw unlocked (map): two-hand zoom stays centred, panX 0 (existing behaviour)", () => {
+    const r = createRotator();
+    r.grabTwo(P(0.05), P(0.15), 0);
+    r.moveTwo(P(0.025), P(0.175), 16);
+    expect(r.state.zoom).toBeCloseTo(1.5, 12);
+    expect(r.state.panX).toBe(0);
+    r.moveTwo(P(0.3), P(0.45), 33); // 중점 이동은 회전
+    expect(deg(r.state.yaw)).toBeGreaterThan(0);
+    expect(r.state.panX).toBe(0);
+  });
+});
+
+describe("setYawLocked (13.8)", () => {
+  it("locked: move/moveTwo do not change yaw, flicks do not spin", () => {
+    const r = createRotator();
+    r.setYawLocked(true);
+    flick(r);
+    expect(r.state.yaw).toBe(0);
+    expect(r.state.mode).toBe("idle");
+    expect(r.tick(0.5).yaw).toBe(0);
+    r.grabTwo(P(0.2), P(0.4), 1000);
+    for (let i = 1; i <= 5; i++) r.moveTwo(P(0.2 + 0.04 * i), P(0.4 + 0.04 * i), 1000 + 20 * i);
+    expect(r.state.yaw).toBe(0);
+    r.release(1100);
+    expect(r.state.mode).toBe("idle");
+    expect(r.tick(0.5).yaw).toBe(0);
+  });
+  it("locking stops inertia; yaw kept", () => {
+    const r = createRotator();
+    flick(r);
+    r.tick(0.1);
+    const yaw = r.state.yaw;
+    r.setYawLocked(true);
+    expect(r.state.mode).toBe("idle");
+    expect(r.tick(0.5).yaw).toBe(yaw);
+  });
+  it("unlock mid-hold: only motion after unlocking turns (no jump)", () => {
+    const r = createRotator();
+    r.grabOne(P(0.4), 0);
+    r.setYawLocked(true);
+    r.move(P(0.6), 16);
+    expect(r.state.yaw).toBe(0);
+    r.setYawLocked(false);
+    r.move(P(0.7), 33);
+    expect(deg(r.state.yaw)).toBeCloseTo(18, 6);
+  });
+  it("reset still returns yaw to 0 while locked", () => {
+    const r = createRotator();
+    drag(r, 0.4, 0.6, 0, 50);
+    r.move(P(0.6), 300);
+    r.release(400);
+    r.setYawLocked(true);
+    r.reset();
+    for (let i = 0; i < 7; i++) r.tick(0.1);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
+  });
+});
+
+describe("reset clears panX (13.8)", () => {
+  it("animated: panX eases to 0 with zoom, staying within the clamp", () => {
+    const r = createRotator();
+    r.zoomAt(1.6, -0.9);
+    const p0 = r.state.panX;
+    r.reset();
+    expect(r.state.mode).toBe("resetting");
+    let prev = p0;
+    for (let i = 0; i < 5; i++) {
+      const s = r.tick(0.1);
+      expect(s.panX).toBeLessThan(0);
+      expect(s.panX).toBeGreaterThan(prev);
+      expect(Math.abs(s.panX)).toBeLessThanOrEqual(panLimit(s.zoom) + 1e-12);
+      prev = s.panX;
+    }
+    expect(r.tick(0.1)).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
+  });
+  it("instant", () => {
+    const r = createRotator();
+    r.zoomAt(1.6, 0.7);
+    expect(r.state.panX).not.toBe(0);
+    r.reset(true);
+    expect(r.state).toEqual({ yaw: 0, zoom: 1, mode: "idle", panX: 0 });
   });
 });

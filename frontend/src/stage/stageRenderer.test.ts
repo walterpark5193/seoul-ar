@@ -4,6 +4,7 @@ import type { WebGLRenderer } from "three";
 import {
   MAP_POSE, SPREAD_POSE, createStageRenderer, lerpPose, mapPoseFor, spreadPoseFor, type CameraPose,
 } from "./stageRenderer";
+import { createRotator } from "./rotate";
 import { createSeoulScene } from "../scene/seoulScene";
 import { spreadLayout } from "../scene/spreadLayout";
 import type { Geo } from "../geo/types";
@@ -279,6 +280,169 @@ describe("createStageRenderer", () => {
       const p = spreadPoseFor(4 / 3);
       expect(dist(r, p)).toBeCloseTo(new Vector3(...p.pos).distanceTo(new Vector3(...p.target)) / 1.5, 9);
       r.dispose();
+    });
+  });
+});
+
+// ---- 13.8 setPan: 확대 1배 절반 폭 W1 단위로 카메라 오른쪽 축을 따라 옆으로 ----
+
+describe("setPan (13.8)", () => {
+  const mk = (w = 1280, h = 720) => {
+    vi.stubGlobal("window", { devicePixelRatio: 1, innerWidth: w, innerHeight: h });
+    const box = { clientWidth: w, clientHeight: h, append: vi.fn() };
+    const gl = fakeRenderer();
+    const r = createStageRenderer(box as unknown as HTMLElement, { reducedMotion: false, makeRenderer: () => gl })!;
+    const loop = vi.mocked(gl.setAnimationLoop).mock.calls[0]![0] as (t: number) => void;
+    return { r, box, loop };
+  };
+  /** 포즈의 확대 1배 절반 폭: tan(hfov/2)·D1. */
+  const w1 = (p: CameraPose, aspect: number) =>
+    Math.tan((p.fov * Math.PI) / 360) * aspect * new Vector3(...p.pos).distanceTo(new Vector3(...p.target));
+  /** 확대 z·옆 이동 pan일 때 기대 카메라 위치(오른쪽 축 = 시선 × 위). */
+  function expected(p: CameraPose, aspect: number, z: number, pan: number): { pos: Vector3; target: Vector3 } {
+    const t = new Vector3(...p.target);
+    const off = new Vector3(...p.pos).sub(t);
+    const right = off.clone().negate().cross(new Vector3(0, 1, 0)).normalize();
+    const shift = right.multiplyScalar(pan * w1(p, aspect));
+    return { pos: t.clone().add(off.divideScalar(z)).add(shift), target: t.clone().add(shift) };
+  }
+  /** 카메라가 보는 점(시선 위, 거리 d). */
+  const lookPoint = (cam: PerspectiveCamera, d: number) =>
+    cam.position.clone().add(cam.getWorldDirection(new Vector3()).multiplyScalar(d));
+
+  it("shifts camera and target by p·W1 along the camera right axis; view direction unchanged", () => {
+    for (const mode of ["map", "spread"] as const) {
+      const { r } = mk();
+      r.setMode(mode, true);
+      const pose = mode === "map" ? mapPoseFor(16 / 9) : spreadPoseFor(16 / 9);
+      r.camera.updateMatrixWorld();
+      const dir0 = r.camera.getWorldDirection(new Vector3());
+      const right0 = new Vector3().setFromMatrixColumn(r.camera.matrixWorld, 0);
+      const pos0 = r.camera.position.clone();
+      r.setPan(0.5);
+      r.camera.updateMatrixWorld();
+      const W1 = w1(pose, 16 / 9);
+      expect(r.camera.position.clone().sub(pos0).distanceTo(right0.clone().multiplyScalar(0.5 * W1))).toBeLessThan(1e-9);
+      expect(r.camera.getWorldDirection(new Vector3()).distanceTo(dir0)).toBeLessThan(1e-9);
+      const D1 = new Vector3(...pose.pos).distanceTo(new Vector3(...pose.target));
+      const e = expected(pose, 16 / 9, 1, 0.5);
+      expect(lookPoint(r.camera, D1).distanceTo(e.target)).toBeLessThan(1e-9); // target도 같이 옮겨졌다
+      // setZoom 뒤에 적용: 확대한 거리 + 같은 W1(확대 1배 기준) 이동
+      r.setZoom(1.6);
+      r.camera.updateMatrixWorld();
+      const ez = expected(pose, 16 / 9, 1.6, 0.5);
+      expect(r.camera.position.distanceTo(ez.pos)).toBeLessThan(1e-9);
+      expect(lookPoint(r.camera, D1 / 1.6).distanceTo(ez.target)).toBeLessThan(1e-9);
+      r.setPan(-0.25);
+      expect(r.camera.position.distanceTo(expected(pose, 16 / 9, 1.6, -0.25).pos)).toBeLessThan(1e-9);
+      r.dispose();
+    }
+  });
+
+  it("pan 0 (and NaN) is exactly the unpanned pose; clamped to [−1, 1]", () => {
+    const { r } = mk();
+    const pose = mapPoseFor(16 / 9);
+    r.setZoom(1.3);
+    const unpanned = r.camera.position.clone();
+    r.setPan(0.4);
+    r.setPan(0);
+    expect(r.camera.position.equals(unpanned)).toBe(true);
+    r.setPan(0.4);
+    r.setPan(NaN);
+    expect(r.camera.position.equals(unpanned)).toBe(true);
+    r.setPan(5);
+    expect(r.camera.position.distanceTo(expected(pose, 16 / 9, 1.3, 1).pos)).toBeLessThan(1e-9);
+    r.setPan(-5);
+    expect(r.camera.position.distanceTo(expected(pose, 16 / 9, 1.3, -1).pos)).toBeLessThan(1e-9);
+    r.dispose();
+  });
+
+  it("pan kept across setMode tween and resize (W1 of the current fitted pose)", () => {
+    const { r, box, loop } = mk();
+    loop(0);
+    r.setZoom(1.5);
+    r.setPan(-0.2);
+    r.setMode("spread");
+    loop(100); // 보간 중에도 옆 이동이 얹혀 있다
+    r.camera.updateMatrixWorld();
+    const right = new Vector3().setFromMatrixColumn(r.camera.matrixWorld, 0);
+    expect(right.distanceTo(new Vector3(1, 0, 0))).toBeLessThan(1e-9);
+    for (let t = 200; t <= 2000; t += 100) loop(t);
+    expect(r.camera.position.distanceTo(expected(spreadPoseFor(16 / 9), 16 / 9, 1.5, -0.2).pos)).toBeLessThan(1e-9);
+    box.clientWidth = 1024; box.clientHeight = 768;
+    r.resize();
+    for (let t = 2100; t <= 4000; t += 100) loop(t);
+    const e = expected(spreadPoseFor(4 / 3), 4 / 3, 1.5, -0.2);
+    expect(r.camera.position.distanceTo(e.pos)).toBeLessThan(1e-9);
+    r.camera.updateMatrixWorld();
+    const D1 = new Vector3(...spreadPoseFor(4 / 3).pos).distanceTo(new Vector3(...spreadPoseFor(4 / 3).target));
+    expect(lookPoint(r.camera, D1 / 1.5).distanceTo(e.target)).toBeLessThan(1e-9);
+    r.setMode("map", true);
+    expect(r.camera.position.distanceTo(expected(mapPoseFor(4 / 3), 4 / 3, 1.5, -0.2).pos)).toBeLessThan(1e-9);
+    r.dispose();
+  });
+
+  describe("three projection: spread 16:9, zoom 1.6 anchored at ndc −0.9 (rotator zoomAt → setZoom/setPan)", () => {
+    const s = createSeoulScene(geo, { reducedMotion: true, makeTextTexture: wideText });
+    const sum = summary[month]!;
+    s.setLayout("spread", sum, "price");
+    s.group.updateMatrixWorld(true);
+    const first = spreadLayout(sum, "price", NAMES)[0]!;
+
+    const view = (z: number, pan: number) => {
+      const { r } = mk();
+      r.setMode("spread", true);
+      r.setZoom(z);
+      r.setPan(pan);
+      r.camera.updateMatrixWorld();
+      return r;
+    };
+    const rot = createRotator();
+    rot.zoomAt(1.6, -0.9);
+
+    it("rank-1 slot is the left end of the arc (x = −0.9·sin50°)", () => {
+      expect(first.rank).toBe(1);
+      expect(first.x).toBeCloseTo(-0.9 * Math.sin((50 * Math.PI) / 180), 9);
+      expect(rot.state.zoom).toBeCloseTo(1.6, 12);
+      expect(rot.state.panX).toBeLessThan(0);
+    });
+
+    it("the target-plane point under the anchor stays at ndc −0.9 (rotator and renderer units agree)", () => {
+      const base = view(1, 0);
+      const pose = spreadPoseFor(16 / 9);
+      const anchored = expected(pose, 16 / 9, 1, -0.9).target; // target 평면에서 ndc −0.9 아래
+      expect(anchored.clone().project(base.camera).x).toBeCloseTo(-0.9, 9);
+      const r = view(rot.state.zoom, rot.state.panX);
+      expect(anchored.clone().project(r.camera).x).toBeCloseTo(-0.9, 9);
+      base.dispose();
+      r.dispose();
+    });
+
+    it("rank-1 pillar stays inside NDC ±1 and comes toward the centre compared with no pan", () => {
+      const panned = view(rot.state.zoom, rot.state.panX);
+      const plain = view(rot.state.zoom, 0);
+      const ep = meshExtent(guMesh(s.group, first.gu), panned.camera);
+      const e0 = meshExtent(guMesh(s.group, first.gu), plain.camera);
+      expect(ep.minX >= -1 && ep.maxX <= 1 && ep.minY >= -1 && ep.maxY <= 1, `panned ${fmt(ep)}`).toBe(true);
+      const cx = (e: Extent) => (e.minX + e.maxX) / 2;
+      expect(Math.abs(cx(ep)), `panned ${fmt(ep)} vs plain ${fmt(e0)}`).toBeLessThan(Math.abs(cx(e0)));
+      // 슬롯 바닥 중심점도
+      const slot = new Vector3(first.x, 0, first.z);
+      expect(Math.abs(slot.clone().project(panned.camera).x)).toBeLessThan(Math.abs(slot.clone().project(plain.camera).x));
+      expect(Math.abs(slot.clone().project(panned.camera).x)).toBeLessThan(1);
+      panned.dispose();
+      plain.dispose();
+    });
+
+    it("centre anchor keeps panX 0: identical to plain zoom", () => {
+      const c = createRotator();
+      c.zoomAt(1.6, 0);
+      expect(c.state.panX).toBe(0);
+      const a = view(c.state.zoom, c.state.panX);
+      const b = view(1.6, 0);
+      expect(a.camera.position.equals(b.camera.position)).toBe(true);
+      a.dispose();
+      b.dispose();
     });
   });
 });
