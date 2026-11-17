@@ -436,7 +436,7 @@ export interface Rotator {
   grabTwo(a: Point, b: Point, t: number): void;   // 잡는 순간의 중점 x·거리·zoom을 기준으로
   move(p: Point, t: number): void;               // one: yaw += Δx × degPerScreen(라디안 환산). 손이 오른쪽(+x)이면 yaw 증가
   moveTwo(a: Point, b: Point, t: number): void;   // 중점 Δx → yaw, zoom = zoom0 × (거리/거리0), 클램프
-  release(t: number): void;                      // 최근 velocityWindowMs 각속도 ≥ flickMinDegPerSec면 spinning(상한 maxSpeedDeg), 아니면 idle
+  release(t: number): void;                      // t 이전 velocityWindowMs 구간 표본의 각속도 ≥ flickMinDegPerSec면 spinning(상한 maxSpeedDeg), 아니면 idle
   catch(): void;                                 // spinning·resetting → idle, 각도 유지
   wheel(deltaY: number): void;                   // deltaY<0 확대(zoom ×(1+wheelStep)), >0 축소(÷), 클램프
   reset(instant?: boolean): void;                // yaw→0(최단 방향), zoom→1, resetSeconds 보간(instant면 즉시)
@@ -450,6 +450,8 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 - `secondary`: 손이 2개 이상이면 primary가 아닌 손 중 손바닥이 가장 큰 손, 아니면 null.
 - `twoFist`: 손이 정확히 2개, 둘 다 `Closed_Fist`·≥minScore가 confirmFrames 연속, 투표 중 아님 → 한 번. 래치(풀릴 때까지 재발생 없음). 단일 주먹 상태(fist)와 독립(그대로 유지).
 - `twoFistEnd`: twoFist 상태에서 어느 한 손이 주먹이 아님이 confirmFrames 연속이거나, 손이 2개 미만인 상태가 releaseAfterMs 이상 → 한 번. 투표 시작 시 조용히 해제.
+- `push(frame, ctx: { voting: boolean; spinning?: boolean })`: `spinning`(관성 중)이면 grab은 cooldownMs를 무시한다(확정 confirmFrames는 그대로). 그래서 관성 중 놓고 300ms 뒤 쥐는 주먹도 바로 grab → catch가 된다. stageView가 state.spinning을 넘긴다.
+- 손바닥 간격이 0.04 미만인 두 손은 같은 손이 둘로 잡힌 것으로 보고 두 손 회전(grabTwo·moveTwo)을 하지 않는다.
 - 기존 규칙(grab/release/spread/victory, 추적 손 기억, 정지 가드)은 그대로.
 
 ### 13.4 무대 상태 (`stageState`·`effects`)
@@ -457,6 +459,7 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 - `release`: rotate "one"이면 rotate="none" + rotate.release(lift 경로 없음). 아니면 지금처럼.
 - `twoFist`: mode "map", 투표 진행 중 아님 → rotate="two" + rotate.grabTwo(one이었으면 전환). lifted 중이면(같은 프레임의 grab 포함) 들기를 취소(lifted=null, focus 변화 없음)하고 회전을 시작한다 — 두 주먹 = 돌리기 우선. 그 외 무시. 이후 주먹을 놓아도 focus가 되지 않는다.
 - `twoFistEnd`: rotate "two"면 rotate="none" + rotate.release.
+- twoFist가 들기를 취소할 때(cause twoFist, lifted 비null→null) diffEffects는 `narrate.stop`도 낸다(든 구의 해설이 계속 나오지 않게).
 - `spinState`: spinning 갱신(stageView가 회전기 모드 변화 때 보냄).
 - spread로 들어갈 때, victory, voteStart, setInput 변경 → rotate="none", spinning=false, 효과 rotate.reset. (spread·victory는 기존 효과와 함께, 순서는 scene.layout 앞.)
 - 회전 중(rotate≠"none")에는 hover 이벤트를 상태에 반영하지 않는다(hover=null 유지).
@@ -467,12 +470,18 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 ### 13.5 렌더러·입력
 - `StageRenderer.setZoom(z: number)`: 현재 포즈(화면 비율 맞춤·모드 보간 포함)의 target에서 카메라까지 거리를 1/z배. 0.7~1.6 클램프. 포즈 보간·resize와 함께 유지.
 - `PointerHandlers.wheel?(deltaY: number)`: attachPointer가 wheel을 받으면 preventDefault 후 호출(passive: false).
+- 휠 누적: stageView가 deltaMode를 픽셀로 환산(줄 ×16, 페이지 ×800)해 deltaY를 누적하고 100 단위당 `rotator.wheel` 한 단계(부호 유지, 나머지는 이월)를 부른다. 트랙패드의 잔 값도 한 칸 마우스 휠도 자연스럽다(줄 단위 장치는 약 2칸에 한 단계). 지도 모드·lifted 없음·투표 중 아님일 때만 반영한다.
+- 한 손 회전 중 커서 손을 다시 잡거나 primary가 다른 손으로 바뀐 프레임은 `move` 대신 `grabOne(새 점, t)`로 기준만 다시 잡는다(각도·관성 유지, 튐 없음).
+- release 시각: stageView는 rotate "one"·"two" 동안 추적 손(두 손이면 어느 한 손)이 처음 주먹이 아닌 프레임의 t를 기록하고, rotate.release 효과 때 `rotator.release(tOpen)`을 부른다(기록이 없으면 현재 t). 손을 펴면서 휙 미는 동작도 속도로 잡힌다.
 
 ### 13.6 채널·큰 화면
+- 모든 StageMessage에 `{yaw, zoom}`이 들어간다(들기·펼치기·투표 등 종류와 무관, 하트비트 포함).
 - `StageMessage`에 선택 필드 `yaw?: number`((-π, π], 유한수), `zoom?: number`([0.7, 1.6]). ALLOWED_KEYS.stage에 추가. `toStageMessage(s, ts, view?: { yaw: number; zoom: number })`.
 - 무대: yaw·zoom이 바뀌는 동안 최대 5Hz로 StageMessage 발행, 멈추면 1회, 하트비트에도 포함.
 - `StageFollowOptions.onView?(yaw: number, zoom: number)`: StageMessage에 값이 있으면 호출(따라가기 중일 때만). 없거나 stale 타임아웃이면 (0, 1).
 - orbitView: 큰 화면 모드(`?stage=1`)에서만 onView를 적용(도시 group 회전 + 확대, 부드럽게 따라가기). 일반 관객 폰은 무시.
+- 큰 화면은 무대 view를 따르는 동안(최근 StageMessage가 살아 있는 동안) 자동 회전을 멈추고 받은 yaw를 그대로 쓴다. 무대가 끊겨(stale) (0, 1)로 돌아가면 자동 회전을 다시 시작한다. reduced-motion이면 보간 없이 즉시 적용한다.
+- createViewFollower는 새 목표 yaw를 직전 목표 기준으로 unwrap해(±π 경계에서 최단 방향 유지) 빠른 회전에서도 거꾸로 돌지 않는다.
 
 ### 13.7 안내 줄 (`hud.ts renderHints`)
 - 손: "주먹: 들어올리기 · 빈 곳 주먹 끌기: 돌리기 · 두 주먹: 돌리기·확대 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거"
