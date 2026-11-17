@@ -12,7 +12,7 @@ import { esc } from "../ui/html";
 import { replaceKeepingFocus } from "../ui/patch";
 import { drawQr } from "../ui/qr";
 import {
-  createMonthFetch, defaultFetchMonth, monthInputValue, narratingMonth, needsFetchRender, renderMonthFetch,
+  createMonthFetch, defaultFetchMonth, monthInputValue, narratingMonth, needsFetchRender, needsNarrationRecheck, renderMonthFetch,
   type FetchView, type NarrationAvailability, type StorageLike,
 } from "./monthFetch";
 import { createTimeTravel, renderTimeTravel, type TravelView } from "./timeTravel";
@@ -162,11 +162,12 @@ export const mountHostView: MountView = (root, ctx) => {
     forgetMonth: (m) => forgetMonth(m),
     toast: ctx.toast,
     onChange: (v) => {
-      const wasNarrating = narratingMonth(fetchView) !== null;
+      const prev = fetchView;
       fetchView = v;
       paintFetch(v, "view");
-      // 해설 작업이 실패나 포기로 끝나면 버튼을 다시 판단한다(성공은 reloadNarration이 다시 확인한다).
-      if (wasNarrating && v.phase === "idle" && v.error) void checkNarration(ctx.store.getState().month);
+      // 해설 작업이 어떤 식으로든 끝나면(성공, 실패, 자동 해설 90초 포기) 해설 유무를 다시 확인한다.
+      // 성공 때 reloadNarration이 부르는 확인은 아직 loading 단계라 "running"으로 남을 수 있어서, 여기서 한 번 더 확인한다.
+      if (needsNarrationRecheck(prev, v)) void checkNarration(ctx.store.getState().month);
     },
   });
 

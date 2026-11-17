@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  PRESENTER_KEY, createMonthFetch, defaultFetchMonth, isBusy, needsFetchRender, parseMonthInput, renderMonthFetch, statusLine,
+  PRESENTER_KEY, createMonthFetch, defaultFetchMonth, isBusy, needsFetchRender, needsNarrationRecheck, parseMonthInput, renderMonthFetch, statusLine,
   type FetchView,
 } from "./monthFetch";
 import type { DataIndex } from "../data/types";
@@ -326,6 +326,20 @@ describe("createMonthFetch", () => {
       expect(toast.mock.calls.length).toBe(toasts);
     });
 
+    it("the give-up ends the follow so the host re-checks and re-enables 해설 생성", async () => {
+      const { mf, views } = await fetchDone();
+      const running = mf.view;
+      await vi.advanceTimersByTimeAsync(95_000);
+      const after = mf.view;
+      expect(after).toEqual({ phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" });
+      // hostView는 이 판정이 true면 checkNarration을 다시 돌린다 → 해설이 없으면 absent → 버튼 켜짐.
+      expect(needsNarrationRecheck(running, after)).toBe(true);
+      expect(views.some((v, i) => i > 0 && needsNarrationRecheck(views[i - 1]!, v))).toBe(true);
+      const button = /<button[^>]*data-action="narrate"[^>]*>/.exec(
+        renderMonthFetch(after, { value: "2026-09", max: "2026-11", narration: { month: "202610", state: "absent" } }))?.[0] ?? "";
+      expect(button).not.toContain("disabled");
+    });
+
     it("keeps following once the job has been seen, even if it is slow", async () => {
       const { mf, emit } = await fetchDone();
       emit(auto({ done: 1 }));
@@ -483,3 +497,20 @@ describe("해설 생성 button while a narration job runs (I2)", () => {
   });
 });
 
+describe("needsNarrationRecheck", () => {
+  const running = { phase: "running" as const, kind: "narration" as const, month: "202610", jobId: "j-n", done: 3, total: 26 };
+  const loading = { phase: "loading" as const, kind: "narration" as const, month: "202610" };
+
+  it("is true whenever a narration job stops running: done, error or give-up", () => {
+    expect(needsNarrationRecheck(loading, { phase: "idle", note: "해설이 준비됐습니다" })).toBe(true);
+    expect(needsNarrationRecheck(running, { phase: "idle", error: "실패" })).toBe(true);
+    expect(needsNarrationRecheck(running, { phase: "idle", note: "2026년 10월 데이터가 준비됐습니다" })).toBe(true);
+  });
+
+  it("is false while it keeps running, and for fetch jobs", () => {
+    expect(needsNarrationRecheck(running, { ...running, done: 4 })).toBe(false);
+    expect(needsNarrationRecheck(running, loading)).toBe(false);
+    expect(needsNarrationRecheck({ phase: "running", kind: "fetch", month: "202610", jobId: "j", done: 1, total: 25 }, { phase: "idle" })).toBe(false);
+    expect(needsNarrationRecheck({ phase: "idle" }, { phase: "idle" })).toBe(false);
+  });
+});

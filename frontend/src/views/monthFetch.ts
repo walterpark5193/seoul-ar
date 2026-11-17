@@ -88,6 +88,14 @@ export function narratingMonth(v: FetchView): string | null {
   return (v.phase === "sending" || v.phase === "running" || v.phase === "loading") && v.kind === "narration" ? v.month : null;
 }
 
+/**
+ * 해설 작업이 도는 단계(sending·running·loading)를 벗어났는지: 성공, 실패, 자동 해설 포기(90초) 모두.
+ * 호스트는 이때 해설 유무를 다시 확인한다. 안 그러면 "running" 표시가 남아 버튼이 계속 꺼져 있다.
+ */
+export function needsNarrationRecheck(prev: FetchView, next: FetchView): boolean {
+  return narratingMonth(prev) !== null && narratingMonth(next) === null;
+}
+
 /** 진행 한 줄. 수집은 계약 10.5 표기 "2026년 10월 수집 중 12/25 · 강서구" 그대로. */
 export function statusLine(v: FetchView): string {
   if (v.phase === "idle") return v.note ?? "";
