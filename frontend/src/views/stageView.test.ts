@@ -11,7 +11,7 @@ import { createMockStageChannel } from "../stage/net/stageChannel";
 import { createNarrator, type AudioLike, type NarrationItem, type Narrator } from "../stage/narrator";
 import type { GestureName, HandFrame, HandObs, Point, Vec3 } from "../stage/types";
 import {
-  HAND_ERROR_LIMIT, HEARTBEAT_MS, RESULT_GUARD_MS, VOTE_TICK_MS,
+  HAND_ERROR_LIMIT, HAND_START_TIMEOUT_MS, HEARTBEAT_MS, RESULT_GUARD_MS, VOTE_TICK_MS,
   createStageController, normalizeKey, voteCandidates, voteTiming,
   type StageControllerDeps, type StartResult, type UiPart,
 } from "./stageView";
@@ -348,15 +348,15 @@ describe("stage controller", () => {
     expect(s.c.state.mode).toBe("spread");
     s.key("v"); // 카메라로 세는 투표 한 판
     for (let i = 0; i < 3; i++) {
-      s.clock.advance(1500 + VOTE_TICK_MS);
+      s.live(1500 + VOTE_TICK_MS); // 카메라가 살아 있는 동안 시간이 흐른다(프레임이 멈추면 마우스로 바뀐다)
       expect(s.c.state.vote?.phase).toBe("counting");
       s.frames(20, [hand("Open_Palm", 0.3, 0.5), hand("Open_Palm", 0.7, 0.5)]);
-      s.clock.advance(5000);
+      s.live(5000);
     }
-    s.clock.advance(3000 + VOTE_TICK_MS);
+    s.live(3000 + VOTE_TICK_MS);
     expect(s.c.state.vote?.phase).toBe("result");
     expect(s.c.state.vote?.counts).toEqual([2, 2, 2]);
-    s.clock.advance(HEARTBEAT_MS);
+    s.live(HEARTBEAT_MS);
     await flush();
     expect(s.c.publishFailed).toBe(false); // 모의 채널(toWire)이 거절한 메시지가 하나도 없다
     expect(s.wire.filter((w) => w.msg.type === "vote")).toHaveLength(1);
@@ -598,6 +598,127 @@ describe("stage controller", () => {
     expect(s.c.state.input).toBe("hands");
   });
 
+  it("hand start slower than 20s falls back to mouse with a toast, the late source is stopped (F3)", async () => {
+    let resolve!: (r: StartResult) => void;
+    const s = setup({ start: () => new Promise<StartResult>((r) => { resolve = r; }) });
+    const p = s.c.start("hands");
+    await flush();
+    expect(s.view.parts.start).toContain("준비하는 중");
+    s.clock.advance(HAND_START_TIMEOUT_MS - 1);
+    await flush();
+    expect(s.c.started).toBe(false);
+    s.clock.advance(1);
+    await p;
+    expect(s.c.started).toBe(true);
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.view.parts.start).toBeNull();
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    expect(s.toast.mock.calls[0]![0]).toContain("마우스");
+    expect(s.toast.mock.calls[0]![0]).toContain("G로 다시 시도");
+    expect(s.key(" ")).toBe(true); // 키를 다시 듣는다
+    expect(s.clock.jobs).toBe(2); // 시작 대기 타이머는 정리되고 tick·heartbeat만
+    resolve({ ok: true, source: s.src.source as unknown as HandSource }); // 늦게 도착
+    await flush();
+    expect(s.src.source.stop).toHaveBeenCalledTimes(1);
+    expect(s.src.listeners).toBe(0);
+    expect(s.c.state.input).toBe("mouse");
+    // G로 다시 시도할 수 있고, 이번에도 늦으면 같은 길로 빠진다
+    s.key("g");
+    await flush();
+    expect(s.startHands).toHaveBeenCalledTimes(2);
+    s.clock.advance(HAND_START_TIMEOUT_MS);
+    await flush();
+    expect(s.toast).toHaveBeenCalledTimes(2);
+    expect(s.c.state.input).toBe("mouse");
+    s.key("g");
+    await flush();
+    expect(s.startHands).toHaveBeenCalledTimes(3);
+  });
+
+  it("the starting overlay offers 마우스로 계속, which starts in mouse mode right away (F3)", async () => {
+    let resolve!: (r: StartResult) => void;
+    const s = setup({ start: () => new Promise<StartResult>((r) => { resolve = r; }) });
+    const p = s.c.start("hands");
+    expect(s.view.parts.start).toContain('data-start="mouse"');
+    expect(s.view.parts.start).toContain("마우스로 계속");
+    void s.c.start("mouse");
+    await p;
+    expect(s.c.started).toBe(true);
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.toast).not.toHaveBeenCalled();
+    expect(s.clock.jobs).toBe(2);
+    expect(s.narr.said.at(-1)?.id).toBe("stage-hello");
+    resolve({ ok: true, source: s.src.source as unknown as HandSource });
+    await flush();
+    expect(s.src.source.stop).toHaveBeenCalledTimes(1);
+    expect(s.c.state.input).toBe("mouse");
+  });
+
+  it("a normal hand start clears its timeout; leaving while waiting stops the late source (F3)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    expect(s.clock.jobs).toBe(2);
+    let resolve!: (r: StartResult) => void;
+    const s2 = setup({ start: () => new Promise<StartResult>((r) => { resolve = r; }) });
+    void s2.c.start("hands");
+    s2.c.dispose();
+    expect(s2.clock.jobs).toBe(0);
+    resolve({ ok: true, source: s2.src.source as unknown as HandSource });
+    await flush();
+    expect(s2.src.source.stop).toHaveBeenCalledTimes(1);
+    expect(s2.wire).toHaveLength(0); // 시작 전이었으니 아무것도 보내지 않는다
+  });
+
+  it("camera frames stopping for 1.5s in hand mode: mouse mode, the lifted gu is put down, cursor hidden, toast (F4)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    s.live(300, [hand("Open_Palm", 0.4, 0.6)]);
+    s.live(300, [hand("Closed_Fist", 0.4, 0.6)]);
+    expect(s.c.state.lifted).toBe("강남구");
+    s.wire.length = 0;
+    s.clock.advance(1200); // 프레임이 멈췄다(USB 웹캠 빠짐 등)
+    expect(s.c.state.input).toBe("hands");
+    expect(s.toast).not.toHaveBeenCalled();
+    s.clock.advance(600);
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.c.state.lifted).toBeNull();
+    expect(s.c.state.focus).toBe("강남구"); // 들고 있던 구는 그 자리에 내려놓는다
+    expect(s.src.source.stop).toHaveBeenCalled();
+    expect(s.src.listeners).toBe(0);
+    expect(s.view.cursors.at(-1)!.cls).toContain("is-hidden");
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    expect(s.toast.mock.calls[0]![0]).toContain("카메라 영상이 끊겨");
+    expect(s.wire.filter((w) => w.msg.type === "stage").at(-1)?.msg).toMatchObject({ lifted: null });
+    s.clock.advance(5000);
+    expect(s.toast).toHaveBeenCalledTimes(1);
+  });
+
+  it("no stall fallback while the page is hidden (frames pause in background tabs) (F4)", async () => {
+    let hidden = false;
+    const s = setup({ extra: { hidden: () => hidden } });
+    await s.c.start("hands");
+    s.live(300, []);
+    hidden = true;
+    s.clock.advance(10_000);
+    expect(s.c.state.input).toBe("hands");
+    hidden = false; // 돌아온 뒤에도 프레임이 안 오면 그때부터 1.5초
+    s.clock.advance(1200);
+    expect(s.c.state.input).toBe("hands");
+    s.clock.advance(600);
+    expect(s.c.state.input).toBe("mouse");
+  });
+
+  it("no stall fallback while frames keep coming, or after switching to mouse (F4)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    s.live(5000, []);
+    expect(s.c.state.input).toBe("hands");
+    s.key("g"); // 마우스로: 인식기는 그대로 두지만 정지 감시는 손 모드에서만
+    s.clock.advance(5000);
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.toast).not.toHaveBeenCalled();
+  });
+
   it("primary null for 3 frames keeps hover", async () => {
     let under: string | null = "강남구";
     const s = setup({ pick: () => under });
@@ -662,7 +783,7 @@ describe("stage controller", () => {
     const s = setup();
     await s.c.start("hands");
     s.key("v");
-    s.clock.advance(1500 + VOTE_TICK_MS);
+    s.live(1500 + VOTE_TICK_MS);
     expect(s.c.state.vote?.phase).toBe("counting");
     const votes = () => s.view.ui.set.mock.calls.filter(([part]) => part === "vote").length;
     const lives = () => s.view.ui.set.mock.calls.filter(([part]) => part === "live").length;
@@ -689,14 +810,15 @@ describe("stage controller", () => {
     expect(c2.state.vote?.method).toBe("camera");
     s.frames(5, [hand("Open_Palm")]); // prompt 중에는 세지 않는다
     expect(push).not.toHaveBeenCalled();
-    s.clock.advance(1500 + VOTE_TICK_MS);
+    // 카메라가 살아 있는 채로 counting에 들어갈 때까지(프레임을 먼저 내고 시계를 민다: 들어간 뒤의 프레임은 없다)
+    for (let k = 0; k < 100 && c2.state.vote?.phase !== "counting"; k++) s.live(33);
     expect(c2.state.vote?.phase).toBe("counting");
     expect(reset).toHaveBeenCalledTimes(1);
     s.frames(20, [hand("Open_Palm", 0.3), hand("Open_Palm", 0.7)]);
     s.frames(20, []);
     expect(push).toHaveBeenCalledTimes(40);
     expect(push.mock.calls.at(-1)![1]).toBe(0);
-    s.clock.advance(5000);
+    s.live(5000);
     expect(c2.state.vote?.counts[0]).toBe(2);
     expect(c2.state.vote?.sources[0]).toBe("camera");
     c2.dispose();

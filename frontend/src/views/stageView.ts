@@ -34,6 +34,10 @@ export const VOTE_TICK_MS = 250;
 export const HEARTBEAT_MS = 10_000;
 /** HandSource.errors(연속 인식 실패)가 이 값을 넘으면(30fps로 약 2초) 마우스로 바꾼다. */
 export const HAND_ERROR_LIMIT = 60;
+/** 손 모드 준비(카메라 권한·모델·wasm·GPU)를 이만큼 기다리고, 넘으면 마우스로 진행한다. */
+export const HAND_START_TIMEOUT_MS = 20_000;
+/** 손 모드에서 인식 프레임이 이만큼 오지 않으면 카메라 영상이 끊긴 것으로 보고 마우스로 바꾼다. */
+export const HAND_STALL_MS = 1500;
 /** 투표 결과가 뜬 뒤 이 시간 동안은 grab·spread·victory를 받지 않는다(투표 내내 쥐고 있던 주먹·키가 결과를 지우지 않게). */
 export const RESULT_GUARD_MS = 1500;
 /** 주 손이 이 시간 이상 안 보여야 진짜로 놓친 것. gestureMachine이 추적 손을 기억하는 시간과 같다. */
@@ -47,8 +51,12 @@ const HAND_FAIL: Record<HandSourceError, string> = {
   unsupported: "이 브라우저는 동작 인식을 지원하지 않아 마우스로 진행합니다",
 };
 const HAND_ERRORS_TOAST = "손 인식이 계속 실패해 마우스로 바꿨습니다. G로 다시 시도할 수 있어요";
+const HAND_SLOW_TOAST = "동작 인식 준비가 늦어 마우스로 진행합니다 · G로 다시 시도할 수 있어요";
+const HAND_STALL_TOAST = "카메라 영상이 끊겨 마우스로 바꿨습니다 · G로 다시 시도할 수 있어요";
 const AUDIO_BLOCKED_TOAST = "소리가 막혔습니다 · 화면을 한 번 눌러 주세요";
-const STARTING_HTML = `<section class="stage-start"><p class="start-note" role="status">카메라와 동작 인식을 준비하는 중</p></section>`;
+// "마우스로 계속"은 start("mouse")로 이어진다: 준비를 기다리지 않고 마우스로 바로 시작한다.
+const STARTING_HTML = `<section class="stage-start"><p class="start-note" role="status">카메라와 동작 인식을 준비하는 중</p>` +
+  `<button type="button" class="start-sub" data-start="mouse">마우스로 계속</button></section>`;
 
 // ---------- 순수 도우미 ----------
 
@@ -133,6 +141,8 @@ export interface StageControllerDeps {
   startHands(): Promise<StartResult>;
   hash(): string;
   modelReady?(): Promise<boolean>;
+  /** 페이지가 보이지 않는가(document.hidden). 숨은 탭에서는 프레임이 멈추므로 정지 감지를 쉰다. */
+  hidden?(): boolean;
   /** 본체 state를 발행할 때마다(호스트 화면과 store를 맞추는 용도) */
   onState?(msg: StateMessage): void;
   clock?: StageClock;
@@ -166,6 +176,25 @@ const systemClock: StageClock = {
   },
 };
 
+/** clock.every로 만든 한 번짜리 타이머. 돌려준 함수로 취소한다. */
+function after(clock: StageClock, ms: number, fn: () => void): () => void {
+  let done = false;
+  const stop = clock.every(ms, () => {
+    if (done) return;
+    done = true;
+    stop();
+    fn();
+  });
+  return () => { done = true; stop(); };
+}
+
+/** 손 인식 준비를 기다린 결과: 준비 결과, 시간 초과, 또는 "마우스로 계속"·화면 떠남으로 그만 기다림. */
+type HandWait = { kind: "result"; r: StartResult } | { kind: "timeout" } | { kind: "skip" };
+
+function stopSource(src: HandSource): void {
+  try { src.stop(); } catch (err) { console.warn("[stage] 인식기 정지 실패", err); }
+}
+
 export function createStageController(deps: StageControllerDeps): StageController {
   const clock = deps.clock ?? systemClock;
   const gestures = deps.gestures ?? createGestureMachine();
@@ -184,6 +213,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let source: HandSource | null = null;
   let offFrame: (() => void) | null = null;
   let acquiring = false;
+  let skipHandWait: (() => void) | null = null; // 손 준비 대기 중이면 그만 기다리게 하는 함수
+  let frameAt = 0;                               // 마지막 인식 프레임을 받은 시각(clock). 정지 감지용
   let liveHands = 0;
   let gesture = { name: "None", score: 0 };
   let handPoint: Point | null = null;
@@ -337,6 +368,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   const hoverTo = (gu: string | null) => { if (gu !== state.hover) dispatch({ type: "hover", gu }); };
 
   function onFrame(f: HandFrame): void {
+    frameAt = clock.now(); // 프레임 시각 f.t(performance)와 섞지 않고 clock 한쪽으로만 잰다
     if (phase !== "running") return;
     const v = state.vote;
     const hands = state.input === "hands";
@@ -367,15 +399,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   function attach(src: HandSource): void {
     source = src;
+    frameAt = clock.now();
     offFrame = src.onFrame(onFrame);
     ui.preview(preview, src.video);
   }
   function detach(): void {
     offFrame?.();
     offFrame = null;
-    if (source) {
-      try { source.stop(); } catch (err) { console.warn("[stage] 인식기 정지 실패", err); }
-    }
+    if (source) stopSource(source);
     source = null;
     liveHands = 0;
     handLost = true;
@@ -388,19 +419,56 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     handLost = true;
     dispatch({ type: "setInput", input: "hands", now: clock.now() });
   }
+  /**
+   * 손 인식 준비를 기다린다. HAND_START_TIMEOUT_MS가 지나거나 skipHandWait(마우스로 계속·화면 떠남)가 불리면
+   * 그것을 먼저 돌려주고, 그 뒤에 도착한 소스는 받는 즉시 끈다(카메라·GPU가 남지 않게).
+   */
+  function waitHands(): Promise<HandWait> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let cancelTimer = () => {};
+      const settle = (w: HandWait) => {
+        if (settled) {
+          if (w.kind === "result" && w.r.ok) stopSource(w.r.source);
+          return;
+        }
+        settled = true;
+        cancelTimer();
+        skipHandWait = null;
+        resolve(w);
+      };
+      cancelTimer = after(clock, HAND_START_TIMEOUT_MS, () => settle({ kind: "timeout" }));
+      skipHandWait = () => settle({ kind: "skip" });
+      let p: Promise<StartResult>;
+      try { p = deps.startHands(); } catch (err) { p = Promise.reject(err); }
+      p.then((r) => settle({ kind: "result", r }), (err: unknown) => {
+        console.warn("[stage] 손 인식 시작 실패", err);
+        settle({ kind: "result", r: { ok: false, reason: "wasm-failed" } });
+      });
+    });
+  }
   async function acquireHands(): Promise<void> {
     if (acquiring) return;
     acquiring = true;
-    let r: StartResult;
-    try { r = await deps.startHands(); } catch (err) {
-      console.warn("[stage] 손 인식 시작 실패", err);
-      r = { ok: false, reason: "wasm-failed" };
-    }
+    const w = await waitHands();
     acquiring = false;
-    if (phase === "disposed") { if (r.ok) r.source.stop(); return; }
-    if (!r.ok) { deps.toast(HAND_FAIL[r.reason]); return; }
-    attach(r.source);
+    if (phase === "disposed") { if (w.kind === "result" && w.r.ok) stopSource(w.r.source); return; }
+    if (w.kind === "timeout") { deps.toast(HAND_SLOW_TOAST); return; }
+    if (w.kind === "skip") return;
+    if (!w.r.ok) { deps.toast(HAND_FAIL[w.r.reason]); return; }
+    attach(w.r.source);
     useHands();
+  }
+  /** 손 인식이 죽었을 때(연속 실패·영상 끊김): 인식기를 끄고, 들고 있던 구는 내려놓고, 마우스로 바꾸고 알린다. */
+  function fallbackToMouse(message: string): void {
+    detach();
+    gestures.reset();
+    if (state.input === "hands") {
+      if (state.lifted !== null) dispatch({ type: "release" });
+      dispatch({ type: "setInput", input: "mouse", now: clock.now() });
+    }
+    renderCursor();
+    deps.toast(message);
   }
   function toggleInput(): void {
     if (state.input === "hands") { dispatch({ type: "setInput", input: "mouse", now: clock.now() }); return; }
@@ -450,12 +518,9 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
   function tick(): void {
     const now = clock.now();
-    if (source && source.errors > HAND_ERROR_LIMIT) {
-      detach();
-      if (state.input === "hands") dispatch({ type: "setInput", input: "mouse", now });
-      renderCursor();
-      deps.toast(HAND_ERRORS_TOAST);
-    }
+    if (deps.hidden?.()) frameAt = now; // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
+    if (source && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
+    else if (source && state.input === "hands" && now - frameAt > HAND_STALL_MS) fallbackToMouse(HAND_STALL_TOAST);
     if (state.vote) dispatch({ type: "voteTick", now, cameraCount: counter.result() });
     renderVote();
     renderDiagPart();
@@ -505,6 +570,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     get publishFailed() { return publishFailed(); },
     get started() { return phase === "running"; },
     async start(mode) {
+      // 준비 덮개의 "마우스로 계속": 손 준비를 그만 기다리고 마우스로 바로 시작한다(늦게 온 소스는 도착할 때 끈다).
+      if (phase === "starting" && mode === "mouse") { skipHandWait?.(); return; }
       if (phase !== "idle") return;
       // 오토플레이 정책: 사용자 클릭 처리 안에서 await보다 먼저 불러야 한다.
       void narrator.unlock().catch(() => {});
@@ -553,6 +620,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     dispose() {
       if (phase === "disposed") return;
       phase = "disposed";
+      skipHandWait?.();
       for (const stop of stops.splice(0)) stop();
       detach();
       narrator.stop();
@@ -751,6 +819,7 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
       startHands: () => startHandSource(),
       hash: () => location.hash,
       modelReady: modelOnServer,
+      hidden: () => document.hidden,
       onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
     });
     undo.push(() => controller.dispose());
