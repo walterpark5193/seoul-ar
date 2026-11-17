@@ -3,9 +3,42 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
-import { compileTargetImage, inspectMind, MIND_FORMAT_VERSION, DEFAULT_IN, DEFAULT_OUT } from "./compile-target.mjs";
+import {
+  compileTargetImage,
+  inspectMind,
+  sha256,
+  manifestPathFor,
+  MIND_FORMAT_VERSION,
+  DEFAULT_IN,
+  DEFAULT_OUT,
+  DEFAULT_MANIFEST,
+} from "./compile-target.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+describe("target.manifest.json ties the committed target.png to the committed target.mind", () => {
+  it("lives next to the .mind", () => {
+    expect(manifestPathFor("/x/marker/target.mind")).toBe("/x/marker/target.manifest.json");
+    expect(DEFAULT_MANIFEST).toBe(resolve(here, "../../frontend/public/marker/target.manifest.json"));
+  });
+
+  it("hashes match the files on disk (if this fails: node tools/marker/compile-target.mjs after make-slide)", async () => {
+    const manifest = JSON.parse(await readFile(DEFAULT_MANIFEST, "utf8"));
+    const [png, mind] = await Promise.all([readFile(DEFAULT_IN), readFile(DEFAULT_OUT)]);
+    expect(manifest.v).toBe(1);
+    expect(manifest.source).toBe("target.png");
+    expect(manifest.mind).toBe("target.mind");
+    expect(manifest.sourceSha256).toBe(sha256(png));
+    expect(manifest.sourceBytes).toBe(png.length);
+    expect(manifest.mindSha256).toBe(sha256(mind));
+    expect(manifest.mindBytes).toBe(mind.length);
+    expect(manifest.mindFormatVersion).toBe(MIND_FORMAT_VERSION);
+    expect(manifest.mindAr).toBe("1.2.5");
+    expect(manifest.image).toEqual({ width: 1024, height: 1024 });
+    expect(manifest.matching.length).toBe(inspectMind(mind)[0].matchingKeyframes);
+    expect(manifest.tracking.map((t) => t.width)).toEqual([256, 128]);
+  });
+});
 
 describe("committed target.mind (frontend/public/marker)", () => {
   it("is a v2 .mind for the 1024x1024 target with matching keyframes and both tracking scales", async () => {

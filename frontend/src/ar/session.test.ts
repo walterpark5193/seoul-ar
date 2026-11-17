@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The real bundle touches `window` at import time and needs WebGL; replace it with a
 // scriptable fake so the wrapper's wiring can be verified in Node.
@@ -61,7 +61,7 @@ const fake = vi.hoisted(() => {
 vi.mock("mind-ar/dist/mindar-image-three.prod.js", () => ({ MindARThree: fake.FakeMindAR }));
 
 import { Group } from "three";
-import { arSupported, createArSession } from "./session";
+import { arSupported, createArSession, START_TIMEOUT_MS } from "./session";
 
 type GL = { kind: string } | null;
 function env(opts: { gum?: boolean; gl?: GL | "throw"; nav?: boolean }) {
@@ -107,10 +107,27 @@ describe("arSupported decision table", () => {
   });
 });
 
+/** A response that looks like a real .mind: msgpack fixmap header (0x82 = map of 2: { v, dataList }). */
+function mindResponse(body: Uint8Array = new Uint8Array([0x82, 0xa1, 0x76, 0x02]), init: { ok?: boolean; status?: number } = {}) {
+  return {
+    ok: init.ok ?? true,
+    status: init.status ?? 200,
+    arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+  };
+}
+
 describe("createArSession wiring", () => {
+  const fetchMock = vi.fn();
   beforeEach(() => {
     fake.state.ctorArgs.length = 0;
     fake.state.instances.length = 0;
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => mindResponse());
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   const container = { tagName: "DIV" } as unknown as HTMLElement;
@@ -173,12 +190,14 @@ describe("createArSession wiring", () => {
     expect(lost).toHaveBeenCalledTimes(1);
   });
 
-  it("start() starts MindAR then drives onFrame with dt in seconds and renders", async () => {
+  it("start() checks the target file first, then starts MindAR and drives onFrame with dt in seconds", async () => {
     const s = createArSession({ container, targetSrc: "/marker/target.mind" });
     const inst = fake.state.instances[0]!;
     const dts: number[] = [];
     s.onFrame((dt) => dts.push(dt));
     await s.start();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/marker/target.mind");
     expect(inst.started).toBe(1);
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
     const loop = inst.renderer.loop!;
@@ -217,26 +236,32 @@ describe("createArSession wiring", () => {
     expect(order).toEqual(["loop:null", "stop"]);
   });
 
-  it("stop() during a pending start() releases the camera once start lands and never starts the loop", async () => {
+  it("stop() during a pending start() releases the camera at once and again when start lands; the loop never starts", async () => {
     const s = createArSession({ container, targetSrc: "/marker/target.mind" });
     const inst = fake.state.instances[0]!;
     let resolveStart: () => void = () => {};
-    inst.startImpl = () => new Promise<void>((r) => { resolveStart = r; });
+    const mindarStarted = new Promise<void>((started) => {
+      inst.startImpl = () => new Promise<void>((r) => { resolveStart = r; started(); });
+    });
     const pending = s.start();
+    await mindarStarted; // target check passed, MindAR's start() is now waiting on the camera
     s.stop(); // user left the AR view while the permission prompt was open
+    expect(inst.stopped).toBe(1); // released immediately, even though we were never "running"
     resolveStart();
     await pending;
     expect(inst.started).toBe(1);
-    expect(inst.stopped).toBe(1); // camera released even though we were never "running"
+    expect(inst.stopped).toBe(2); // MindAR acquired the stream after our stop(); released again
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledWith(null);
     expect(inst.renderer.loop).toBeNull();
   });
 
-  it("start() while already running is a no-op", async () => {
+  it("start() while already running is a no-op, and concurrent start() calls share one attempt", async () => {
     const s = createArSession({ container, targetSrc: "/marker/target.mind" });
     const inst = fake.state.instances[0]!;
-    await s.start();
+    const [a, b] = [s.start(), s.start()];
+    expect(a).toBe(b);
+    await a;
     await s.start();
     expect(inst.started).toBe(1);
     expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
@@ -248,5 +273,54 @@ describe("createArSession wiring", () => {
     inst.startImpl = () => Promise.reject(undefined); // MindAR rejects with no value on getUserMedia failure
     await expect(s.start()).rejects.toBeInstanceOf(Error);
     expect(inst.renderer.setAnimationLoop).not.toHaveBeenCalled();
+  });
+
+  it("start() rejects before opening the camera when the target 404s", async () => {
+    fetchMock.mockImplementation(async () => mindResponse(new Uint8Array(0), { ok: false, status: 404 }));
+    const s = createArSession({ container, targetSrc: "/marker/target.mind" });
+    const inst = fake.state.instances[0]!;
+    await expect(s.start()).rejects.toThrow(/404/);
+    expect(inst.started).toBe(0); // getUserMedia never requested
+    expect(inst.renderer.setAnimationLoop).not.toHaveBeenCalled();
+  });
+
+  it("start() rejects before opening the camera when the SPA fallback serves index.html instead of the .mind", async () => {
+    fetchMock.mockImplementation(async () => mindResponse(new TextEncoder().encode("<!doctype html><html></html>")));
+    const s = createArSession({ container, targetSrc: "/marker/target.mind" });
+    const inst = fake.state.instances[0]!;
+    await expect(s.start()).rejects.toThrow(/\.mind|index\.html/);
+    expect(inst.started).toBe(0);
+  });
+
+  it("start() rejects before opening the camera when the target download is empty or fails", async () => {
+    fetchMock.mockImplementation(async () => mindResponse(new Uint8Array(0)));
+    const s = createArSession({ container, targetSrc: "/marker/target.mind" });
+    await expect(s.start()).rejects.toThrow(/비어/);
+    fetchMock.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    await expect(s.start()).rejects.toThrow(/Failed to fetch/);
+    expect(fake.state.instances[0]!.started).toBe(0);
+  });
+
+  it("start() times out when MindAR never settles (bad target decode) and releases the live camera", async () => {
+    vi.useFakeTimers();
+    const s = createArSession({ container, targetSrc: "/marker/target.mind" });
+    const inst = fake.state.instances[0]!;
+    inst.startImpl = () => new Promise<void>(() => {}); // _startAR hangs forever, camera already on
+    const attempt = s.start();
+    const rejection = expect(attempt).rejects.toThrow(new RegExp(`${START_TIMEOUT_MS / 1000}초`));
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
+    await rejection;
+    expect(inst.started).toBe(1);
+    expect(inst.stopped).toBe(1); // camera released despite never reaching "running"
+    expect(inst.renderer.setAnimationLoop).not.toHaveBeenCalled();
+    expect(() => s.stop()).not.toThrow(); // and a later unmount is harmless (clears the loop with null)
+    expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(1);
+    expect(inst.renderer.setAnimationLoop).toHaveBeenLastCalledWith(null);
+    // a start() after the failure is allowed again (not stuck on the dead attempt)
+    inst.startImpl = async () => {};
+    await s.start();
+    expect(inst.started).toBe(2);
+    expect(inst.renderer.setAnimationLoop).toHaveBeenCalledTimes(2);
+    expect(inst.renderer.loop).toEqual(expect.any(Function));
   });
 });
