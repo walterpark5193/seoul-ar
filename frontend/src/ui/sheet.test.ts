@@ -44,6 +44,12 @@ describe("renderSheet", () => {
     expect(t).toContain("52.6억");
   });
 
+  it("says a capped fetch is incomplete, not a 1,000-row cutoff", () => {
+    const t = text(renderSheet(state(), { ...gangnam, total: stat({ truncated: true }) }, index));
+    expect(t).toContain("거래가 많아 일부만 집계했습니다.");
+    expect(t).not.toContain("1,000건");
+  });
+
   it("sheet renders 거래 없음", () => {
     const t = text(renderSheet(state({ gu: "도봉구" }), null, index));
     expect(t).toContain("도봉구");

@@ -40,7 +40,8 @@ function guFigures(stat: Stat | null): { figures: Figure[]; notes: string[] } {
   ];
   const notes: string[] = [];
   if (stat && stat.cancelled > 0) notes.push(`취소된 ${fmtCount(stat.cancelled)}은 뺐습니다.`);
-  if (stat?.truncated) notes.push("거래가 많아 1,000건까지만 집계했습니다.");
+  // truncated: 수집이 페이지 상한에 닿아 그 달 자료가 다 모이지 않았다는 뜻(행 수 기준이 아님).
+  if (stat?.truncated) notes.push("거래가 많아 일부만 집계했습니다.");
   return { figures, notes };
 }
 

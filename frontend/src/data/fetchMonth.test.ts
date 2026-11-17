@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { FETCH_MONTH_PATH, NARRATE_MONTH_PATH, requestFetchMonth, requestNarrateMonth } from "./fetchMonth";
+
+// CloudFront OAC(SigV4)로 보호된 Lambda URL은 POST 본문의 SHA-256을 x-amz-content-sha256으로 요구한다.
+const bodyHash = (month: string) => createHash("sha256").update(JSON.stringify({ month }), "utf8").digest("hex");
 
 const res = (status: number, body: unknown = {}) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
@@ -11,7 +15,7 @@ describe("requestFetchMonth", () => {
     expect(FETCH_MONTH_PATH).toBe("/api/fetch-month");
     expect(f).toHaveBeenCalledWith("/api/fetch-month", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-presenter-key": "secret" },
+      headers: { "content-type": "application/json", "x-presenter-key": "secret", "x-amz-content-sha256": bodyHash("202610") },
       body: JSON.stringify({ month: "202610" }),
       cache: "no-store",
     });
@@ -36,7 +40,7 @@ describe("requestFetchMonth", () => {
     expect(NARRATE_MONTH_PATH).toBe("/api/narrate-month");
     expect(f).toHaveBeenCalledWith("/api/narrate-month", expect.objectContaining({
       method: "POST",
-      headers: { "content-type": "application/json", "x-presenter-key": "secret" },
+      headers: { "content-type": "application/json", "x-presenter-key": "secret", "x-amz-content-sha256": bodyHash("202611") },
       body: JSON.stringify({ month: "202611" }),
     }));
     expect(await requestNarrateMonth("202611", "k", vi.fn(async () => res(401)))).toEqual({ kind: "unauthorized" });
