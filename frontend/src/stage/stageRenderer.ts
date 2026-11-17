@@ -40,6 +40,8 @@ export function mapPoseFor(aspect: number): CameraPose {
 /** 포즈 보간 시간(초). 본체 LAYOUT_SECONDS(0.8)와 같은 값이다. */
 const CAMERA_SECONDS = 0.8;
 const MAX_DT = 0.1;
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 1.6;
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const mix3 = (a: Vec3, b: Vec3, t: number): Vec3 => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
@@ -52,6 +54,8 @@ export function lerpPose(a: CameraPose, b: CameraPose, t: number): CameraPose {
 export interface StageRenderer {
   world: Scene; camera: PerspectiveCamera; canvas: HTMLCanvasElement;
   setMode(mode: StageMode, instant?: boolean): void;
+  /** target에서 카메라까지 거리를 1/z배로. 0.7~1.6 클램프. 모드 보간·resize 뒤에도 유지. */
+  setZoom(z: number): void;
   onFrame(cb: (dt: number) => void): () => void; resize(): void; dispose(): void;
 }
 
@@ -87,9 +91,12 @@ export function createStageRenderer(
   let to: CameraPose = MAP_POSE;
   let elapsed = CAMERA_SECONDS; // >= CAMERA_SECONDS면 보간 끝
 
+  let zoom = 1;
+  // current는 확대 전 기준 포즈(보간 대상). 카메라에만 확대를 얹는다.
   const apply = (p: CameraPose) => {
     current = p;
-    camera.position.set(...p.pos);
+    const [tx, ty, tz] = p.target;
+    camera.position.set(tx + (p.pos[0] - tx) / zoom, ty + (p.pos[1] - ty) / zoom, tz + (p.pos[2] - tz) / zoom);
     camera.lookAt(...p.target);
     if (camera.fov !== p.fov) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
   };
@@ -108,6 +115,11 @@ export function createStageRenderer(
     from = current;
     to = dest;
     elapsed = 0;
+  };
+
+  const setZoom = (z: number) => {
+    zoom = Number.isFinite(z) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) : 1;
+    apply(current);
   };
 
   const resize = () => {
@@ -139,7 +151,7 @@ export function createStageRenderer(
   });
 
   return {
-    world, camera, canvas, setMode, resize,
+    world, camera, canvas, setMode, setZoom, resize,
     onFrame(cb) { listeners.add(cb); return () => { listeners.delete(cb); }; },
     dispose() {
       renderer.setAnimationLoop(null);

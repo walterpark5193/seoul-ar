@@ -35,7 +35,7 @@ export function keyToAction(key: string, s: StageState, ui: { reviewRow: number;
   return UI_KEYS[lower] ? act(UI_KEYS[lower]) : null;
 }
 
-export interface PointerHandlers { move(p: Point): void; down(): void; up(): void; leave(): void; }
+export interface PointerHandlers { move(p: Point): void; down(): void; up(): void; leave(): void; wheel?(deltaY: number): void; }
 
 export function attachPointer(el: HTMLElement, h: PointerHandlers): () => void {
   const onMove = (e: PointerEvent) => {
@@ -50,7 +50,10 @@ export function attachPointer(el: HTMLElement, h: PointerHandlers): () => void {
   el.addEventListener("pointerdown", onDown);
   el.addEventListener("pointerup", onUp);
   el.addEventListener("pointerleave", onLeave);
+  const onWheel = h.wheel ? (e: WheelEvent) => { e.preventDefault(); h.wheel!(e.deltaY); } : null;
+  if (onWheel) el.addEventListener("wheel", onWheel, { passive: false });
   return () => {
+    if (onWheel) el.removeEventListener("wheel", onWheel);
     el.removeEventListener("pointermove", onMove);
     el.removeEventListener("pointerdown", onDown);
     el.removeEventListener("pointerup", onUp);

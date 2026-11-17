@@ -235,4 +235,50 @@ describe("createStageRenderer", () => {
     expect(r.camera.position.distanceTo(new Vector3(...spreadPoseFor(4 / 3).pos))).toBeLessThan(1e-9);
     r.dispose();
   });
+  describe("setZoom", () => {
+    const mk = (w = 1280, h = 720) => {
+      vi.stubGlobal("window", { devicePixelRatio: 1, innerWidth: w, innerHeight: h });
+      const box = { clientWidth: w, clientHeight: h, append: vi.fn() };
+      const gl = fakeRenderer();
+      const r = createStageRenderer(box as unknown as HTMLElement, { reducedMotion: false, makeRenderer: () => gl })!;
+      const loop = vi.mocked(gl.setAnimationLoop).mock.calls[0]![0] as (t: number) => void;
+      return { r, box, loop };
+    };
+    const dist = (r: { camera: PerspectiveCamera }, p: CameraPose) =>
+      r.camera.position.distanceTo(new Vector3(...p.target));
+    it("setZoom 2 halves distance to target", () => {
+      // 계약상 상한이 1.6이라 2배는 불가: 1.25배로 거리가 1/1.25. (2는 1.6으로 잘림은 아래 clamp 테스트)
+      const { r } = mk();
+      const base = dist(r, mapPoseFor(16 / 9));
+      r.setZoom(1.25);
+      expect(dist(r, mapPoseFor(16 / 9))).toBeCloseTo(base / 1.25, 9);
+      r.dispose();
+    });
+    it("zoom clamped", () => {
+      const { r } = mk();
+      const base = dist(r, mapPoseFor(16 / 9));
+      r.setZoom(5);
+      expect(dist(r, mapPoseFor(16 / 9))).toBeCloseTo(base / 1.6, 9);
+      r.setZoom(0.1);
+      expect(dist(r, mapPoseFor(16 / 9))).toBeCloseTo(base / 0.7, 9);
+      r.setZoom(NaN);
+      expect(dist(r, mapPoseFor(16 / 9))).toBeCloseTo(base, 9);
+      r.dispose();
+    });
+    it("zoom kept across setMode tween and resize", () => {
+      const { r, box, loop } = mk();
+      loop(0);
+      r.setZoom(1.5);
+      r.setMode("spread");
+      for (let t = 100; t <= 2000; t += 100) loop(t);
+      const q = spreadPoseFor(16 / 9);
+      expect(dist(r, q)).toBeCloseTo(new Vector3(...q.pos).distanceTo(new Vector3(...q.target)) / 1.5, 9);
+      box.clientWidth = 1024; box.clientHeight = 768;
+      r.resize();
+      for (let t = 2100; t <= 4000; t += 100) loop(t);
+      const p = spreadPoseFor(4 / 3);
+      expect(dist(r, p)).toBeCloseTo(new Vector3(...p.pos).distanceTo(new Vector3(...p.target)) / 1.5, 9);
+      r.dispose();
+    });
+  });
 });

@@ -7,7 +7,7 @@ function vote(p: Partial<VoteState> = {}): VoteState {
     counts: [null, null, null], sources: [null, null, null], reviewEdited: false, winner: null, allZero: false, endsAt: null, ...p };
 }
 function st(v: VoteState | null = null, p: Partial<StageState> = {}): StageState {
-  return { mode: "map", hover: null, lifted: null, focus: null, input: "hands", vote: v, month: "202510", metric: "price", round: 0, ...p };
+  return { mode: "map", hover: null, lifted: null, focus: null, input: "hands", vote: v, month: "202510", metric: "price", round: 0, rotate: "none", spinning: false, ...p };
 }
 const ui = { reviewRow: 2, now: 1000 };
 const k = (key: string, s = st()) => keyToAction(key, s, ui);
@@ -81,5 +81,41 @@ describe("attachPointer", () => {
     off();
     expect(l.size).toBe(0);
     expect(removed.length).toBe(4);
+  });
+});
+
+describe("attachPointer wheel", () => {
+  const mkEl = () => {
+    const l = new Map<string, (e: any) => void>();
+    const opts = new Map<string, any>();
+    const el: any = {
+      addEventListener: (t: string, f: any, o: any) => { l.set(t, f); opts.set(t, o); },
+      removeEventListener: (t: string, f: any) => { if (l.get(t) === f) l.delete(t); },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+    };
+    return { l, opts, el };
+  };
+  const base = { move() {}, down() {}, up() {}, leave() {} };
+  it("attachPointer wheel calls handler with deltaY and prevents default", () => {
+    const { l, opts, el } = mkEl();
+    const got: number[] = [];
+    attachPointer(el, { ...base, wheel: (d) => got.push(d) });
+    let prevented = false;
+    l.get("wheel")!({ deltaY: -120, preventDefault: () => { prevented = true; } });
+    expect(got).toEqual([-120]);
+    expect(prevented).toBe(true);
+    expect(opts.get("wheel")).toEqual({ passive: false });
+  });
+  it("wheel listener removed on detach", () => {
+    const { l, el } = mkEl();
+    const off = attachPointer(el, { ...base, wheel: () => {} });
+    expect(l.has("wheel")).toBe(true);
+    off();
+    expect(l.size).toBe(0);
+  });
+  it("no wheel listener without handler", () => {
+    const { l, el } = mkEl();
+    attachPointer(el, base);
+    expect(l.has("wheel")).toBe(false);
   });
 });
