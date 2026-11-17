@@ -1,4 +1,5 @@
 // 미리보기·골격·커서·진단. 계약: docs/CONTRACTS-stage.md 8절. 순수 모듈(DOM 없음).
+import { esc } from "../../ui/html";
 import type { HandFrame, InputMode, Point } from "../types";
 
 export type PreviewMode = "video" | "skeleton" | "hidden";
@@ -49,8 +50,6 @@ export function drawSkeleton(ctx: Ctx2DLike, frame: HandFrame, w: number, h: num
 export function cursorClass(o: { visible: boolean; fist: boolean; hovering: boolean }): string {
   return "stage-cursor" + (o.visible ? "" : " is-hidden") + (o.fist ? " is-fist" : "") + (o.hovering ? " is-hover" : "");
 }
-
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 export function renderDiag(d: { fps: number; hands: number; gesture: string; score: number; cursor: Point | null; loadMs: number | null; delegate: string | null; input: InputMode }): string {
   const cursor = d.cursor ? `${d.cursor.x.toFixed(2)}, ${d.cursor.y.toFixed(2)}` : "—";
