@@ -270,6 +270,7 @@ export const NATIVE_COUNT = ["", "한", "두", "세", "네", "다섯", "여섯"]
 // tools/narration/facts.mjs
 export function buildFacts(index, guDataByName, month); // → Facts[] (GU_ORDER 순)
 // Facts = { gu, month, n, cancelled, medPerM2, rankPrice, maxAmt, topDong, topDongMedPerM2, topDongBasis: "min3" | "maxN" | null, totalGus: 25 }  (TOP_DONG_MIN_N = 3)
+// 추가(2026-11-17 최종 검증 후): rankPrice는 표준 경쟁 순위(같은 값은 같은 순위, 다음 순위는 건너뜀: 13·13·15), rankTied: boolean(같은 순위 구가 있음 → 자막은 "공동 N위"), topDongTiedWith: string|null(최고 동 동점 → topDongIsMax false, 자막은 "함께 가장 높습니다"처럼), partial: boolean(그 달이 끝나기 전에 받은 데이터 = gu 파일 generatedAt의 KST 연월 ≤ 그 달 → 자막에 "N월(집계 중)" 필수, 다른 달에서는 금지). validateScript가 모두 강제
 // rankPrice: medPerM2 내림차순 1부터(null이면 null). topDong: dongs 중 n≥3인 것의 medPerM2 최대(없으면 n 최대, 그것도 없으면 null)
 // tools/narration/templates.mjs
 export function templateLines(gus, month); // → { id, caption, speech }[] : 고정 4 + prompt 25 + result 150 + none 25 = 204
