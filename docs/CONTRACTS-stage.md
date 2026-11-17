@@ -461,6 +461,8 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 - spread로 들어갈 때, victory, voteStart, setInput 변경 → rotate="none", spinning=false, 효과 rotate.reset. (spread·victory는 기존 효과와 함께, 순서는 scene.layout 앞.)
 - 회전 중(rotate≠"none")에는 hover 이벤트를 상태에 반영하지 않는다(hover=null 유지).
 - 효과 순서: rotate.* → scene.layout → … (기존 순서 유지).
+- `diffEffects(prev, next, cause?: StageEvent)`: 세 번째 인자로 원인 이벤트를 받는다. 회전만 된 지도에서 victory는 상태가 바뀌지 않으므로 cause로 rotate.reset을 낸다. stageView는 항상 이벤트를 넘긴다(Ruling).
+- 추가 가드: 회전 중 grab 무시; spinState(true)는 자유 지도(잡기 없음·map·투표 아님)에서만; twoFist로 관성을 잡으면 rotate.catch 후 rotate.grabTwo; 관성 중에도 hover는 갱신(rotate≠none일 때만 막음).
 
 ### 13.5 렌더러·입력
 - `StageRenderer.setZoom(z: number)`: 현재 포즈(화면 비율 맞춤·모드 보간 포함)의 target에서 카메라까지 거리를 1/z배. 0.7~1.6 클램프. 포즈 보간·resize와 함께 유지.
