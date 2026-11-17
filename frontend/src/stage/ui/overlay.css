@@ -3,11 +3,16 @@
   position: fixed; right: 16px; bottom: 16px; width: 240px; aspect-ratio: 4 / 3;
   background: var(--night); border: 1px solid var(--line-strong); border-radius: var(--r-ctl); overflow: hidden;
 }
-.stage-preview.is-hidden { display: none; }
+/* 숨김(C 세 번)·골격 모드에서도 video는 렌더 트리에 남긴다. display:none·visibility:hidden이면 브라우저가 영상 프레임
+   콜백(requestVideoFrameCallback)을 멈춰 손 인식이 끊기고 1.5초 뒤 마우스 모드로 떨어진다. 그래서 화면 안 자리에서
+   1px·투명으로만 숨긴다(골격 canvas는 그냥 숨겨도 된다). .stage-view까지 적은 선택자는 stage.css의 크기 규칙을 이긴다. */
+.stage-preview.is-hidden,
+.stage-view .stage-preview.is-hidden { width: 1px; height: 1px; opacity: 0; border: 0; pointer-events: none; }
+.stage-preview.is-hidden canvas { display: none; }
 .stage-preview video, .stage-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 /* 거울 규칙: CSS는 video만 뒤집는다. 골격 canvas는 뒤집지 않고 drawSkeleton(mirror=true)이 x를 뒤집는다(이중 반전 방지). */
 .stage-preview.is-mirror video { transform: scaleX(-1); }
-.stage-preview.is-skeleton video { visibility: hidden; }
+.stage-preview.is-skeleton video { opacity: 0; }
 
 .stage-cursor {
   position: fixed; left: 0; top: 0; width: 56px; height: 56px; margin: -28px 0 0 -28px;
