@@ -12,6 +12,10 @@ let template;
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "seoul-ar-dist-"));
   fs.writeFileSync(path.join(tmp, "index.html"), "<!doctype html><title>t</title>");
+  // 저장소 데이터 스냅샷(frontend/public/data → dist/data). 시드 배포가 올린다.
+  fs.mkdirSync(path.join(tmp, "data", "202611"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "data", "index.json"), "{}");
+  fs.writeFileSync(path.join(tmp, "data", "202611", "강남구.json"), "{}");
   process.env.SEOUL_AR_DIST = tmp;
   const { SeoulArStack } = require("../lib/seoul-ar-stack");
   const app = new cdk.App();
@@ -72,7 +76,7 @@ test("bucket deployment is configured and emits config.json source", () => {
     DistributionPaths: ["/*"],
     SystemMetadata: Match.objectLike({ "cache-control": "no-cache" }),
   });
-  const dep = Object.values(template.findResources("Custom::CDKBucketDeployment"))[0];
+  const dep = Object.values(template.findResources("Custom::CDKBucketDeployment")).find((d) => d.Properties.Prune === true);
   assert.strictEqual(dep.Properties.SourceMarkers.length, 2);
   // config.json 의 배포 시점 토큰: CloudFront 도메인, Events http/realtime DNS, API 키
   const attrs = Object.values(dep.Properties.SourceMarkers[1]).map((v) => v["Fn::GetAtt"].join("."));
@@ -81,4 +85,276 @@ test("bucket deployment is configured and emits config.json source", () => {
   assert.ok(attrs.some((a) => a.endsWith("Dns.Realtime")));
   assert.ok(attrs.some((a) => a.endsWith("ApiKey")));
   assert.deepStrictEqual(dep.Properties.SourceMarkersConfig[1], { jsonEscape: true });
+});
+
+// ---- Task 9a: 월 실시간 수집 (CONTRACTS 10.6) ----
+// 한 Lambda 에 Function URL 과 DISTRIBUTION_ID 를 함께 두면
+// Distribution → FunctionUrl → Function → (env DISTRIBUTION_ID) → Distribution 순환이 생긴다.
+// 그래서 같은 코드(lambda/fetch-month)로 함수 둘을 만든다: API(Function URL) 와 작업자(무효화·발행).
+const WORKER_NAME = "SeoulArStack-FetchMonthWorker";
+const CONTRACT_ENV = ["BUCKET", "DISTRIBUTION_ID", "EVENTS_HTTP_ENDPOINT", "EVENTS_API_KEY", "SSM_API_KEY_NAME", "SSM_PASSCODE_NAME", "SELF_FUNCTION_NAME"];
+
+function fetchMonthFns() {
+  const fns = Object.entries(template.findResources("AWS::Lambda::Function"));
+  const worker = fns.find(([, r]) => r.Properties.FunctionName === WORKER_NAME);
+  const api = fns.find(([, r]) => r.Properties.Environment?.Variables?.SELF_FUNCTION_NAME !== undefined);
+  assert.ok(worker, "worker function");
+  assert.ok(api, "api function");
+  return { worker, api };
+}
+
+function statementsOf([, fn]) {
+  const roleId = fn.Properties.Role["Fn::GetAtt"][0];
+  return Object.values(template.findResources("AWS::IAM::Policy"))
+    .filter((p) => p.Properties.Roles.some((r) => r.Ref === roleId))
+    .flatMap((p) => p.Properties.PolicyDocument.Statement);
+}
+
+const actionsOf = (st) => [].concat(st.Action);
+const findStatement = (sts, action) => sts.find((st) => actionsOf(st).includes(action));
+const logicalId = (type) => Object.keys(template.findResources(type))[0];
+
+test("fetch-month worker: Node.js 22, 512 MB, 600 s, worker env", () => {
+  const [, w] = fetchMonthFns().worker;
+  assert.equal(w.Properties.Runtime, "nodejs22.x");
+  assert.equal(w.Properties.Handler, "index.handler");
+  assert.equal(w.Properties.MemorySize, 512);
+  assert.equal(w.Properties.Timeout, 600);
+  const env = w.Properties.Environment.Variables;
+  assert.deepEqual(Object.keys(env).sort(), ["BUCKET", "DISTRIBUTION_ID", "EVENTS_API_KEY", "EVENTS_HTTP_ENDPOINT", "SSM_API_KEY_NAME"]);
+  assert.deepEqual(env.BUCKET, { Ref: logicalId("AWS::S3::Bucket") });
+  assert.deepEqual(env.DISTRIBUTION_ID, { Ref: logicalId("AWS::CloudFront::Distribution") });
+  assert.equal(env.SSM_API_KEY_NAME, "/seoul-ar/seoul-api-key");
+  assert.ok(JSON.stringify(env.EVENTS_HTTP_ENDPOINT).includes("Dns.Http"));
+  assert.ok(JSON.stringify(env.EVENTS_HTTP_ENDPOINT).includes("/event"));
+  assert.deepEqual(env.EVENTS_API_KEY["Fn::GetAtt"][1], "ApiKey");
+});
+
+test("fetch-month api: Node.js 22, env, SELF_FUNCTION_NAME 은 작업자 이름(리터럴, 순환 없음)", () => {
+  const [, a] = fetchMonthFns().api;
+  assert.equal(a.Properties.Runtime, "nodejs22.x");
+  assert.equal(a.Properties.Handler, "index.handler");
+  const env = a.Properties.Environment.Variables;
+  assert.deepEqual(Object.keys(env).sort(), ["BUCKET", "SELF_FUNCTION_NAME", "SSM_PASSCODE_NAME"]);
+  assert.equal(env.SELF_FUNCTION_NAME, WORKER_NAME);
+  assert.equal(env.SSM_PASSCODE_NAME, "/seoul-ar/presenter-passcode");
+  assert.deepEqual(env.BUCKET, { Ref: logicalId("AWS::S3::Bucket") });
+});
+
+test("fetch-month: 두 함수의 env 이름을 합치면 계약의 7개와 같고, 같은 코드 자산을 쓴다", () => {
+  const { worker, api } = fetchMonthFns();
+  const names = new Set([...Object.keys(worker[1].Properties.Environment.Variables), ...Object.keys(api[1].Properties.Environment.Variables)]);
+  assert.deepEqual([...names].sort(), [...CONTRACT_ENV].sort());
+  assert.deepEqual(worker[1].Properties.Code, api[1].Properties.Code);
+});
+
+test("fetch-month worker: 비동기 재시도 0 (시간 초과 뒤 같은 작업이 다시 돌지 않게)", () => {
+  template.hasResourceProperties("AWS::Lambda::EventInvokeConfig", {
+    FunctionName: { Ref: fetchMonthFns().worker[0] },
+    MaximumRetryAttempts: 0,
+  });
+});
+
+test("fetch-month: 로그 그룹 보존 14일", () => {
+  const { worker, api } = fetchMonthFns();
+  for (const [, fn] of [worker, api]) {
+    const lgId = fn.Properties.LoggingConfig.LogGroup.Ref;
+    assert.equal(template.toJSON().Resources[lgId].Properties.RetentionInDays, 14);
+  }
+});
+
+test("Function URL: API 함수, AuthType NONE, 공개 호출 권한", () => {
+  const [apiId] = fetchMonthFns().api;
+  template.resourceCountIs("AWS::Lambda::Url", 1);
+  template.hasResourceProperties("AWS::Lambda::Url", { AuthType: "NONE", TargetFunctionArn: { "Fn::GetAtt": [apiId, "Arn"] } });
+  template.hasResourceProperties("AWS::Lambda::Permission", {
+    Action: "lambda:InvokeFunctionUrl", Principal: "*", FunctionUrlAuthType: "NONE", FunctionName: { "Fn::GetAtt": [apiId, "Arn"] },
+  });
+});
+
+test("CloudFront /api/* → Function URL 오리진, 캐시 끔, ALL_VIEWER_EXCEPT_HOST_HEADER, 메서드 전부, HTTPS 리다이렉트", () => {
+  const dist = Object.values(template.findResources("AWS::CloudFront::Distribution"))[0].Properties.DistributionConfig;
+  const cb = dist.CacheBehaviors.find((b) => b.PathPattern === "/api/*");
+  assert.ok(cb, "/api/* behavior");
+  assert.deepEqual([...cb.AllowedMethods].sort(), ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]);
+  assert.equal(cb.CachePolicyId, "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"); // Managed-CachingDisabled
+  assert.equal(cb.OriginRequestPolicyId, "b689b0a8-53d0-40ab-baf2-68738e2966ac"); // Managed-AllViewerExceptHostHeader
+  assert.equal(cb.ViewerProtocolPolicy, "redirect-to-https");
+  const origin = dist.Origins.find((o) => o.Id === cb.TargetOriginId);
+  const urlId = logicalId("AWS::Lambda::Url");
+  assert.ok(JSON.stringify(origin.DomainName).includes(`"${urlId}","FunctionUrl"`), "Function URL 도메인");
+  assert.equal(origin.CustomOriginConfig.OriginProtocolPolicy, "https-only");
+  // 기본 동작(정적 사이트)은 그대로
+  assert.deepEqual(dist.DefaultCacheBehavior.AllowedMethods, ["GET", "HEAD"]);
+});
+
+test("IAM 작업자: data/* Get/Put, 이 배포 무효화, API 키 파라미터 + kms:Decrypt(ssm 경유)", () => {
+  const sts = statementsOf(fetchMonthFns().worker);
+  const bucketId = logicalId("AWS::S3::Bucket");
+  const s3 = findStatement(sts, "s3:PutObject");
+  assert.deepEqual(actionsOf(s3).sort(), ["s3:GetObject", "s3:PutObject"]);
+  assert.deepEqual(s3.Resource, { "Fn::Join": ["", [{ "Fn::GetAtt": [bucketId, "Arn"] }, "/data/*"]] });
+  const cf = findStatement(sts, "cloudfront:CreateInvalidation");
+  assert.deepEqual(actionsOf(cf), ["cloudfront:CreateInvalidation"]);
+  const cfArn = JSON.stringify(cf.Resource);
+  assert.ok(cfArn.includes(":cloudfront::557395122774:distribution/"), cfArn);
+  assert.ok(cfArn.includes(`{"Ref":"${logicalId("AWS::CloudFront::Distribution")}"}`), cfArn);
+  const ssm = findStatement(sts, "ssm:GetParameter");
+  assert.deepEqual(actionsOf(ssm), ["ssm:GetParameter"]);
+  assert.ok(JSON.stringify(ssm.Resource).includes(":ssm:us-east-1:557395122774:parameter/seoul-ar/seoul-api-key"));
+  assert.ok(!JSON.stringify(ssm.Resource).includes("presenter-passcode"));
+  const kms = findStatement(sts, "kms:Decrypt");
+  assert.deepEqual(actionsOf(kms), ["kms:Decrypt"]);
+  assert.deepEqual(kms.Condition, { StringEquals: { "kms:ViaService": "ssm.us-east-1.amazonaws.com" } });
+  assert.equal(findStatement(sts, "lambda:InvokeFunction"), undefined);
+});
+
+test("IAM API: data/jobs/* Get/Put, 암호 파라미터 + kms:Decrypt, 작업자 lambda:InvokeFunction 만", () => {
+  const sts = statementsOf(fetchMonthFns().api);
+  const s3 = findStatement(sts, "s3:PutObject");
+  assert.deepEqual(actionsOf(s3).sort(), ["s3:GetObject", "s3:PutObject"]);
+  assert.deepEqual(s3.Resource, { "Fn::Join": ["", [{ "Fn::GetAtt": [logicalId("AWS::S3::Bucket"), "Arn"] }, "/data/jobs/*"]] });
+  const ssm = findStatement(sts, "ssm:GetParameter");
+  assert.ok(JSON.stringify(ssm.Resource).includes(":parameter/seoul-ar/presenter-passcode"));
+  assert.ok(!JSON.stringify(ssm.Resource).includes("seoul-api-key"));
+  assert.ok(findStatement(sts, "kms:Decrypt"));
+  const inv = findStatement(sts, "lambda:InvokeFunction");
+  assert.deepEqual(actionsOf(inv), ["lambda:InvokeFunction"]);
+  assert.ok(JSON.stringify(inv.Resource).includes(`:lambda:us-east-1:557395122774:function:${WORKER_NAME}"`), JSON.stringify(inv.Resource));
+  assert.equal(findStatement(sts, "cloudfront:CreateInvalidation"), undefined);
+});
+
+test("IAM fetch-month: 와일드카드 동작·삭제 권한 없음", () => {
+  const { worker, api } = fetchMonthFns();
+  for (const st of [...statementsOf(worker), ...statementsOf(api)]) {
+    for (const a of actionsOf(st)) {
+      assert.ok(!a.includes("*"), `wildcard action ${a}`);
+      assert.ok(!/Delete/.test(a), `delete action ${a}`);
+    }
+    if (actionsOf(st).some((a) => a.startsWith("s3:") || a.startsWith("ssm:") || a.startsWith("lambda:") || a.startsWith("cloudfront:"))) {
+      assert.notEqual(st.Resource, "*", JSON.stringify(st));
+    }
+  }
+});
+
+test("SSM 파라미터는 이름으로만 참조하고 만들지 않는다", () => {
+  template.resourceCountIs("AWS::SSM::Parameter", 0);
+  const json = JSON.stringify(template.toJSON());
+  assert.ok(json.includes("/seoul-ar/seoul-api-key"));
+  assert.ok(json.includes("/seoul-ar/presenter-passcode"));
+  assert.ok(!json.includes("SecureString"));
+  assert.ok(!json.includes("resolve:ssm"));
+});
+
+test("출력 FetchMonthUrl = CloudFront 도메인 + /api/fetch-month", () => {
+  const out = template.toJSON().Outputs.FetchMonthUrl;
+  assert.ok(out, "FetchMonthUrl");
+  const v = JSON.stringify(out.Value);
+  assert.ok(v.includes("DomainName") && v.includes("/api/fetch-month"), v);
+});
+
+test("템플릿 리소스 의존 그래프에 순환이 없다 (Ref, GetAtt, Sub, DependsOn)", () => {
+  const R = template.toJSON().Resources;
+  const edges = {};
+  const collect = (v, out) => {
+    if (Array.isArray(v)) return v.forEach((x) => collect(x, out));
+    if (!v || typeof v !== "object") return;
+    if (typeof v.Ref === "string" && R[v.Ref]) out.add(v.Ref);
+    if (Array.isArray(v["Fn::GetAtt"]) && R[v["Fn::GetAtt"][0]]) out.add(v["Fn::GetAtt"][0]);
+    if (typeof v["Fn::GetAtt"] === "string" && R[v["Fn::GetAtt"].split(".")[0]]) out.add(v["Fn::GetAtt"].split(".")[0]);
+    const sub = v["Fn::Sub"];
+    const subText = typeof sub === "string" ? sub : Array.isArray(sub) ? sub[0] : null;
+    if (subText) for (const [, name] of subText.matchAll(/\$\{([^}.!]+)/g)) if (R[name]) out.add(name);
+    Object.values(v).forEach((x) => collect(x, out));
+  };
+  for (const [id, r] of Object.entries(R)) {
+    const s = new Set();
+    collect(r.Properties, s);
+    [].concat(r.DependsOn ?? []).forEach((d) => s.add(d));
+    edges[id] = [...s];
+  }
+  const state = {};
+  const visit = (n, trail) => {
+    state[n] = 1;
+    for (const m of edges[n] ?? []) {
+      if (state[m] === 1) assert.fail(`cycle: ${[...trail, n, m].join(" -> ")}`);
+      if (!state[m]) visit(m, [...trail, n]);
+    }
+    state[n] = 2;
+  };
+  for (const n of Object.keys(R)) if (!state[n]) visit(n, []);
+});
+
+// ---- 재배포가 Lambda 가 쓴 data/ 를 지우지 않게 (Task 9a 추가) ----
+const deployments = () => Object.entries(template.findResources("Custom::CDKBucketDeployment"));
+const siteDeployment = () => deployments().find(([, d]) => d.Properties.Prune === true);
+const seedDeployment = () => deployments().find(([, d]) => d.Properties.DestinationBucketKeyPrefix === "data/");
+
+test("사이트 배포: prune 은 그대로, data/* 는 올리지도 지우지도 않는다(exclude)", () => {
+  const [, d] = siteDeployment();
+  assert.deepEqual(d.Properties.Exclude, ["data/*"]);
+  assert.equal(d.Properties.DestinationBucketKeyPrefix, undefined);
+  assert.deepEqual(d.Properties.DistributionPaths, ["/*"]);
+});
+
+test("시드 배포: dist/data → data/ 접두사, prune false, no-cache", () => {
+  assert.equal(deployments().length, 2);
+  const [, d] = seedDeployment();
+  assert.equal(d.Properties.Prune, false);
+  assert.deepEqual(d.Properties.SystemMetadata, { "cache-control": "no-cache" });
+  assert.equal(d.Properties.SourceObjectKeys.length, 1);
+  assert.equal(d.Properties.Exclude, undefined);
+});
+
+test("index 재구성: 배포마다 작업자를 {action: rebuild-index} 로 호출하는 AwsCustomResource", () => {
+  const crs = Object.entries(template.findResources("Custom::AWS"));
+  assert.equal(crs.length, 1);
+  const [id, cr] = crs[0];
+  const workerId = fetchMonthFns().worker[0];
+  for (const phase of ["Create", "Update"]) {
+    const call = JSON.stringify(cr.Properties[phase]);
+    assert.ok(call.includes('\\"service\\":\\"Lambda\\"') && call.includes('\\"action\\":\\"invoke\\"'), call);
+    assert.ok(call.includes(`{"Ref":"${workerId}"}`), "FunctionName = 작업자");
+    assert.ok(call.includes('\\"InvocationType\\":\\"RequestResponse\\"'), call);
+    assert.ok(call.includes('rebuild-index'), call);
+    assert.match(call, /\\"physicalResourceId\\":\{\\"id\\":\\"rebuild-\d+\\"\}/);
+    assert.ok(call.includes('\\"outputPaths\\":[\\"StatusCode\\"]'), "응답 크기 제한");
+  }
+  const payload = JSON.parse(JSON.parse(cr.Properties.Create["Fn::Join"][1].join("").replace(/\{"Ref":"[^"]+"\}/g, "W")).parameters?.Payload ?? "null");
+  assert.deepEqual(payload, { action: "rebuild-index" });
+  assert.equal(cr.Properties.InstallLatestAwsSdk, false);
+  const deps = [].concat(cr.DependsOn ?? []);
+  assert.ok(deps.includes(seedDeployment()[0]), "시드 배포 뒤");
+  assert.ok(deps.includes(workerId), "작업자 뒤");
+  // 커스텀 리소스 정책: 작업자 lambda:InvokeFunction 만
+  const policyId = deps.find((d) => d.startsWith("RebuildIndexCustomResourcePolicy"));
+  assert.ok(policyId, "커스텀 리소스 전용 정책");
+  const sts = template.toJSON().Resources[policyId].Properties.PolicyDocument.Statement;
+  assert.deepEqual(sts.map((st) => st.Action), ["lambda:InvokeFunction"]);
+  assert.deepEqual(sts[0].Resource, { "Fn::GetAtt": [workerId, "Arn"] });
+  assert.ok(id);
+});
+
+test("IAM 작업자: s3:ListBucket 은 data/ 접두사로만", () => {
+  const sts = statementsOf(fetchMonthFns().worker);
+  const list = findStatement(sts, "s3:ListBucket");
+  assert.deepEqual(actionsOf(list), ["s3:ListBucket"]);
+  assert.deepEqual(list.Resource, { "Fn::GetAtt": [logicalId("AWS::S3::Bucket"), "Arn"] });
+  assert.deepEqual(list.Condition, { StringLike: { "s3:prefix": ["data/", "data/*"] } });
+  assert.equal(findStatement(statementsOf(fetchMonthFns().api), "s3:ListBucket"), undefined);
+});
+
+test("dist 에 data/ 가 없으면 시드 배포 없이 합성되고 재구성은 남는다", () => {
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "seoul-ar-bare-"));
+  const saved = process.env.SEOUL_AR_DIST;
+  try {
+    process.env.SEOUL_AR_DIST = bare;
+    const { SeoulArStack } = require("../lib/seoul-ar-stack");
+    const t = Template.fromStack(new SeoulArStack(new cdk.App(), "Bare", { env: { account: "557395122774", region: "us-east-1" } }));
+    t.resourceCountIs("Custom::CDKBucketDeployment", 1);
+    t.resourceCountIs("Custom::AWS", 1);
+  } finally {
+    process.env.SEOUL_AR_DIST = saved;
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
 });

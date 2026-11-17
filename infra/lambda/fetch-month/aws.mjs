@@ -1,0 +1,108 @@
+// 런타임 기본 I/O: Node.js 22 Lambda 런타임에 내장된 AWS SDK v3 와 global fetch 만 쓴다(npm 의존성 없음).
+// 각 어댑터는 client 와 명령 클래스를 받으므로 SDK 없이 테스트할 수 있다(aws.test.mjs).
+import { randomUUID } from "node:crypto";
+import { PreconditionFailed, isPrecondition } from "./job.mjs";
+import { createPublisher } from "./publish.mjs";
+
+/** S3 저장소: get(key) → {text, etag} | null, put(key, text, opts) → {etag}, list(prefix) → 키 배열. 조건 불일치는 PreconditionFailed. */
+export function s3Store({ client, bucket, GetObjectCommand, PutObjectCommand, ListObjectsV2Command }) {
+  return {
+    async list(prefix) {
+      const keys = [];
+      let token;
+      do {
+        const input = { Bucket: bucket, Prefix: prefix };
+        if (token) input.ContinuationToken = token;
+        const r = await client.send(new ListObjectsV2Command(input));
+        for (const o of r.Contents ?? []) keys.push(o.Key);
+        token = r.IsTruncated ? r.NextContinuationToken : undefined;
+      } while (token);
+      return keys;
+    },
+    async get(key) {
+      try {
+        const r = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        return { text: await r.Body.transformToString("utf-8"), etag: r.ETag };
+      } catch (e) {
+        if (e?.name === "NoSuchKey" || e?.name === "NotFound" || e?.$metadata?.httpStatusCode === 404) return null;
+        throw e;
+      }
+    },
+    async put(key, text, { contentType, cacheControl, ifMatch, ifNoneMatch } = {}) {
+      const input = { Bucket: bucket, Key: key, Body: text };
+      if (contentType) input.ContentType = contentType;
+      if (cacheControl) input.CacheControl = cacheControl;
+      if (ifMatch !== undefined) input.IfMatch = ifMatch;
+      if (ifNoneMatch !== undefined) input.IfNoneMatch = ifNoneMatch;
+      try {
+        const r = await client.send(new PutObjectCommand(input));
+        return { etag: r.ETag };
+      } catch (e) {
+        if (isPrecondition(e)) throw new PreconditionFailed();
+        throw e;
+      }
+    },
+  };
+}
+
+/** SSM SecureString 값을 복호화해 읽는다. 빈 값은 오류. */
+export function ssmGetter({ client, GetParameterCommand }) {
+  return async function getParameter(name) {
+    const r = await client.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
+    const value = typeof r?.Parameter?.Value === "string" ? r.Parameter.Value.trim() : "";
+    if (value === "") throw new Error("SSM 파라미터 값이 비어 있음");
+    return value;
+  };
+}
+
+export function cloudFrontInvalidator({ client, CreateInvalidationCommand }) {
+  return async function invalidate({ distributionId, paths, callerReference }) {
+    await client.send(new CreateInvalidationCommand({
+      DistributionId: distributionId,
+      InvalidationBatch: { CallerReference: callerReference, Paths: { Quantity: paths.length, Items: [...paths] } },
+    }));
+  };
+}
+
+/** 비동기(Event) 호출. Lambda 는 받아들이면 202 를 준다. */
+export function lambdaInvoker({ client, InvokeCommand }) {
+  return async function invoke({ functionName, payload }) {
+    const r = await client.send(new InvokeCommand({
+      FunctionName: functionName,
+      InvocationType: "Event",
+      Payload: new TextEncoder().encode(JSON.stringify(payload)),
+    }));
+    if (r?.StatusCode !== 202) throw new Error(`Lambda 비동기 호출이 받아들여지지 않음 (StatusCode ${r?.StatusCode})`);
+  };
+}
+
+function jsonLog(level, msg, fields = {}) {
+  const line = JSON.stringify({ level, msg, ...fields });
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
+/** 환경 변수(CONTRACTS 10.6)로 런타임 의존성을 만든다. importModule 은 테스트용. */
+export async function makeDefaultDeps(env, { importModule = (name) => import(name) } = {}) {
+  const [s3, ssm, cloudfront, lambda] = await Promise.all([
+    importModule("@aws-sdk/client-s3"),
+    importModule("@aws-sdk/client-ssm"),
+    importModule("@aws-sdk/client-cloudfront"),
+    importModule("@aws-sdk/client-lambda"),
+  ]);
+  const fetch = globalThis.fetch;
+  return {
+    env,
+    fetch,
+    store: s3Store({ client: new s3.S3Client({}), bucket: env.BUCKET, GetObjectCommand: s3.GetObjectCommand, PutObjectCommand: s3.PutObjectCommand, ListObjectsV2Command: s3.ListObjectsV2Command }),
+    getParameter: ssmGetter({ client: new ssm.SSMClient({}), GetParameterCommand: ssm.GetParameterCommand }),
+    invalidate: cloudFrontInvalidator({ client: new cloudfront.CloudFrontClient({}), CreateInvalidationCommand: cloudfront.CreateInvalidationCommand }),
+    invoke: lambdaInvoker({ client: new lambda.LambdaClient({}), InvokeCommand: lambda.InvokeCommand }),
+    publish: createPublisher({ fetch, endpoint: env.EVENTS_HTTP_ENDPOINT, apiKey: env.EVENTS_API_KEY }),
+    now: () => Date.now(),
+    randomId: () => randomUUID(),
+    log: jsonLog,
+    concurrency: 4,
+  };
+}
