@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { diffEffects, NARRATION_IDS } from "./effects";
-import type { StageState, VoteState } from "./types";
+import type { StageEvent, StageState, VoteState } from "./types";
 
-const base: StageState = { mode: "map", hover: null, lifted: null, focus: null, input: "mouse", vote: null, month: "202611", metric: "price", round: 0 };
+const base: StageState = {
+  mode: "map", hover: null, lifted: null, focus: null, input: "mouse", vote: null, month: "202611", metric: "price", round: 0,
+  rotate: "none", spinning: false,
+};
 const vote = (o: Partial<VoteState> = {}): VoteState => ({
   round: 1, candidates: ["강남구", "마포구", "노원구"], index: 0, phase: "prompt", method: "camera",
   counts: [null, null, null], sources: [null, null, null], reviewEdited: false, winner: null, allZero: false, endsAt: null, ...o,
@@ -28,6 +31,7 @@ describe("diffEffects", () => {
   });
   it("spread emits layout spread-intro publish.stage", () => {
     expect(diffEffects(base, s({ mode: "spread" }))).toEqual([
+      { type: "rotate.reset" }, // 13.4: 펼치기 진입은 정면·1배로
       { type: "scene.layout", mode: "spread" },
       { type: "narrate", id: "spread-intro", interrupt: true, protect: false },
       { type: "publish.stage" },
@@ -46,7 +50,8 @@ describe("diffEffects", () => {
   });
   it("vote round start narrates vote-intro protect", () => {
     const e = diffEffects(base, s({ vote: vote() }));
-    expect(e[0]).toEqual({ type: "narrate", id: "vote-intro", interrupt: true, protect: true });
+    expect(e[0]).toEqual({ type: "rotate.reset" }); // 13.4: 투표 시작은 정면·1배로
+    expect(e[1]).toEqual({ type: "narrate", id: "vote-intro", interrupt: true, protect: true });
   });
   it("prompt entry narrates vote-prompt-{gu} protect not interrupt", () => {
     const e = diffEffects(s({ vote: vote({ phase: "review", index: 0 }) }), s({ vote: vote({ phase: "prompt", index: 1 }) }));
@@ -132,9 +137,42 @@ describe("diffEffects", () => {
       s({ mode: "map", hover: "b", lifted: "강남구", focus: "강남구", month: "202610", vote: vote({ phase: "counting" }) }),
     );
     expect(types(e)).toEqual([
-      "scene.layout", "scene.lift", "scene.focus", "scene.hover", "scene.data", "counter.reset",
+      "rotate.reset", "scene.layout", "scene.lift", "scene.focus", "scene.hover", "scene.data", "counter.reset",
       "narrate", "narrate", "narrate", "publish.state", "publish.stage",
     ]);
+  });
+  it("rotate.* come first, catch before grabOne", () => {
+    expect(types(diffEffects(base, s({ rotate: "one" })))).toEqual(["rotate.grabOne"]);
+    expect(types(diffEffects(s({ spinning: true, hover: "강남구" }), s({ rotate: "one" })))).toEqual(["rotate.catch", "rotate.grabOne", "scene.hover"]);
+    expect(types(diffEffects(s({ spinning: true }), s({ rotate: "two" })))).toEqual(["rotate.catch", "rotate.grabTwo"]);
+    // 한 손 → 두 손 전환은 놓기 없이 grabTwo만
+    expect(types(diffEffects(s({ rotate: "one" }), s({ rotate: "two" })))).toEqual(["rotate.grabTwo"]);
+    // 돌리던 중 펼치기 진입: 리셋 하나가 scene.layout 앞
+    expect(types(diffEffects(s({ rotate: "one" }), s({ mode: "spread" })))).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+  });
+  it("release from one or two hands", () => {
+    expect(diffEffects(s({ rotate: "one" }), base)).toEqual([{ type: "rotate.release" }]);
+    expect(diffEffects(s({ rotate: "two" }), base)).toEqual([{ type: "rotate.release" }]);
+  });
+  it("spinState alone emits nothing", () => {
+    expect(diffEffects(base, s({ spinning: true }))).toEqual([]);
+    expect(diffEffects(s({ spinning: true }), base)).toEqual([]); // 관성이 저절로 끝남
+  });
+  it("input change resets rotation instead of releasing", () => {
+    expect(diffEffects(s({ rotate: "one" }), s({ input: "hands" }))).toEqual([{ type: "rotate.reset" }]);
+    expect(diffEffects(base, s({ input: "hands" }))).toEqual([{ type: "rotate.reset" }]);
+  });
+  it("victory resets from its cause even when nothing else changed", () => {
+    const victory: StageEvent = { type: "victory" };
+    expect(diffEffects(base, { ...base }, victory)).toEqual([{ type: "rotate.reset" }]);
+    expect(diffEffects(s({ rotate: "one" }), base, victory)).toEqual([{ type: "rotate.reset" }]);
+    expect(diffEffects(s({ mode: "spread" }), base, victory)[0]).toEqual({ type: "rotate.reset" });
+    // 리듀서가 무시한 브이(같은 객체)는 리셋 없음
+    expect(diffEffects(base, base, victory)).toEqual([]);
+    // cause가 없으면 상태 차이로만 판단한다(브이인지 알 수 없음)
+    expect(diffEffects(base, { ...base })).toEqual([]);
+    // 다른 cause는 리셋을 만들지 않는다
+    expect(diffEffects(s({ rotate: "one" }), base, { type: "release" })).toEqual([{ type: "rotate.release" }]);
   });
   it("NARRATION_IDS literals", () => {
     expect(NARRATION_IDS.voteResult("마포구", 2)).toBe("vote-result-마포구-2");

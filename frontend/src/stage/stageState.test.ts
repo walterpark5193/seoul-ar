@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { initialStageState, reduceStage, defaultCandidates, parseVoteParam, winnerOf } from "./stageState";
+import { diffEffects } from "./effects";
 import type { StageEvent, StageState, VoteState } from "./types";
 import { VOTE_TIMING } from "./types";
 import type { Stat } from "../data/types";
@@ -49,6 +50,7 @@ describe("initialStageState", () => {
   it("map mode, nothing selected, price, round 0", () => {
     expect(initialStageState("202611", "mouse")).toEqual({
       mode: "map", hover: null, lifted: null, focus: null, input: "mouse", vote: null, month: "202611", metric: "price", round: 0,
+      rotate: "none", spinning: false,
     });
   });
 });
@@ -64,11 +66,11 @@ describe("hand controls", () => {
     expect(s.lifted).toBe("강남구");
     expect(s.focus).toBeNull();
   });
-  it("grab without hover ignored", () => {
-    const s0 = hands();
-    const s = run(s0, { type: "grab" });
-    expect(s).toEqual(s0);
+  it("grab without hover lifts nothing", () => {
+    // 13.4 이전에는 상태가 그대로였다. 지금은 빈 지도 주먹이 돌리기를 시작하지만(아래 rotation 절) 여전히 아무것도 들지 않는다.
+    const s = run(hands(), { type: "grab" });
     expect(s.lifted).toBeNull();
+    expect(s.focus).toBeNull();
   });
   it("release settles focus", () => {
     const s = run(hands(), { type: "spread" }, { type: "hover", gu: "강남구" }, { type: "grab" }, { type: "release" });
@@ -99,6 +101,248 @@ describe("hand controls", () => {
     expect(s.lifted).toBeNull();
     expect(s.mode).toBe("map");
     expect(s.hover).toBe("마포구");
+  });
+});
+
+describe("rotation hold (13.4)", () => {
+  const grab: StageEvent = { type: "grab" };
+  const release: StageEvent = { type: "release" };
+  const spread: StageEvent = { type: "spread" };
+  const victory: StageEvent = { type: "victory" };
+  const twoFist: StageEvent = { type: "twoFist" };
+  const twoFistEnd: StageEvent = { type: "twoFistEnd" };
+  const spin = (spinning: boolean): StageEvent => ({ type: "spinState", spinning });
+  const hover = (gu: string | null): StageEvent => ({ type: "hover", gu });
+
+  /** stageView dispatch와 같은 한 단계: 리듀서가 같은 객체를 돌려주면(무시) 효과 없음, 아니면 이번 이벤트를 cause로 넘긴다. */
+  function step(s: StageState, e: StageEvent): [StageState, string[]] {
+    const next = reduceStage(deepFreeze(s), e);
+    return [next, next === s ? [] : diffEffects(s, next, e).map((x) => x.type)];
+  }
+
+  it("grab without hover starts rotate only in map", () => {
+    const [s, fx] = step(hands(), grab);
+    expect(s.rotate).toBe("one");
+    expect(s.lifted).toBeNull();
+    expect(s.focus).toBeNull();
+    expect(s.mode).toBe("map");
+    expect(fx).toEqual(["rotate.grabOne"]);
+    // 마우스(빈 곳 누르기)도 같은 경로
+    expect(run(mouse(), grab).rotate).toBe("one");
+    // 결과 화면에서는 투표 표시를 지우고 돌리기 시작
+    const result = run(hands(), start(0), tick(1500), tick(6500, 1), tick(8000), tick(13000, 2), tick(14500), tick(19500, 3), tick(22500));
+    expect(vote(result).phase).toBe("result");
+    const r = run(result, grab);
+    expect(r.vote).toBeNull();
+    expect(r.rotate).toBe("one");
+  });
+
+  it("grab in spread without hover ignored", () => {
+    const s0 = run(hands(), spread);
+    expect(run(s0, grab)).toBe(s0);
+    expect(s0.rotate).toBe("none");
+  });
+
+  it("grab with hover still lifts", () => {
+    const [s, fx] = step(run(hands(), hover("강남구")), grab);
+    expect(s.lifted).toBe("강남구");
+    expect(s.rotate).toBe("none");
+    expect(fx).toEqual(["scene.lift", "narrate", "publish.stage"]);
+    // 들고 있는 동안 grab은 무시(빈 곳이어도 돌리기 없음)
+    expect(run(s, grab)).toBe(s);
+    expect(run(s, hover(null), grab).rotate).toBe("none");
+  });
+
+  it("grab while spinning catches, no lift", () => {
+    const s0 = run(hands(), spin(true), hover("강남구"));
+    expect(s0.spinning).toBe(true);
+    expect(s0.hover).toBe("강남구");
+    const [s, fx] = step(s0, grab);
+    expect(s.spinning).toBe(false);
+    expect(s.rotate).toBe("one");
+    expect(s.lifted).toBeNull();
+    expect(s.hover).toBeNull(); // 잡는 동안 구 강조 없음
+    expect(fx).toEqual(["rotate.catch", "rotate.grabOne", "scene.hover"]);
+    // 빈 곳에서 잡아도 같은 순서
+    expect(step(run(hands(), spin(true)), grab)[1]).toEqual(["rotate.catch", "rotate.grabOne"]);
+    // 놓으면 그 구는 들리지 않는다(lift 경로 없음)
+    const [after, fxAfter] = step(s, release);
+    expect(after.lifted).toBeNull();
+    expect(after.focus).toBeNull();
+    expect(fxAfter).toEqual(["rotate.release"]);
+  });
+
+  it("release ends rotate with rotate.release", () => {
+    const held = run(hands(), grab);
+    const [s, fx] = step(held, release);
+    expect(s.rotate).toBe("none");
+    expect(s.lifted).toBeNull();
+    expect(s.focus).toBeNull();
+    expect(s.mode).toBe("map");
+    expect(fx).toEqual(["rotate.release"]);
+    // 다시 놓아도 아무 일 없음
+    expect(run(s, release)).toBe(s);
+  });
+
+  it("twoFist starts two-hand rotate in map", () => {
+    const [s, fx] = step(hands(), twoFist);
+    expect(s.rotate).toBe("two");
+    expect(fx).toEqual(["rotate.grabTwo"]);
+    // 한 손으로 돌리던 중이면 두 손으로 전환(놓기 없음)
+    const [s2, fx2] = step(run(hands(), grab), twoFist);
+    expect(s2.rotate).toBe("two");
+    expect(fx2).toEqual(["rotate.grabTwo"]);
+    // 관성 중이면 먼저 잡아 멈춘다, 구 강조는 끈다
+    const [s3, fx3] = step(run(hands(), spin(true), hover("마포구")), twoFist);
+    expect(s3.rotate).toBe("two");
+    expect(s3.spinning).toBe(false);
+    expect(s3.hover).toBeNull();
+    expect(fx3).toEqual(["rotate.catch", "rotate.grabTwo", "scene.hover"]);
+    // 두 손으로 잡은 동안 주 손의 grab·release는 두 손 회전을 깨지 않는다
+    expect(run(s, grab)).toBe(s);
+    expect(run(s, release)).toBe(s);
+    expect(run(s, twoFist)).toBe(s);
+  });
+
+  it("twoFist ignored while voting or spread", () => {
+    const prompt = run(hands(), start(0));
+    const counting = run(prompt, tick(1500));
+    const spreadMode = run(hands(), spread);
+    const liftedInSpread = run(spreadMode, hover("강남구"), grab);
+    expect(liftedInSpread.lifted).toBe("강남구");
+    for (const s0 of [prompt, counting, spreadMode, liftedInSpread]) expect(run(s0, twoFist)).toBe(s0);
+  });
+
+  // Controller ruling(R2 결과): 주 손 주먹이 twoFist와 같은 프레임이나 몇 프레임 앞에 확정돼 구를 들 수 있다.
+  // 두 주먹은 돌리기이므로 지도에서는 들던 구를 앉히지 않고 내려놓고(focus 그대로) 두 손 회전을 시작한다.
+  it("same-frame grab+twoFist over a gu rotates, no lift, no focus", () => {
+    // gestureMachine 출력 events ["grab", "twoFist"]를 stageView가 차례로 dispatch한다
+    const [lifted] = step(run(hands(), hover("강남구")), grab);
+    expect(lifted.lifted).toBe("강남구");
+    const [s, fx] = step(lifted, twoFist);
+    expect(s.rotate).toBe("two");
+    expect(s.lifted).toBeNull();
+    expect(s.focus).toBeNull();
+    expect(s.hover).toBeNull();
+    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "publish.stage"]);
+    expect(diffEffects(lifted, s, twoFist)).toContainEqual({ type: "scene.lift", gu: null });
+    // 나중에 주먹을 펴도 focus가 되지 않는다(주 손 release가 먼저 오든 twoFistEnd가 먼저 오든)
+    const a = run(s, release, twoFistEnd);
+    const b = run(s, twoFistEnd, release);
+    for (const end of [a, b]) {
+      expect(end.rotate).toBe("none");
+      expect(end.lifted).toBeNull();
+      expect(end.focus).toBeNull();
+    }
+  });
+
+  it("grab (lift) then twoFist 3 frames later rotates, keeps the old focus", () => {
+    // 이전에 앉혀 둔 구(중구)가 있으면 그대로 둔다
+    const base0 = run(hands(), hover("중구"), grab, release);
+    expect(base0.focus).toBe("중구");
+    // 들고 있는 동안의 프레임마다 hover가 갱신된다
+    const lifted = run(base0, hover("강남구"), grab, hover("강남구"), hover("서초구"), hover("서초구"));
+    expect(lifted.lifted).toBe("강남구");
+    const [s, fx] = step(lifted, twoFist);
+    expect(s.rotate).toBe("two");
+    expect(s.lifted).toBeNull();
+    expect(s.focus).toBe("중구");
+    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "publish.stage"]);
+    expect(fx).not.toContain("narrate");
+    const end = run(s, release, twoFistEnd);
+    expect(end.focus).toBe("중구");
+    expect(end.lifted).toBeNull();
+    expect(end.mode).toBe("map");
+  });
+
+  it("twoFistEnd releases", () => {
+    const two = run(hands(), twoFist);
+    const [s, fx] = step(two, twoFistEnd);
+    expect(s.rotate).toBe("none");
+    expect(fx).toEqual(["rotate.release"]);
+    // 두 손으로 잡고 있지 않으면 무시
+    const one = run(hands(), grab);
+    for (const s0 of [hands(), one, s]) expect(run(s0, twoFistEnd)).toBe(s0);
+  });
+
+  it("spinState sets spinning", () => {
+    const [s, fx] = step(hands(), spin(true));
+    expect(s.spinning).toBe(true);
+    expect(fx).toEqual([]);
+    expect(run(s, spin(true))).toBe(s);
+    const [s2, fx2] = step(s, spin(false));
+    expect(s2.spinning).toBe(false);
+    expect(fx2).toEqual([]);
+    // 관성은 놓인 지도에서만: 잡고 있거나 펼치기·투표 중이면 도는 상태가 되지 않는다
+    for (const s0 of [run(hands(), grab), run(hands(), twoFist), run(hands(), spread), run(hands(), start(0))]) {
+      expect(run(s0, spin(true))).toBe(s0);
+    }
+  });
+
+  it("spread/victory/voteStart emit rotate.reset", () => {
+    // 펼치기 진입: 한 손으로 돌리던 중(마우스 누른 채 스페이스)
+    const [sp, fxSp] = step(run(mouse(), grab), spread);
+    expect(sp.mode).toBe("spread");
+    expect(sp.rotate).toBe("none");
+    expect(fxSp).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+    // 펼치기 진입: 관성 중
+    const [sp2, fxSp2] = step(run(hands(), spin(true)), spread);
+    expect(sp2.spinning).toBe(false);
+    expect(fxSp2).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+    // 펼치기에서 지도로: 이미 정면이라 리셋 없음
+    expect(step(sp, spread)[1]).not.toContain("rotate.reset");
+
+    // 브이: 돌려 놓은 뒤 놓인 깨끗한 지도(상태는 그대로)여도 정면 복귀
+    expect(step(hands(), victory)[1]).toEqual(["rotate.reset"]);
+    // 브이: 펼치기에서, 관성 중에, 돌리는 중에
+    expect(step(run(hands(), spread), victory)[1]).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+    const [v2, fxV2] = step(run(hands(), spin(true)), victory);
+    expect(v2.spinning).toBe(false);
+    expect(fxV2).toEqual(["rotate.reset"]);
+    const [v3, fxV3] = step(run(mouse(), grab), victory);
+    expect(v3.rotate).toBe("none");
+    expect(fxV3).toEqual(["rotate.reset"]); // 놓기(관성)가 아니라 리셋
+
+    // 투표 시작: 관성 중, 돌리는 중
+    const [vs, fxVs] = step(run(hands(), spin(true)), start(0));
+    expect(vs.spinning).toBe(false);
+    expect(fxVs).toEqual(["rotate.reset", "narrate", "narrate"]);
+    const [vs2, fxVs2] = step(run(hands(), twoFist), start(0));
+    expect(vs2.rotate).toBe("none");
+    expect(fxVs2[0]).toBe("rotate.reset");
+    expect(fxVs2).not.toContain("rotate.release");
+
+    // 무시된 이벤트는 리셋을 내지 않는다(투표 중 브이·펼치기)
+    const voting = run(hands(), start(0));
+    expect(step(voting, victory)).toEqual([voting, []]);
+    expect(step(voting, spread)).toEqual([voting, []]);
+  });
+
+  it("hover ignored while rotating", () => {
+    for (const held of [run(hands(), grab), run(hands(), twoFist)]) {
+      expect(held.hover).toBeNull();
+      expect(run(held, hover("마포구"))).toBe(held);
+    }
+    // 놓으면 다시 강조
+    expect(run(hands(), grab, release, hover("마포구")).hover).toBe("마포구");
+    expect(run(hands(), twoFist, twoFistEnd, hover("마포구")).hover).toBe("마포구");
+  });
+
+  it("setInput resets rotate", () => {
+    const [s, fx] = step(run(mouse(), grab), { type: "setInput", input: "hands", now: 0 });
+    expect(s.input).toBe("hands");
+    expect(s.rotate).toBe("none");
+    expect(fx).toEqual(["rotate.reset"]);
+    // 전환 뒤 늦게 온 마우스 놓기는 아무 일 없음
+    expect(run(s, release)).toBe(s);
+    const [s2, fx2] = step(run(hands(), spin(true)), { type: "setInput", input: "mouse", now: 0 });
+    expect(s2.spinning).toBe(false);
+    expect(fx2).toEqual(["rotate.reset"]);
+    const [s3] = step(run(hands(), twoFist), { type: "setInput", input: "mouse", now: 0 });
+    expect(s3.rotate).toBe("none");
+    // 같은 입력이면 무시
+    const h = hands();
+    expect(run(h, { type: "setInput", input: "hands", now: 0 })).toBe(h);
   });
 });
 

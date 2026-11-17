@@ -1,4 +1,4 @@
-// 무대 상태 리듀서 (CONTRACTS-stage 3.1, 설계 5.3). 순수·불변. 시간은 이벤트의 now로만 받는다.
+// 무대 상태 리듀서 (CONTRACTS-stage 3.1, 13.4 회전 잡기, 설계 5.3). 순수·불변. 시간은 이벤트의 now로만 받는다.
 import type { Metric, Stat } from "../data/types";
 import { GU_ORDER } from "../data/gu";
 import type { InputMode, StageEvent, StageState, VoteMethod, VoteState } from "./types";
@@ -8,12 +8,51 @@ type Index = VoteState["index"];
 type Triple<T> = [T, T, T];
 
 export function initialStageState(month: string, input: InputMode): StageState {
-  return { mode: "map", hover: null, lifted: null, focus: null, input, vote: null, month, metric: "price", round: 0 };
+  return {
+    mode: "map", hover: null, lifted: null, focus: null, input, vote: null, month, metric: "price", round: 0,
+    rotate: "none", spinning: false,
+  };
 }
 
 /** 결과 화면이 아닌 투표가 있으면 진행 중. 진행 중에는 제스처를 받지 않는다. */
 function voting(s: StageState): boolean {
   return s.vote !== null && s.vote.phase !== "result";
+}
+
+/** 정면 복귀(계약 13.4): 잡기·관성을 모두 푼다. effects가 rotate.reset을 낸다. */
+const STILL = { rotate: "none", spinning: false } as const;
+
+/** 결과 화면에서 손짓이 오면 투표 표시를 지운 뒤 적용한다(진행 중 투표는 호출 전에 걸러짐). */
+function clearResult(s: StageState): StageState {
+  return s.vote !== null ? { ...s, vote: null } : s;
+}
+
+/**
+ * 주먹(마우스 누르기). 들고 있거나 이미 돌리는 중이면 무시. 관성으로 도는 중이면 어디서든 잡아 멈추기만 하고(들지 않음),
+ * 아니면 구 위에서는 들어올리고, 빈 지도에서는 한 손 돌리기를 시작한다. 펼치기의 빈 곳은 무시.
+ */
+function grab(s: StageState): StageState {
+  if (s.lifted !== null || s.rotate !== "none") return s;
+  const base = clearResult(s);
+  if (base.spinning) return { ...base, spinning: false, rotate: "one", hover: null };
+  if (base.hover !== null) return { ...base, lifted: base.hover };
+  return base.mode === "map" ? { ...base, rotate: "one" } : base;
+}
+
+/** 놓기. 한 손으로 돌리던 중이면 회전만 놓고(들어올림 경로 없음), 아니면 들고 있던 구를 앉힌다. */
+function release(s: StageState): StageState {
+  if (s.rotate === "one") return { ...s, rotate: "none" };
+  return s.lifted === null ? s : { ...s, focus: s.lifted, lifted: null, mode: "map" };
+}
+
+/**
+ * 두 주먹: 지도에서만 두 손 돌리기·확대. 한 손 회전·관성 중이면 그대로 넘겨받는다.
+ * 주 손 주먹이 같은 프레임이나 몇 프레임 앞에 확정돼 구를 들었으면 앉히지 않고 내려놓는다(focus 그대로):
+ * 두 주먹은 돌리기다(Controller ruling, 계약 13.4 개정 예정). 펼치기에서 든 구는 그대로 둔다.
+ */
+function twoFist(s: StageState): StageState {
+  if (voting(s) || s.mode !== "map" || s.rotate === "two") return s;
+  return { ...s, rotate: "two", spinning: false, hover: null, lifted: null };
 }
 
 function setAt<T>(t: Triple<T>, i: Index, value: T): Triple<T> {
@@ -119,6 +158,8 @@ function changeMethod(v: VoteState, method: VoteMethod, now: number): VoteState 
 export function reduceStage(s: StageState, e: StageEvent): StageState {
   switch (e.type) {
     case "hover":
+      // 돌리는 동안에는 구 강조를 하지 않는다(잡을 때 hover를 비우고 놓을 때까지 null로 둔다).
+      if (s.rotate !== "none") return s;
       return s.hover === e.gu ? s : { ...s, hover: e.gu };
 
     case "grab":
@@ -126,19 +167,33 @@ export function reduceStage(s: StageState, e: StageEvent): StageState {
     case "spread":
     case "victory": {
       if (voting(s)) return s;
-      // 결과 화면에서 grab·spread·victory가 오면 투표 표시를 지우고 그대로 적용한다.
-      const base = s.vote !== null && e.type !== "release" ? { ...s, vote: null } : s;
       switch (e.type) {
         case "grab":
-          return base.hover === null ? base : { ...base, lifted: base.hover };
+          return grab(s);
         case "release":
-          return base.lifted === null ? base : { ...base, focus: base.lifted, lifted: null, mode: "map" };
-        case "spread":
-          return base.lifted !== null ? base : { ...base, mode: base.mode === "map" ? "spread" : "map" };
+          return release(s);
+        case "spread": {
+          const base = clearResult(s);
+          if (base.lifted !== null) return base;
+          // 펼치기는 정면에서만 읽힌다("왼쪽이 가장 비쌉니다"): 들어갈 때 회전을 푼다.
+          return base.mode === "map" ? { ...base, mode: "spread", ...STILL } : { ...base, mode: "map" };
+        }
         case "victory":
-          return { ...base, focus: null, lifted: null, mode: "map" };
+          return { ...clearResult(s), focus: null, lifted: null, mode: "map", ...STILL };
       }
     }
+
+    case "twoFist":
+      return twoFist(s);
+
+    case "twoFistEnd":
+      return s.rotate === "two" ? { ...s, rotate: "none" } : s;
+
+    case "spinState":
+      if (s.spinning === e.spinning) return s;
+      // 관성은 놓인 지도에서만: 잡고 있거나 펼치기·투표 중에 늦게 온 "돈다"는 받지 않는다(잡기 전용 주먹이 엉뚱하게 걸리지 않게).
+      if (e.spinning && (s.rotate !== "none" || s.mode !== "map" || voting(s))) return s;
+      return { ...s, spinning: e.spinning };
 
     case "voteStart": {
       if (voting(s)) return s;
@@ -153,7 +208,7 @@ export function reduceStage(s: StageState, e: StageEvent): StageState {
       // 첫 후보 안내는 소개 클립 뒤에 나온다: 소개 길이만큼 더 기다린다.
       const intro = e.introMs !== undefined && Number.isFinite(e.introMs) && e.introMs > 0 ? e.introMs : 0;
       vote.endsAt = e.now + intro + promptFor(vote, 0);
-      return { ...s, round, lifted: null, vote };
+      return { ...s, round, lifted: null, vote, ...STILL };
     }
 
     case "voteTick":
@@ -176,7 +231,8 @@ export function reduceStage(s: StageState, e: StageEvent): StageState {
 
     case "setInput": {
       if (s.input === e.input) return s;
-      const next: StageState = { ...s, input: e.input };
+      // 입력이 바뀌면 잡고 있던 회전(마우스 누름·주먹)은 이어지지 않는다: 정면으로 돌려 놓는다.
+      const next: StageState = { ...s, input: e.input, ...STILL };
       if (e.input === "mouse") {
         // 손으로 들고 있던 구는 내려놓는다(focus는 그대로).
         next.lifted = null;
