@@ -122,7 +122,7 @@ describe("arView", () => {
     expect(fallbackMessage(new Error("x"))).toContain("3D 화면으로 바꿨습니다");
   });
 
-  it("shows the stage banner on the first StageMessage and taps through to #/3d", () => {
+  function fakeRoot() {
     const listeners = new Map<string, () => void>();
     const els: Record<string, { hidden: boolean; textContent: string; addEventListener(t: string, f: () => void): void }> = {};
     const mk = (k: string) => (els[k] = { hidden: true, textContent: "", addEventListener: (t, f) => { listeners.set(`${k}:${t}`, f); } });
@@ -133,6 +133,33 @@ describe("arView", () => {
         return els[k] ?? mk(k);
       },
     } as unknown as HTMLElement;
+    return { root, els, listeners };
+  }
+
+  it("hides the stage banner when the stage goes quiet for 30 s, shows it again on the next StageMessage", () => {
+    vi.useFakeTimers();
+    try {
+      const { root, els } = fakeRoot();
+      const unmount = mountArView(root, fakeCtx(() => true));
+      emitStage({ v: 1, type: "stage", mode: "spread", lifted: null, ts: 1 });
+      expect(els.banner?.hidden).toBe(false);
+      vi.advanceTimersByTime(10_000);
+      emitStage({ v: 1, type: "stage", mode: "spread", lifted: null, ts: 2 }); // 하트비트
+      vi.advanceTimersByTime(29_999);
+      expect(els.banner?.hidden).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(els.banner?.hidden).toBe(true);
+      emitStage({ v: 1, type: "stage", mode: "map", lifted: null, ts: 3 });
+      expect(els.banner?.hidden).toBe(false);
+      unmount();
+      expect(stageHandlers.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the stage banner on the first StageMessage and taps through to #/3d", () => {
+    const { root, els, listeners } = fakeRoot();
     const ctx = fakeCtx(() => true);
     const unmount = mountArView(root, ctx);
     expect(els.banner?.hidden).toBe(true);

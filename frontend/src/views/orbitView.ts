@@ -3,7 +3,7 @@ import { PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
-import { bindStageFollow, createVoteLine } from "./stageFollow";
+import { bindStageFollow, createVoteLine, followLayout } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
 export const AUTO_ROTATE_RAD_PER_S = 0.3;
@@ -121,10 +121,8 @@ export const mountOrbitView: MountView = (root, ctx) => {
     channel: ctx.stageChannel,
     store: ctx.store,
     index: ctx.index,
-    onLayout: (mode) => {
-      const st = ctx.store.getState();
-      city.setLayout(mode, ctx.index.summary[st.month] ?? {}, st.metric);
-    },
+    // 펼치기는 지표와 무관하게 늘 ㎡당 가격순(무대와 같다). 막대 색·시트는 현재 지표 그대로.
+    onLayout: (mode) => followLayout(city, ctx.index, ctx.store.getState().month, mode),
     onLift: (gu) => city.lift(gu),
     onVote: (text) => voteLine.show(text),
   });

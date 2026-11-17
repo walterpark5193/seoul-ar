@@ -6,7 +6,6 @@ import type { AppState } from "../state/store";
 import type { GuData } from "../data/types";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
-import { isStageMessage } from "../stage/net/messages";
 import { bindStageFollow, createVoteLine } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
@@ -135,9 +134,7 @@ export const mountArView: MountView = (root, ctx) => {
     if (h > 0) viewerEl?.style.setProperty("--sheet-h", `${h}px`);
   });
   sheetRo?.observe(sheetHost);
-  const offBanner = ctx.stageChannel.subscribe((m) => {
-    if (isStageMessage(m)) banner.hidden = false; // follow와 무관하게 처음 받으면 보인다
-  });
+  // 배너는 follow와 무관하게 StageMessage를 받으면 보이고, 무대가 30초(STAGE_STALE_MS) 조용하면 숨는다.
   const offVote = bindStageFollow({
     channel: ctx.stageChannel,
     store: ctx.store,
@@ -145,6 +142,7 @@ export const mountArView: MountView = (root, ctx) => {
     onLayout: () => {},
     onLift: () => {},
     onVote: (text) => voteLine.show(text),
+    onStage: (active) => { banner.hidden = !active; },
   });
 
   startBtn.addEventListener("click", async () => {
@@ -175,7 +173,6 @@ export const mountArView: MountView = (root, ctx) => {
   return () => {
     alive = false;
     sheetRo?.disconnect();
-    offBanner();
     offVote();
     voteLine.dispose();
     unbind();
