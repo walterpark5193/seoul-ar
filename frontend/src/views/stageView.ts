@@ -34,6 +34,8 @@ export const VOTE_TICK_MS = 250;
 export const HEARTBEAT_MS = 10_000;
 /** HandSource.errors(연속 인식 실패)가 이 값을 넘으면(30fps로 약 2초) 마우스로 바꾼다. */
 export const HAND_ERROR_LIMIT = 60;
+/** 투표 결과가 뜬 뒤 이 시간 동안은 grab·spread·victory를 받지 않는다(투표 내내 쥐고 있던 주먹·키가 결과를 지우지 않게). */
+export const RESULT_GUARD_MS = 1500;
 /** 주 손이 이 시간 이상 안 보여야 진짜로 놓친 것. gestureMachine이 추적 손을 기억하는 시간과 같다. */
 const CURSOR_GAP_MS = DEFAULT_GESTURE_CONFIG.releaseAfterMs;
 
@@ -189,6 +191,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let handLost = true;
   let mousePoint: Point | null = null;
   let mouseDown = false;
+  let resultAt = -Infinity; // 투표 결과 화면에 들어온 시각(clock)
   let focusToken = 0;
   let focusCache: { key: string; data: GuData } | null = null;
   const shown = new Map<UiPart, string | null>();
@@ -295,8 +298,12 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     }
   }
 
+  /** 결과 화면에 막 들어왔다: 손짓·포인터·키로 결과를 곧바로 지우지 않는다. */
+  const resultGuarded = () => state.vote?.phase === "result" && clock.now() - resultAt < RESULT_GUARD_MS;
+
   function dispatch(e: StageEvent): void {
     if (phase === "disposed") return;
+    if ((e.type === "grab" || e.type === "spread" || e.type === "victory") && resultGuarded()) return;
     const prev = state;
     const next = reduceStage(prev, e);
     if (next === prev) return;
@@ -304,6 +311,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     const pv = prev.vote;
     const nv = next.vote;
     if (nv && (!pv || pv.round !== nv.round)) reviewRow = 0;
+    if (nv?.phase === "result" && (pv?.phase !== "result" || pv.round !== nv.round)) resultAt = clock.now();
     // effects는 counting에 들어갈 때만 counter.reset을 낸다. counting 중 카메라 방식으로 바뀌면(N·토글·setInput)
     // 그 전에 쌓인 프레임을 버리고 지금부터 센다.
     if (pv && nv && pv.round === nv.round && pv.phase === "counting" && nv.phase === "counting" && pv.method !== "camera" && nv.method === "camera") {

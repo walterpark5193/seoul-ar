@@ -11,7 +11,7 @@ import { createMockStageChannel } from "../stage/net/stageChannel";
 import { createNarrator, type AudioLike, type NarrationItem, type Narrator } from "../stage/narrator";
 import type { GestureName, HandFrame, HandObs, Point, Vec3 } from "../stage/types";
 import {
-  HAND_ERROR_LIMIT, HEARTBEAT_MS, VOTE_TICK_MS,
+  HAND_ERROR_LIMIT, HEARTBEAT_MS, RESULT_GUARD_MS, VOTE_TICK_MS,
   createStageController, normalizeKey, voteCandidates, voteTiming,
   type StageControllerDeps, type StartResult, type UiPart,
 } from "./stageView";
@@ -420,6 +420,47 @@ describe("stage controller", () => {
     expect(s.c.state.vote).toBeNull();
     expect(s.view.parts.vote).toBeNull();
     expect(s.wire.filter((w) => w.msg.type === "vote")).toHaveLength(1);
+  });
+
+  it("for 1.5s after the result appears, grab, spread and victory are ignored (F11)", async () => {
+    const s = setup();
+    await s.c.start("mouse");
+    s.key("v");
+    for (const n of ["2", "1", "0"]) {
+      s.clock.advance(1500 + VOTE_TICK_MS);
+      s.key(n);
+      s.clock.advance(1000 + VOTE_TICK_MS);
+    }
+    s.key("Enter");
+    expect(s.c.state.vote?.phase).toBe("result");
+    const said = s.narr.said.length;
+    s.clock.advance(RESULT_GUARD_MS - 100);
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    s.c.pointer.down();
+    s.c.pointer.up();
+    s.key(" ");
+    s.key("Escape");
+    expect(s.c.state.vote?.phase).toBe("result");
+    expect(s.c.state).toMatchObject({ lifted: null, mode: "map", focus: "종로구" });
+    expect(s.narr.said.length).toBe(said); // 결과 해설이 끊기지 않았다
+    s.clock.advance(100);
+    s.key(" ");
+    expect(s.c.state.mode).toBe("spread");
+    expect(s.c.state.vote).toBeNull();
+  });
+
+  it("a fist held through the end of a camera vote does not grab on the result screen (F11)", async () => {
+    const s = setup();
+    await s.c.start("hands");
+    const fist = [hand("Closed_Fist", 0.4, 0.6)];
+    s.live(300, fist); // 주먹을 쥐고 hover
+    s.key("v");
+    for (let k = 0; k < 2000 && s.c.state.vote?.phase !== "result"; k++) s.live(33, fist);
+    expect(s.c.state.vote?.phase).toBe("result");
+    expect(s.c.state.vote?.counts).toEqual([1, 1, 1]);
+    s.live(RESULT_GUARD_MS - 100, fist);
+    expect(s.c.state.lifted).toBeNull();
+    expect(s.c.state.vote?.phase).toBe("result");
   });
 
   it("panel buttons are handled through data attributes", async () => {
