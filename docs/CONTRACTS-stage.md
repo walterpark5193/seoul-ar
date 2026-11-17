@@ -432,7 +432,7 @@ export const DEFAULT_ROTATE: RotateConfig; // { 180, 2.5, 720, 60, 100, 0.7, 1.6
 export type RotateMode = "idle" | "one" | "two" | "spinning" | "resetting";
 export interface RotateState { yaw: number; zoom: number; mode: RotateMode; }   // yaw 라디안, (-π, π]로 정규화
 export interface Rotator {
-  grabOne(p: Point, t: number): void;            // 관성·리셋 중이면 즉시 멈추고 잡음
+  grabOne(p: Point, t: number): void;            // 관성 중이면 그 각도에서 멈추고 잡음. 리셋(정면 복귀) 중이면 리셋을 즉시 끝낸 뒤(yaw 0·zoom 1·panX 0) 잡음 (grabTwo도 같음)
   grabTwo(a: Point, b: Point, t: number): void;   // 잡는 순간의 중점 x·거리·zoom을 기준으로
   move(p: Point, t: number): void;               // one: yaw += Δx × degPerScreen(라디안 환산). 손이 오른쪽(+x)이면 yaw 증가
   moveTwo(a: Point, b: Point, t: number): void;   // 중점 Δx → yaw, zoom = zoom0 × (거리/거리0), 클램프
