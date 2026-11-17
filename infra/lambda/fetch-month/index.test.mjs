@@ -8,7 +8,7 @@ import { aggregateRows, buildIndex } from "./aggregate.mjs";
 import { fakeDeps, fakeStore, fakeSeoulFetch, fakeConverse, bulkReply, httpEvent, row, jsonResponse, FAKE_KEY, AUTH_SECRET, GU_ORDER } from "./fakes.mjs";
 
 const NOW = Date.UTC(2026, 10, 17, 3, 0, 0); // 2026-11-17 12:00 KST
-const PASS = "open-sesame";
+const PASS = "open-sesame-2026"; // 12자 이상(발표자 암호 최소 길이)
 
 describe("validateMonth", () => {
   test("YYYYMM 형식", () => {
@@ -811,8 +811,15 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     for (let i = 0; i < 10; i++) assert.equal((await h(wrong())).statusCode, 401, `시도 ${i + 1}`);
     const locked = parse(await h(right()));
     assert.equal(locked.status, 429);
-    assert.equal(locked.body.error, "too_many_attempts");
-    assert.equal(locked.body.message, "잠시 후 다시 시도해 주세요.");
+    assert.equal(locked.body.error, "locked");
+    assert.equal(locked.body.message, "암호를 너무 많이 틀렸습니다. 약 10분 뒤 다시 시도해 주세요.");
+    assert.equal(locked.body.retryAfterSeconds, 600);
+    f.setNow(NOW + 5.5 * 60_000);
+    const later = parse(await h(right()));
+    assert.equal(later.status, 429);
+    assert.equal(later.body.retryAfterSeconds, 270);
+    assert.equal(later.headers["retry-after"], "270");
+    assert.equal(later.body.message, "암호를 너무 많이 틀렸습니다. 약 5분 뒤 다시 시도해 주세요.");
     assert.equal(locked.headers["retry-after"], "600");
     assert.equal(f.invokes.length, 0);
     f.setNow(NOW + 10 * 60_000 + 1);
@@ -839,7 +846,7 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     const f = fakeDeps({ nowMs: NOW });
     const h = createHandler(f.deps);
     const res = await Promise.all(Array.from({ length: 12 }, () => h(wrong())));
-    assert.ok(res.every((r) => r.statusCode === 401 || r.statusCode === 429));
+    assert.ok(res.every((r) => r.statusCode === 401 || r.statusCode === 429 || r.statusCode === 503));
     const rec = JSON.parse([...f.deps.authStore.objects.entries()].find(([k]) => k.startsWith("attempts/"))[1].text);
     const unrecorded = f.logs.filter((l) => l.msg.startsWith("암호 시도를 기록하지 못해 거절")).length;
     assert.equal(rec.count + unrecorded, 12, JSON.stringify({ count: rec.count, unrecorded }));
@@ -905,11 +912,14 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     assert.equal((await h(right())).statusCode, 429);
   });
 
-  test("시도를 기록하지 못하면 암호를 비교하지 않고 401 (fail-closed)", async () => {
+  test("시도를 기록하지 못하면 암호를 비교하지 않고 503 auth_unavailable (fail-closed, 틀린 암호로 보이지 않게)", async () => {
     const f = fakeDeps({ nowMs: NOW });
     f.deps.authStore.failPut = () => new Error("SlowDown");
     const h = createHandler(f.deps);
-    assert.equal((await h(right())).statusCode, 401);
+    const res = parse(await h(right()));
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error, "auth_unavailable");
+    assert.equal(res.body.message, "잠금 상태를 확인할 수 없어 요청을 받지 않았습니다. 잠시 후 다시 시도해 주세요.");
     assert.equal(f.invokes.length, 0);
     assert.ok(f.logs.some((l) => l.level === "warn" && l.msg.startsWith("암호 시도를 기록하지 못해 거절")));
   });
@@ -992,11 +1002,13 @@ describe("security: HMAC 비밀은 서버 쪽 임의 값, 컨테이너마다 한
     assert.equal(f.secretReads.length, 1);
   });
 
-  test("비밀을 못 읽으면 캐시하지 않고 비교 없이 401(fail-closed), 다음 요청에서 다시 읽는다", async () => {
+  test("비밀을 못 읽으면 캐시하지 않고 비교 없이 503 auth_unavailable, 다음 요청에서 다시 읽는다", async () => {
     let n = 0;
     const f = fakeDeps({ nowMs: NOW, getAuthSecret: async () => { n++; if (n === 1) throw new Error("ResourceNotFoundException"); return AUTH_SECRET; } });
     const h = createHandler(f.deps);
-    assert.equal((await h(post({ month: "202610" }))).statusCode, 401);
+    const first = parse(await h(post({ month: "202610" })));
+    assert.equal(first.status, 503);
+    assert.equal(first.body.error, "auth_unavailable");
     assert.equal(f.invokes.length, 0);
     assert.ok(f.logs.some((l) => l.level === "warn" && l.msg.startsWith("암호 시도를 기록하지 못해 거절")));
     assert.ok(!JSON.stringify(f.logs).includes(AUTH_SECRET));
@@ -1035,5 +1047,76 @@ describe("security: HMAC 비밀은 서버 쪽 임의 값, 컨테이너마다 한
     await h(post({ month: "202610" }));
     assert.ok(f.deps.store.puts.every((p) => !p.key.includes("_auth") && !p.key.startsWith("attempts/")), JSON.stringify(f.deps.store.puts.map((p) => p.key)));
     assert.ok(f.deps.authStore.puts.length >= 3);
+  });
+});
+
+// ---- final fix wave: 응답 모양과 암호 최소 길이 ----
+describe("final: 저장된 발표자 암호가 12자보다 짧으면 503 passcode_too_short", () => {
+  test("11자 암호: 맞혀도 503, error 로그, 작업 없음, 시도로 세지 않는다(잠기지 않음)", async () => {
+    const short = "elevenchars"; // 11자
+    const f = fakeDeps({ nowMs: NOW, params: { "/seoul-ar/presenter-passcode": short } });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 12; i++) {
+      const res = parse(await h(post({ month: "202610" }, { "x-presenter-key": short })));
+      assert.equal(res.status, 503, `요청 ${i + 1}`);
+      assert.equal(res.body.error, "passcode_too_short");
+      assert.equal(res.body.message, "발표자 암호는 12자 이상이어야 합니다. SSM 값을 바꿔 주세요.");
+    }
+    assert.equal(f.invokes.length, 0);
+    assert.ok(f.logs.some((l) => l.level === "error" && /12자/.test(l.msg)));
+    assert.ok(!JSON.stringify(f.logs).includes(short), "암호 값은 로그에 없다");
+  });
+
+  test("12자 암호는 받는다 (코드 포인트로 센다)", async () => {
+    for (const pass of ["twelve-chars", "발표자암호발표자암호발표"]) {
+      assert.equal([...pass].length, 12);
+      const f = fakeDeps({ nowMs: NOW, params: { "/seoul-ar/presenter-passcode": pass } });
+      assert.equal((await createHandler(f.deps)(post({ month: "202610" }, { "x-presenter-key": pass }))).statusCode, 202, pass);
+    }
+  });
+});
+
+describe("final: 2xx 가 아닌 응답은 모두 { error, message(한국어 한 문장) }", () => {
+  test("404·405·400·401·409·429·500·503", async () => {
+    const shapes = [];
+    const check = (res, status) => {
+      const r = parse(res);
+      assert.equal(r.status, status);
+      assert.equal(typeof r.body.error, "string");
+      assert.ok(r.body.error.length > 0);
+      assert.match(r.body.message, /[가-힣]/);
+      assert.match(r.body.message, /[.다요]$/);
+      shapes.push(`${status}:${r.body.error}`);
+    };
+    let f = fakeDeps({ nowMs: NOW });
+    let h = createHandler(f.deps);
+    check(await h(httpEvent({ path: "/api/unknown", headers: { "x-presenter-key": PASS } })), 404);
+    check(await h(httpEvent({ method: "GET", headers: { "x-presenter-key": PASS } })), 405);
+    check(await h(post("{nope")), 400);
+    check(await h(post({ month: "2026-10" })), 400);
+    check(await h(post({ month: "202610" }, { "x-presenter-key": "wrong" })), 401);
+    const busy = fakeStore({ [LOCK_KEY]: { v: 1, jobId: "b-1", month: "202609", ts: NOW } });
+    f = fakeDeps({ nowMs: NOW, store: busy });
+    check(await createHandler(f.deps)(post({ month: "202610" })), 409);
+    f = fakeDeps({ nowMs: NOW });
+    h = createHandler(f.deps);
+    for (let i = 0; i < 10; i++) await h(post({ month: "202610" }, { "x-presenter-key": "wrong" }));
+    check(await h(post({ month: "202610" })), 429);
+    f = fakeDeps({ nowMs: NOW, getParameter: async () => { throw new Error("Throttling"); } });
+    check(await createHandler(f.deps)(post({ month: "202610" })), 500);
+    f = fakeDeps({ nowMs: NOW });
+    f.deps.authStore.failPut = () => new Error("SlowDown");
+    check(await createHandler(f.deps)(post({ month: "202610" })), 503);
+    assert.deepEqual(shapes, ["404:not_found", "405:method_not_allowed", "400:bad_request", "400:bad_month", "401:unauthorized", "409:busy", "429:locked", "500:config", "503:auth_unavailable"]);
+  });
+
+  test("409 는 잠금 주인 종류별 문구: 수집 '{월} 데이터를 가져오는 중입니다', 해설 '{월} 해설을 만드는 중입니다'", async () => {
+    for (const [kind, re] of [[undefined, /^2026년 9월 데이터를 가져오는 중입니다/], ["narration", /^2026년 9월 해설을 만드는 중입니다/]]) {
+      const store = fakeStore({ [LOCK_KEY]: { v: 1, jobId: "h-1", month: "202609", ...(kind ? { kind } : {}), ts: NOW } });
+      const f = fakeDeps({ nowMs: NOW, store });
+      const r = parse(await createHandler(f.deps)(post({ month: "202610" })));
+      assert.equal(r.body.error, "busy");
+      assert.match(r.body.message, re);
+    }
   });
 });

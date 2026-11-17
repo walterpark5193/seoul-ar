@@ -75,7 +75,7 @@ unset SEOUL_API_KEY PRESENTER_PASSCODE
 
 보안 권장:
 - 서울 API 는 HTTP 로만 열려 있다(확인함: 8088 포트는 TLS 핸드셰이크가 실패하고 443 은 응답하지 않는다). 그래서 키가 `openapi.seoul.go.kr` 까지 평문으로 간다. **이 앱 전용 키**를 발급해 쓰고 행사가 끝나면 **폐기·재발급**한다.
-- 발표자 암호는 **12자 이상**으로 정한다. 같은 접속(IP, IPv6 는 /64)에서 10분 안에 10번 시도해 틀리면 10분 동안 429 로 막는다(아래 표).
+- 발표자 암호는 **12자 이상**이어야 한다(코드가 강제한다: 짧으면 모든 요청에 503 `passcode_too_short`, 작업자 로그에 error). 같은 접속(IP, IPv6 는 /64)에서 10분 안에 10번 시도해 틀리면 10분 동안 429 로 막는다(아래 표).
 - 이전 버전(암호 시도 기록을 공개 사이트 버킷 `data/jobs/_auth/` 에 두던 것)을 배포한 적이 있으면, 이번 배포 뒤 그 객체들을 지우고(`aws s3 rm s3://<BucketName>/data/jobs/_auth/ --recursive`) **발표자 암호를 바꾼다**. 그 기록 이름은 암호에서 유도돼 있어 오프라인 대입에 쓰일 수 있었다.
 - 행사장 와이파이처럼 관객과 같은 공인 IP(NAT)를 쓰면, 관객 누군가가 10번 틀려도 발표자까지 10분 막힌다. 발표자는 **휴대폰 핫스폿** 같은 다른 회선을 쓰고, 암호는 **처음부터 정확히** 넣는다.
 
@@ -91,10 +91,14 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 | 400 | `{"error": "bad_month" \| "bad_request", "message"}` | YYYYMM 형식, 200601 이상, 한국 시간 이번 달 이하가 아님 / 본문이 JSON 이 아님 |
 | 401 | `{"error": "unauthorized", "message"}` | 암호 헤더 없음 또는 불일치(sha256 다이제스트를 `timingSafeEqual` 로 비교). 월 검사보다 먼저 |
 | 409 | `{"error": "busy", "message", "jobId"?, "month"?}` | 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시) |
-| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: 비공개 버킷 `AuthStateBucket` 의 `attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 비밀은 Secrets Manager `AuthHmacSecret`(CDK 가 만든 32자 임의 값, 발표자 암호와 무관, 컨테이너마다 한 번 읽음). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). 예약 동시성은 두지 않는다(누구나 채워 발표자를 굶길 수 있다) |
+| 429 | `{"error": "locked", "message": "암호를 너무 많이 틀렸습니다. 약 N분 뒤 다시 시도해 주세요.", "retryAfterSeconds"}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: 비공개 버킷 `AuthStateBucket` 의 `attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 비밀은 Secrets Manager `AuthHmacSecret`(CDK 가 만든 32자 임의 값, 발표자 암호와 무관, 컨테이너마다 한 번 읽음). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). 예약 동시성은 두지 않는다(누구나 채워 발표자를 굶길 수 있다) |
+| 503 | `{"error": "auth_unavailable", "message": "잠금 상태를 확인할 수 없어 요청을 받지 않았습니다. 잠시 후 다시 시도해 주세요."}` | 인증 상태 버킷이나 HMAC 비밀을 쓸 수 없음(fail-closed). 틀린 암호(401)와 구별되므로 브라우저는 저장된 암호를 지우지 않는다 |
+| 503 | `{"error": "passcode_too_short", "message": "발표자 암호는 12자 이상이어야 합니다. SSM 값을 바꿔 주세요."}` | SSM 의 발표자 암호가 12자 미만(설정 오류, 시도로 세지 않음) |
 | 405 / 500 | `{"error", "message"}` | POST 아님 / 설정·잠금·작업자 호출 실패 |
 
-`message` 는 모두 한국어 한 문장이고 키·URL 이 없다.
+2xx 가 아닌 응답은 모두 `{ "error": <코드>, "message": <한국어 한 문장> }` 이고 키·URL 이 없다(409 는 잠금 주인에 따라 "{월} 데이터를 가져오는 중입니다" 또는 "{월} 해설을 만드는 중입니다").
+
+무차별 대입 방어를 이렇게 정한 이유: 이 엔드포인트를 쓰는 사람은 발표자 한 명이고 행사는 몇 시간이다. 그래서 (1) IP(IPv6 /64)마다 원자적으로 세는 잠금(10분에 10번 → 10분)과 (2) 12자 이상 강제로 막는다. 잠금은 IP 하나당 시간당 약 60번까지만 허용하고, 12자 무작위 암호(영문 소문자·숫자만 써도 36¹² ≈ 4.7×10¹⁸)는 IP 를 수천 개 써도 행사 안에 맞힐 수 없다. 예약 동시성으로 병렬 대입을 묶는 방식은 쓰지 않는다: 누구나 그 몇 칸을 채워 발표자를 굶길 수 있다(인증 없는 DoS). AWS WAF 속도 제한은 월 고정비와 규칙 관리가 들고, IP 당 요청 수만 보아 같은 효과를 내면서 이 작은 데모에는 과하다. 대신 잠금 기록은 공개 경로가 없는 별도 버킷에 서버 쪽 임의 비밀로 만든 HMAC 이름으로 두어, 기록에서 암호나 IP 를 거꾸로 찾을 수 없게 했다. 남는 위험은 같은 NAT 를 쓰는 관객이 발표자를 잠글 수 있다는 것(1절 권장: 핫스폿).
 
 ### 3. 작업 흐름
 
@@ -151,7 +155,14 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 - IAM: 작업자만 `bedrock:InvokeModel`, 대상은 `arn:aws:bedrock:*::foundation-model/<기반 모델>` 과 `arn:aws:bedrock:us-east-1:<계정>:inference-profile/us.<기반 모델>` 둘뿐. 공개 함수(API)에는 Bedrock 권한이 없다.
 - 계정에서 그 모델 접근이 막혀 있으면 작업은 `error`("Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요")로 끝난다. Bedrock 콘솔 Model access 에서 Anthropic Claude Haiku 를 켠다(처음이면 사용 목적 양식).
 
-### 8. 알려진 한계
+### 8. 리허설 점검표 (배포 전후)
+
+1. **배포 직전에 프론트를 다시 빌드한다**: `frontend/` 에서 빌드해 `frontend/dist` 를 새로 만든 다음 `infra/` 에서 `npx cdk deploy …`. 사이트 배포는 그때의 dist 를 올린다(오래된 dist 면 옛 화면이 나간다).
+2. **202610 을 가져와 구별 건수를 본다**: 발표자 화면에서 2026년 10월을 가져오고 `data/202610/{구}.json` 의 `total.n` 이 구마다 그럴듯한지(대부분 0 이 아닌지) 확인한다. 거의 전부 0 인 빈 달이면 서울 API 가 계약일 **오름차순**으로 준다는 뜻이다. 그때는 `lambda/fetch-month/seoulApi.mjs` 의 "가장 최근 계약일" 멈춤 규칙을 빼야 한다(1000건 미만·`list_total_count`·30페이지 멈춤만 남긴다).
+3. **202611 해설을 미리 만든다**: 호스트 화면의 "해설 생성"(`POST /api/narrate-month` `{"month":"202611"}`)으로 `data/202611/narration.json` 을 만든다. Bedrock 모델 ARN 짝(기반 모델 + `us.` 인퍼런스 프로파일) IAM 과 런타임 내장 SDK 클라이언트(Bedrock Runtime, Secrets Manager 등)가 실제로 도는지 여기서 확인된다. 실패하면 작업자 로그의 `Bedrock 호출 실패` 를 본다.
+4. 틀린 암호 한 번으로 401, 맞는 암호로 202 가 나는지 보고(Function URL 을 직접 부르면 403 인지도), 발표 회선(핫스폿)에서 다시 한 번 해 본다.
+
+### 9. 알려진 한계
 
 - 서울 API 는 `http://openapi.seoul.go.kr:8088` (HTTP) 로만 열려 있어 키가 평문으로 오간다(1절 보안 권장: 전용 키, 행사 뒤 폐기).
 - 접수연도(`RCPT_YR`)로 거르므로, 11·12월에 계약하고 다음 해에 신고한 거래는 빠진다. 다음 해까지 뒤지면 그 해 전체를 넘겨야 해서 하지 않고, `done` 메시지로 알린다.

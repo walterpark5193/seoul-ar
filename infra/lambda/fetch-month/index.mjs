@@ -35,6 +35,7 @@ const DEFAULT_CONCURRENCY = 4;
 // 10분 잠금 stale 시간보다 먼저 끝나므로 다음 작업과 겹치지 않는다.
 const DEADLINE_MARGIN_MS = 90_000;
 const PASSCODE_TTL_MS = 60_000; // 발표자 암호 메모리 캐시(SSM 을 바꾸면 길어야 1분 뒤 반영)
+export const PASSCODE_MIN_CHARS = 12; // 짧은 암호는 받지 않는다(IP 별 잠금과 함께 무차별 대입을 막는 두 번째 축)
 const TOTAL = GU_ORDER.length;
 const NARR_TOTAL = NARRATION_KEYS.length;
 
@@ -139,11 +140,15 @@ async function handleHttp(event, deps, caches) {
     attemptKey = authKey(clientIp(event), await readAuthSecret(deps, caches.authSecret));
     attempt = await registerAttempt(deps.authStore, attemptKey, deps.now());
   } catch (e) {
+    // 503: 틀린 암호(401)와 구별해야 브라우저가 저장된 암호를 지우지 않는다
     log("warn", "암호 시도를 기록하지 못해 거절(비교하지 않음)", errFields(e));
-    return fail(401, "unauthorized", "암호를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    return fail(503, "auth_unavailable", "잠금 상태를 확인할 수 없어 요청을 받지 않았습니다. 잠시 후 다시 시도해 주세요.");
   }
   if (!attempt.ok) {
-    return fail(429, "too_many_attempts", "잠시 후 다시 시도해 주세요.", {}, { "retry-after": String(Math.ceil(attempt.lockedMs / 1000)) });
+    const retryAfterSeconds = Math.ceil(attempt.lockedMs / 1000);
+    const minutes = Math.max(1, Math.ceil(attempt.lockedMs / 60_000));
+    return fail(429, "locked", `암호를 너무 많이 틀렸습니다. 약 ${minutes}분 뒤 다시 시도해 주세요.`,
+      { retryAfterSeconds }, { "retry-after": String(retryAfterSeconds) });
   }
 
   let expected;
@@ -152,6 +157,12 @@ async function handleHttp(event, deps, caches) {
   } catch (e) {
     log("error", "발표자 암호 파라미터를 읽지 못함", errFields(e));
     return fail(500, "config", "서버 설정을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  }
+  if ([...String(expected)].length < PASSCODE_MIN_CHARS) {
+    // 설정 오류: 어떤 암호도 받지 않는다. 이 시도는 추측이 아니므로 셈에서 지운다(고친 뒤 바로 쓸 수 있게).
+    log("error", `발표자 암호가 ${PASSCODE_MIN_CHARS}자보다 짧아 요청을 받지 않음: SSM ${env.SSM_PASSCODE_NAME} 값을 ${PASSCODE_MIN_CHARS}자 이상으로 바꿔야 한다`, {});
+    await clearAttempts(deps.authStore, attemptKey, attempt.etag).catch((e) => log("warn", "암호 시도 기록을 초기화하지 못함", errFields(e)));
+    return fail(503, "passcode_too_short", `발표자 암호는 ${PASSCODE_MIN_CHARS}자 이상이어야 합니다. SSM 값을 바꿔 주세요.`);
   }
   if (!passcodeMatches(header(event.headers, "x-presenter-key"), expected)) {
     if (attempt.record.lockedUntil) log("warn", "암호 실패가 많아 이 접속을 10분 잠근다", { count: attempt.record.count });

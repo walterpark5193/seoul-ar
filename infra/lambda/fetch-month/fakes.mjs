@@ -112,7 +112,7 @@ export function fakeDeps(over = {}) {
   const invalidations = [];
   const secretReads = [];
   let clock = over.nowMs ?? Date.UTC(2026, 10, 17, 3, 0, 0); // 2026-11-17 12:00 KST
-  const params = { "/seoul-ar/seoul-api-key": FAKE_KEY, "/seoul-ar/presenter-passcode": "open-sesame", ...(over.params ?? {}) };
+  const params = { "/seoul-ar/seoul-api-key": FAKE_KEY, "/seoul-ar/presenter-passcode": "open-sesame-2026", ...(over.params ?? {}) };
   const deps = {
     env: {
       BUCKET: "test-bucket",
