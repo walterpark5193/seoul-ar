@@ -78,7 +78,7 @@ function stageSurface(root: HTMLElement, ctx: ViewContext): InfoSurface {
   const offFollow = ctx.store.subscribe((s) => { if (!s.follow) ctx.store.dispatch({ type: "follow" }); });
 
   // 커서 숨김: 잠시 움직임이 없으면.
-  const viewer = root.querySelector<HTMLElement>(".viewer")!;
+  const viewer = root; // mountOrbitView가 .viewer 요소 자체를 넘긴다(자손이 아니다)
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const wake = () => {
     viewer.classList.remove("is-idle");
