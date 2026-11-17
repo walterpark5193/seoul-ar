@@ -38,6 +38,8 @@ export const HAND_ERROR_LIMIT = 60;
 export const HAND_START_TIMEOUT_MS = 20_000;
 /** 손 모드에서 인식 프레임이 이만큼 오지 않으면 카메라 영상이 끊긴 것으로 보고 마우스로 바꾼다. */
 export const HAND_STALL_MS = 1500;
+/** 펼치기는 지표와 무관하게 늘 ㎡당 가격순으로 줄 세운다(해설 "㎡당 가격순 … 왼쪽이 가장 비쌉니다"가 늘 참). 막대 색은 현재 지표. */
+export const SPREAD_METRIC: Metric = "price";
 /** 투표 결과가 뜬 뒤 이 시간 동안은 grab·spread·victory를 받지 않는다(투표 내내 쥐고 있던 주먹·키가 결과를 지우지 않게). */
 export const RESULT_GUARD_MS = 1500;
 /** 주 손이 이 시간 이상 안 보여야 진짜로 놓친 것. gestureMachine이 추적 손을 기억하는 시간과 같다. */
@@ -224,7 +226,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let mouseDown = false;
   let resultAt = -Infinity; // 투표 결과 화면에 들어온 시각(clock)
   let focusToken = 0;
-  let focusCache: { key: string; data: GuData } | null = null;
+  const guCache = new Map<string, GuData>();                                   // 받은 구 자료(월|구)
+  const guLoading = new Map<string, Promise<GuData | null>>();                  // 받는 중인 요청(같은 구를 두 번 받지 않게)
   const shown = new Map<UiPart, string | null>();
   const stops: (() => void)[] = [];
 
@@ -291,33 +294,58 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   };
 
   // ----- 씬
+  const guKey = (month: string, gu: string) => `${month}|${gu}`;
+  /** 구 자료를 받는다(실패하면 null). 받는 중이면 그 요청을 이어 쓰고, 받은 것은 guCache에 둔다. */
+  function fetchGu(month: string, gu: string): Promise<GuData | null> {
+    const key = guKey(month, gu);
+    const loading = guLoading.get(key);
+    if (loading) return loading;
+    const p = deps.loadGu(month, gu).then(
+      (d): GuData | null => d,
+      (err: unknown) => { console.warn("[stage] 구 자료를 읽지 못함", err); return null; },
+    ).then((d) => {
+      guLoading.delete(key);
+      if (d) guCache.set(key, d);
+      return d;
+    });
+    guLoading.set(key, p);
+    return p;
+  }
+  /** 곧 focus될 구(들어 올린 구, 투표 후보)의 자료를 미리 받아 둔다. */
+  const prefetch = (gu: string) => {
+    if (!guCache.has(guKey(state.month, gu))) void fetchGu(state.month, gu);
+  };
+
   function drawFocus(): void {
     const { focus: gu, month } = state;
     const mine = ++focusToken;
     if (gu === null) { scene.focus(null, null, state.metric); return; }
-    const key = `${month}|${gu}`;
-    if (focusCache?.key === key) { scene.focus(gu, focusCache.data, state.metric); return; }
-    deps.loadGu(month, gu)
-      .then((d): GuData | null => d, (err: unknown) => { console.warn("[stage] 구 자료를 읽지 못함", err); return null; })
-      .then((d) => {
-        if (phase === "disposed" || mine !== focusToken) return;
-        if (d) focusCache = { key, data: d };
-        scene.focus(gu, d, state.metric);
-      });
+    const cached = guCache.get(guKey(month, gu));
+    if (cached) { scene.focus(gu, cached, state.metric); return; }
+    // 자료가 아직이면 구부터 바로 올린다: 지도로 돌아오는 같은 차례에 focus가 바뀌어 옛 focus 구의 막대가 다시 자라 보이지 않는다.
+    // 막대는 자료가 오면 자란다(실패하면 구만 올라 있다).
+    scene.focus(gu, null, state.metric);
+    void fetchGu(month, gu).then((d) => {
+      if (phase === "disposed" || mine !== focusToken || !d) return;
+      scene.focus(gu, d, state.metric);
+    });
   }
 
   function run(fx: Effect): void {
     switch (fx.type) {
       case "scene.layout":
-        scene.setLayout(fx.mode, summary(), state.metric);
+        scene.setLayout(fx.mode, summary(), SPREAD_METRIC);
         renderer?.setMode(fx.mode);
         return;
-      case "scene.lift": scene.lift(fx.gu); return;
+      case "scene.lift":
+        scene.lift(fx.gu);
+        if (fx.gu !== null) prefetch(fx.gu); // 들고 있는 동안 받아 두면 놓을 때 바로 앉는다
+        return;
       case "scene.focus": drawFocus(); return;
       case "scene.hover": scene.setHover(fx.gu); return;
       case "scene.data":
         scene.setOverview(summary(), state.metric);
-        if (state.mode === "spread") scene.setLayout("spread", summary(), state.metric); // 새 지표·월로 다시 줄 세움
+        if (state.mode === "spread") scene.setLayout("spread", summary(), SPREAD_METRIC); // 새 달이면 다시 줄 세움(지표만 바뀌면 그대로)
         if (state.focus !== null) drawFocus();
         return;
       case "narrate": narrator.say(fx.id, { interrupt: fx.interrupt, protect: fx.protect }); return;
@@ -341,7 +369,10 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     state = next;
     const pv = prev.vote;
     const nv = next.vote;
-    if (nv && (!pv || pv.round !== nv.round)) reviewRow = 0;
+    if (nv && (!pv || pv.round !== nv.round)) {
+      reviewRow = 0;
+      for (const g of nv.candidates) prefetch(g); // 결과가 뜨면 승자가 바로 앉게
+    }
     if (nv?.phase === "result" && (pv?.phase !== "result" || pv.round !== nv.round)) resultAt = clock.now();
     // effects는 counting에 들어갈 때만 counter.reset을 낸다. counting 중 카메라 방식으로 바뀌면(N·토글·setInput)
     // 그 전에 쌓인 프레임을 버리고 지금부터 센다.
@@ -619,8 +650,14 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     },
     dispose() {
       if (phase === "disposed") return;
+      const wasRunning = phase === "running";
       phase = "disposed";
       skipHandWait?.();
+      if (wasRunning) {
+        // 무대를 떠난다: 따라오던 폰이 펼치기·들어 올림에 갇히지 않게 지도·내려놓음을 한 번 보낸다(실패는 무시).
+        const last = toStageMessage({ ...state, mode: "map", lifted: null }, clock.now());
+        try { deps.stageChannel.publish(last).catch(() => {}); } catch { /* 무시 */ }
+      }
       for (const stop of stops.splice(0)) stop();
       detach();
       narrator.stop();

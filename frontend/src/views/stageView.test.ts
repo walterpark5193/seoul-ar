@@ -925,8 +925,124 @@ describe("stage controller", () => {
     s.c.dispose();
     expect(s.clock.jobs).toBe(0);
     expect(s.narr.narrator.stop).toHaveBeenCalled();
+    expect(s.wire).toHaveLength(3); // 떠날 때 마지막 stage 하나(F5)
     s.clock.advance(HEARTBEAT_MS);
-    expect(s.wire).toHaveLength(2);
+    expect(s.wire).toHaveLength(3);
+  });
+
+  it("leaving after start sends one last stage message map/null so phones do not stay spread or lifted (F5)", async () => {
+    const s = setup();
+    await s.c.start("mouse");
+    s.key(" ");
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.c.state).toMatchObject({ mode: "spread", lifted: "강남구" });
+    s.wire.length = 0;
+    s.c.dispose();
+    expect(s.wire.map((w) => w.msg)).toEqual([{ v: 1, type: "stage", mode: "map", lifted: null, ts: s.clock.now() }]);
+    s.c.dispose();
+    expect(s.wire).toHaveLength(1);
+  });
+
+  it("the last stage message is best effort, and nothing is sent if the stage never started (F5)", async () => {
+    const s = setup();
+    await s.c.start("mouse");
+    s.flags.failStage = true;
+    expect(() => s.c.dispose()).not.toThrow();
+    await flush();
+    const idle = setup();
+    idle.c.dispose();
+    expect(idle.wire).toHaveLength(0);
+    expect(idle.stageChannel.publish).not.toHaveBeenCalled();
+  });
+
+  it("spread is always laid out by price; the metric only changes colours (F6)", async () => {
+    const s = setup({ extra: { metric: "count" } });
+    await s.c.start("mouse");
+    s.key(" ");
+    expect(s.scene.setLayout).toHaveBeenLastCalledWith("spread", s.index.summary[MONTH], "price");
+    s.key("p");
+    expect(s.c.state.metric).toBe("price");
+    s.key("p");
+    expect(s.c.state.metric).toBe("count");
+    expect(s.scene.setOverview).toHaveBeenLastCalledWith(s.index.summary[MONTH], "count"); // 막대 색·시트는 현재 지표
+    s.key(" ");
+    expect(s.scene.setLayout).toHaveBeenLastCalledWith("map", s.index.summary[MONTH], "price");
+    expect(s.scene.setLayout.mock.calls.every(([, , m]) => m === "price")).toBe(true);
+  });
+
+  it("spread re-laid out for a new month still uses price (F6)", async () => {
+    const s = setup({ months: ["202610", MONTH], extra: { metric: "count" } });
+    await s.c.start("mouse");
+    s.key(" ");
+    s.key("ArrowLeft");
+    expect(s.scene.setLayout).toHaveBeenLastCalledWith("spread", s.index.summary["202610"], "price");
+  });
+
+  it("grabbing prefetches the gu, so release focuses it in the same turn as the map return (F7)", async () => {
+    let under = "강남구";
+    const s = setup({ pick: () => under });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    s.c.pointer.down();
+    s.c.pointer.up(); // focus 강남구
+    await flush();
+    s.key(" ");
+    under = "마포구";
+    s.c.pointer.move({ x: 0.4, y: 0.5 });
+    s.c.pointer.down();
+    expect(s.loadGu).toHaveBeenLastCalledWith(MONTH, "마포구"); // 드는 순간 받기 시작
+    await flush();
+    s.scene.focus.mockClear();
+    s.scene.setLayout.mockClear();
+    s.c.pointer.up();
+    // 기다리지 않고 바로: 지도로 돌아가는 같은 차례에 새 구가 앉는다(옛 focus 강남구 막대가 다시 자랄 틈이 없다)
+    expect(s.scene.focus).toHaveBeenCalledTimes(1);
+    expect(s.scene.focus).toHaveBeenCalledWith("마포구", expect.objectContaining({ gu: "마포구" }), "price");
+    expect(s.scene.setLayout.mock.invocationCallOrder[0]!).toBeLessThan(s.scene.focus.mock.invocationCallOrder[0]!);
+    expect(s.loadGu.mock.calls.filter(([, g]) => g === "마포구")).toHaveLength(1);
+  });
+
+  it("if the gu data is still on its way at release, the new gu rises at once and its bars follow (F7)", async () => {
+    let under = "강남구";
+    const s = setup({ pick: () => under });
+    let resolve!: (d: GuData) => void;
+    s.loadGu.mockImplementation(async (month: string, gu: string) => {
+      if (gu === "마포구") return new Promise<GuData>((r) => { resolve = r; });
+      return { v: 1, month, gu, generatedAt: "", total: stat(1), dongs: [] };
+    });
+    await s.c.start("mouse");
+    s.c.pointer.move({ x: 0.5, y: 0.5 });
+    s.c.pointer.down();
+    s.c.pointer.up();
+    await flush();
+    s.key(" ");
+    under = "마포구";
+    s.c.pointer.move({ x: 0.4, y: 0.5 });
+    s.c.pointer.down();
+    s.scene.focus.mockClear();
+    s.c.pointer.up();
+    expect(s.scene.focus.mock.calls).toEqual([["마포구", null, "price"]]);
+    resolve({ v: 1, month: MONTH, gu: "마포구", generatedAt: "", total: stat(1), dongs: [] });
+    await flush();
+    expect(s.scene.focus).toHaveBeenLastCalledWith("마포구", expect.objectContaining({ gu: "마포구" }), "price");
+    expect(s.loadGu.mock.calls.filter(([, g]) => g === "마포구")).toHaveLength(1); // 미리 받던 요청을 이어 쓴다
+  });
+
+  it("vote candidates are prefetched so the winner is focused at once on the result (F7)", async () => {
+    const s = setup();
+    await s.c.start("mouse");
+    s.key("v");
+    expect(s.loadGu.mock.calls.map(([, g]) => g).sort()).toEqual(["강동구", "서대문구", "종로구"].sort());
+    await flush();
+    for (const n of ["2", "1", "0"]) {
+      s.clock.advance(1500 + VOTE_TICK_MS);
+      s.key(n);
+      s.clock.advance(1000 + VOTE_TICK_MS);
+    }
+    s.scene.focus.mockClear();
+    s.key("Enter");
+    expect(s.scene.focus.mock.calls).toEqual([["종로구", expect.objectContaining({ gu: "종로구" }), "price"]]);
   });
 });
 
