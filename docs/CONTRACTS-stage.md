@@ -487,3 +487,20 @@ export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
 ### 13.7 안내 줄 (`hud.ts renderHints`)
 - 손: "주먹: 들어올리기 · 빈 곳 주먹 끌기: 돌리기 · 두 주먹: 돌리기·확대 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거"
 - 마우스: "누르고 있기: 들어올리기 · 빈 곳 끌기: 돌리기 · 휠: 확대 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드"
+
+### 13.8 펼침 화면 확대 (2026-11-17, 사용자 요청: "가리키는 곳 기준")
+펼친(spread) 화면에서도 확대·축소한다. 회전은 계속 막는다("왼쪽이 가장 비쌉니다" 유지). 확대 기준점은 두 주먹의 중점(마우스는 포인터)이다.
+
+- 단위: `panX`는 "확대 1배일 때 target 평면에서 보이는 화면 절반 폭"을 1로 한 값. 0이면 가운데, 음수면 왼쪽(1위 쪽)을 보고 있음. 기준점 `anchorNdcX` ∈ [−1, 1](화면 왼쪽 −1, 거울 보정 후 커서 좌표 x×2−1).
+- Rotator(13.2 확장):
+  - `RotateState`에 `panX: number`.
+  - `zoomAt(z: number, anchorNdcX: number): void` — z를 [zoomMin, zoomMax]로 자르고, 기준점 아래의 장면 위치가 그대로 있도록 `panX ← panX + s/z0 − s/z1`(s = anchorNdcX). 그 뒤 |panX| ≤ 1 − 1/z1로 자름(z1 ≤ 1이면 0).
+  - `wheel(deltaY, anchorNdcX = 0)`, `moveTwo(a, b, t)`의 확대는 zoomAt을 쓴다(두 손 중점의 ndc x가 기준).
+  - `setYawLocked(locked: boolean)`: 잠그면 move/moveTwo/관성이 yaw를 바꾸지 않는다(확대만).
+  - `reset`은 panX도 0으로.
+  - 지도 모드에서는 기준점 0(가운데)로 확대하고 panX는 0을 유지한다(stageView가 anchor 0을 넘김).
+- 렌더러(13.5 확장): `StageRenderer.setPan(p: number)` — 현재 기본 포즈(화면 비율 맞춤 포함)의 확대 1배 절반 폭 W1 = tan(hfov/2)·D1로 환산해, 카메라 위치와 target을 카메라 오른쪽 축으로 p·W1만큼 옮긴다. setZoom 뒤에 적용, 포즈 보간·resize와 함께 유지.
+- 무대 상태(13.4 확장): spread에서 `twoFist`(들기 없음·투표 아님) → rotate="two"(확대 전용) + rotate.grabTwo. spread에서 빈 곳 한 손 주먹은 지금처럼 무시. spread에서 map으로 나갈 때도 `rotate.reset`(들어갈 때와 같음). 휠은 map과 spread에서(들기 없음·투표 아님).
+- 채널(13.6 확장): StageMessage에 선택 필드 `panX?: number`(유한수, [−1, 1]). ALLOWED_KEYS.stage에 추가. view = {yaw, zoom, panX}. `onView(yaw, zoom, panX)`.
+- 큰 화면: 자기 카메라의 확대 1배 절반 폭 hb로 환산해 도시 group을 −panX·hb만큼 옆으로 옮겨, 무대와 같은 쪽(예: 1위 쪽)이 가운데 오게 한다(근사, 부드럽게 따라가기 그대로).
+- 테스트 기준: 왼쪽 끝(anchorNdcX −0.9)에서 1.6배로 확대하면 1위 기둥이 화면 안에 남고 화면 중심 쪽으로 온다(three 투영). 가운데 기준이면 panX 0 유지.
