@@ -224,7 +224,7 @@ describe("rotation hold (13.4)", () => {
     expect(s.lifted).toBeNull();
     expect(s.focus).toBeNull();
     expect(s.hover).toBeNull();
-    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "publish.stage"]);
+    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "narrate.stop", "publish.stage"]); // final I-1: 든 구 해설도 멈춘다
     expect(diffEffects(lifted, s, twoFist)).toContainEqual({ type: "scene.lift", gu: null });
     // 나중에 주먹을 펴도 focus가 되지 않는다(주 손 release가 먼저 오든 twoFistEnd가 먼저 오든)
     const a = run(s, release, twoFistEnd);
@@ -247,7 +247,7 @@ describe("rotation hold (13.4)", () => {
     expect(s.rotate).toBe("two");
     expect(s.lifted).toBeNull();
     expect(s.focus).toBe("중구");
-    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "publish.stage"]);
+    expect(fx).toEqual(["rotate.grabTwo", "scene.lift", "scene.hover", "narrate.stop", "publish.stage"]); // final I-1: 든 구 해설도 멈춘다
     expect(fx).not.toContain("narrate");
     const end = run(s, release, twoFistEnd);
     expect(end.focus).toBe("중구");

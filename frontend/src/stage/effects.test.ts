@@ -174,6 +174,22 @@ describe("diffEffects", () => {
     // 다른 cause는 리셋을 만들지 않는다
     expect(diffEffects(s({ rotate: "one" }), base, { type: "release" })).toEqual([{ type: "rotate.release" }]);
   });
+  // final I-1: 주 손 주먹이 먼저 확정돼 구를 든 뒤 두 주먹이 들기를 취소하면, 그 구 해설이 계속 나오지 않게 멈춘다.
+  it("twoFist that drops a lift stops the gu narration", () => {
+    const twoFist: StageEvent = { type: "twoFist" };
+    const lifted = s({ input: "hands", hover: "강남구", lifted: "강남구" });
+    const rotating = s({ input: "hands", rotate: "two", lifted: null });
+    expect(types(diffEffects(lifted, rotating, twoFist))).toEqual([
+      "rotate.grabTwo", "scene.lift", "scene.hover", "narrate.stop", "publish.stage",
+    ]);
+    // 관성 중 두 주먹(든 구 없음)은 멈출 해설이 없다
+    expect(types(diffEffects(s({ spinning: true }), s({ rotate: "two" }), twoFist))).toEqual(["rotate.catch", "rotate.grabTwo"]);
+    // 들기를 끝내는 다른 원인은 그대로: 놓기(앉히기)는 해설을 멈추지 않는다
+    const settle = diffEffects(lifted, s({ input: "hands", hover: "강남구", focus: "강남구" }), { type: "release" });
+    expect(types(settle)).not.toContain("narrate.stop");
+    // cause 없이 같은 상태 차이만으로는 내지 않는다(두 주먹인지 알 수 없음)
+    expect(types(diffEffects(lifted, rotating))).not.toContain("narrate.stop");
+  });
   it("NARRATION_IDS literals", () => {
     expect(NARRATION_IDS.voteResult("마포구", 2)).toBe("vote-result-마포구-2");
     expect(NARRATION_IDS.voteNone("노원구")).toBe("vote-none-노원구");

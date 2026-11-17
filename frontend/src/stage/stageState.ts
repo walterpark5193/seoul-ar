@@ -48,7 +48,7 @@ function release(s: StageState): StageState {
 /**
  * 두 주먹: 지도에서만 두 손 돌리기·확대. 한 손 회전·관성 중이면 그대로 넘겨받는다.
  * 주 손 주먹이 같은 프레임이나 몇 프레임 앞에 확정돼 구를 들었으면 앉히지 않고 내려놓는다(focus 그대로):
- * 두 주먹은 돌리기다(Controller ruling, 계약 13.4 개정 예정). 펼치기에서 든 구는 그대로 둔다.
+ * 두 주먹은 돌리기다(계약 13.4). 그 구 해설은 effects가 narrate.stop으로 멈춘다. 펼치기에서 든 구는 그대로 둔다.
  */
 function twoFist(s: StageState): StageState {
   if (voting(s) || s.mode !== "map" || s.rotate === "two") return s;

@@ -42,7 +42,8 @@ function rotateEffects(prev: StageState, next: StageState, cause: StageEvent | u
 
 /**
  * prev → next 변화의 효과. cause(next를 만든 이벤트)는 선택이지만 stageView는 넘겨야 한다:
- * 없으면 상태가 그대로인 브이의 정면 복귀(rotate.reset)를 알 수 없다. 나머지 효과는 cause와 무관하다.
+ * 없으면 상태가 그대로인 브이의 정면 복귀(rotate.reset)와, 두 주먹이 들기를 취소할 때의 해설 멈춤(narrate.stop)을
+ * 알 수 없다. 나머지 효과는 cause와 무관하다.
  */
 export function diffEffects(prev: StageState, next: StageState, cause?: StageEvent): Effect[] {
   const rotate = rotateEffects(prev, next, cause);
@@ -88,6 +89,9 @@ export function diffEffects(prev: StageState, next: StageState, cause?: StageEve
 
   // 투표를 취소하면(결과 화면이 아닌 투표가 사라짐) 보호된 소개·안내 클립까지 멈추고 대기열을 비운다.
   if (pv && pv.phase !== "result" && !nv) narr.push({ type: "narrate.stop" });
+  // 두 주먹이 막 든 구를 내려놓으면(주 손 주먹이 먼저 확정된 경우) 그 구 해설도 멈춘다(계약 13.4).
+  // 두 주먹은 투표 진행 중에 오지 않으므로 보호 클립을 끊을 일이 없다.
+  else if (cause?.type === "twoFist" && prev.lifted !== null && next.lifted === null) narr.push({ type: "narrate.stop" });
 
   if (nv) {
     if (newRound(pv, nv)) narr.push(narrate(NARRATION_IDS.voteIntro, true, true));
