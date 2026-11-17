@@ -62,10 +62,13 @@ const STARTING_HTML = `<section class="stage-start"><p class="start-note" role="
 
 // ---------- 순수 도우미 ----------
 
-/** URL 후보(유효 이름, 앞 세 개)를 먼저, 모자라면 기본 후보(1위·13위·25위)로, 그래도 모자라면 GU_ORDER로 채운다. */
-export function voteCandidates(hash: string, summary: Record<string, Stat>, metric: Metric): [string, string, string] {
+/**
+ * URL 후보(유효 이름, 앞 세 개)를 먼저, 모자라면 기본 후보로, 그래도 모자라면 GU_ORDER로 채운다.
+ * 기본 후보는 스펙대로 현재 지표와 무관하게 "현재 월 ㎡당 중앙값 1위·13위·25위"(비싼 곳·중간·싼 곳)다.
+ */
+export function voteCandidates(hash: string, summary: Record<string, Stat>): [string, string, string] {
   const picked = (parseVoteParam(hash, GU_ORDER) ?? []).slice(0, 3);
-  for (const g of [...defaultCandidates(summary, metric, GU_ORDER), ...GU_ORDER]) {
+  for (const g of [...defaultCandidates(summary, "price", GU_ORDER), ...GU_ORDER]) {
     if (picked.length >= 3) break;
     if (!picked.includes(g)) picked.push(g);
   }
@@ -532,7 +535,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
         const v = state.vote;
         if (v && v.phase !== "result") dispatch({ type: "voteCancel" });
         else {
-          const candidates = voteCandidates(deps.hash(), summary(), state.metric);
+          const candidates = voteCandidates(deps.hash(), summary());
           // 안내 단계 길이를 실제 해설 길이에 맞춘다(첫 후보 카메라 창이 소개·안내 음성과 겹치지 않게).
           const timing = voteTiming(candidates, (id) => narrator.clipMs(id));
           dispatch({ type: "voteStart", candidates, now: clock.now(), ...timing });

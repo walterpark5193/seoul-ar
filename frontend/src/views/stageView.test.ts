@@ -241,13 +241,13 @@ function setup(o: {
 describe("voteCandidates", () => {
   const summary = makeIndex().summary[MONTH]!;
   it("defaults to 1st, 13th and 25th by price", () => {
-    expect(voteCandidates("#/stage", summary, "price")).toEqual(["종로구", "서대문구", "강동구"]);
+    expect(voteCandidates("#/stage", summary)).toEqual(["종로구", "서대문구", "강동구"]);
   });
   it("takes valid names from the hash and fills the rest with defaults", () => {
-    expect(voteCandidates("#/stage?vote=강남구,마포구,노원구", summary, "price")).toEqual(["강남구", "마포구", "노원구"]);
-    expect(voteCandidates("#/stage?vote=강남구,없는구", summary, "price")).toEqual(["강남구", "종로구", "서대문구"]);
-    expect(voteCandidates("#/stage?vote=종로구", summary, "price")).toEqual(["종로구", "서대문구", "강동구"]);
-    expect(voteCandidates("#/stage?vote=강남구,마포구,노원구,중구", summary, "price")).toEqual(["강남구", "마포구", "노원구"]);
+    expect(voteCandidates("#/stage?vote=강남구,마포구,노원구", summary)).toEqual(["강남구", "마포구", "노원구"]);
+    expect(voteCandidates("#/stage?vote=강남구,없는구", summary)).toEqual(["강남구", "종로구", "서대문구"]);
+    expect(voteCandidates("#/stage?vote=종로구", summary)).toEqual(["종로구", "서대문구", "강동구"]);
+    expect(voteCandidates("#/stage?vote=강남구,마포구,노원구,중구", summary)).toEqual(["강남구", "마포구", "노원구"]);
   });
 });
 
@@ -776,7 +776,22 @@ describe("stage controller", () => {
     await s.c.start("mouse");
     expect(s.wire[0]!.msg).toMatchObject({ type: "state", metric: "count" });
     s.key("v");
-    expect(s.c.state.vote?.candidates).toEqual(["강동구", "서대문구", "종로구"]); // 건수 1·13·25위
+    expect(s.c.state.vote?.candidates).toEqual(["종로구", "서대문구", "강동구"]); // 지표와 무관하게 ㎡당 가격 1·13·25위
+  });
+
+  it("default vote candidates are by price even when the metric is count, also after switching with P", async () => {
+    // 스펙: 기본 후보는 "현재 월 ㎡당 중앙값 1위, 13위, 25위". 건수 기준이면 강동구·서대문구·종로구가 된다.
+    const s = setup();
+    await s.c.start("mouse");
+    s.key("p");
+    expect(s.c.state.metric).toBe("count");
+    s.key("v");
+    expect(s.c.state.vote?.candidates).toEqual(["종로구", "서대문구", "강동구"]);
+    s.key("v");
+    const u = setup({ hash: "#/stage?vote=마포구", extra: { metric: "count" } });
+    await u.c.start("mouse");
+    u.key("v");
+    expect(u.c.state.vote?.candidates).toEqual(["마포구", "종로구", "서대문구"]); // URL 후보 뒤를 가격 기본 후보로 채운다
   });
 
   it("vote panel redraws only when its text changes, not on every tick or frame", async () => {
