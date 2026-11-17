@@ -23,6 +23,7 @@ export interface Ctx2DLike {
   strokeStyle: unknown; fillStyle: unknown; lineWidth: number;
 }
 
+/** 거울 규칙: 골격 canvas는 CSS로 뒤집지 않는다. 미리보기가 거울이면 mirror=true로 호출해 여기서 x를 뒤집는다(video만 CSS scaleX(-1)). */
 export function drawSkeleton(ctx: Ctx2DLike, frame: HandFrame, w: number, h: number, mirror: boolean): void {
   ctx.clearRect(0, 0, w, h);
   const px = (x: number) => (mirror ? w - x * w : x * w);

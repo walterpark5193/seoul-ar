@@ -33,6 +33,7 @@ describe("overlay", () => {
       expect(a).toBeGreaterThanOrEqual(0); expect(b).toBeLessThanOrEqual(20);
       expect(a).not.toBe(b);
     }
+    expect(new Set(HAND_CONNECTIONS.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`)).size).toBe(21);
   });
   it("drawSkeleton: two hands -> 42 lines, 42 dots", () => {
     const { ctx, calls } = fakeCtx();
@@ -54,6 +55,7 @@ describe("overlay", () => {
   it("cursorClass combos", () => {
     expect(cursorClass({ visible: false, fist: false, hovering: false })).toBe("stage-cursor is-hidden");
     expect(cursorClass({ visible: true, fist: false, hovering: false })).toBe("stage-cursor");
+    expect(cursorClass({ visible: true, fist: false, hovering: true })).toBe("stage-cursor is-hover");
     expect(cursorClass({ visible: true, fist: true, hovering: true })).toBe("stage-cursor is-fist is-hover");
   });
   it("renderDiag shows values", () => {

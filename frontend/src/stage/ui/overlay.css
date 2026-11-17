@@ -5,7 +5,8 @@
 }
 .stage-preview.is-hidden { display: none; }
 .stage-preview video, .stage-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.stage-preview.is-mirror video, .stage-preview.is-mirror canvas { transform: scaleX(-1); }
+/* 거울 규칙: CSS는 video만 뒤집는다. 골격 canvas는 뒤집지 않고 drawSkeleton(mirror=true)이 x를 뒤집는다(이중 반전 방지). */
+.stage-preview.is-mirror video { transform: scaleX(-1); }
 .stage-preview.is-skeleton video { visibility: hidden; }
 
 .stage-cursor {
@@ -14,7 +15,7 @@
   background: transparent; pointer-events: none; z-index: 50;
 }
 .stage-cursor.is-hidden { display: none; }
-.stage-cursor.is-hover { border-color: var(--amber); }
+.stage-cursor.is-hover { border-color: var(--sky); }
 .stage-cursor.is-fist { border-color: var(--amber); background: rgb(251 191 36 / 0.35); }
 
 .stage-diag {
