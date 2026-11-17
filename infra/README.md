@@ -145,12 +145,24 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 
 ### 7. AI 한 줄 해설 (CONTRACTS 12)
 
-달마다 `data/{month}/narration.json`(`{v, month, generatedAt, model, items}`, `Cache-Control: no-cache`)을 만든다. 키는 `"서울 전체"`와 25구, 값은 한국어 한 문장(80자 이내).
+달마다 `data/{month}/narration.json`(`{v, month, generatedAt, model, items, source}`, `Cache-Control: no-cache`)을 만든다. 키는 `"서울 전체"`와 25구, 값은 한국어 한 문장(100자 이내, 프롬프트는 70자 안팎·최대 90자를 요구). `source` 는 같은 키로 `"model"`(Bedrock 문장) 또는 `"template"`(데이터로 만든 틀 문장)이다(프론트는 모르는 필드를 무시한다).
 
 - 언제: (a) 월 수집이 `done` 된 뒤 같은 작업자 호출 안에서 자동으로(수집 잠금을 푼 뒤 `{수집 jobId}-narration` 으로 다시 잠근다. 그동안 "해설 생성"은 409 "{월} 해설을 만드는 중입니다". 다른 작업이 잠금을 잡고 있으면 자동 해설은 건너뛴다. 진행은 `/seoul/jobs` 에 `kind: "narration"`, jobId `{수집 jobId}-narration`, 기록 `data/jobs/{그 jobId}.json`). 실패해도 수집 결과는 그대로다. (b) 이미 있는 달은 `POST /api/narrate-month` `{"month"}` + `x-presenter-key` → 202 `{jobId, month}`. 검사와 잠금은 fetch-month 와 같고, index 에 없는 달이면 400 `no_data`.
-- 어떻게: Bedrock Converse 로 한 번에 26개를 JSON 으로 받고, 코드로 검증한다(80자, 줄바꿈 없음, 금지어 `추천|매수|매도|사세요|팔세요|오를|내릴|전망|유망|투자하`, 번지·지번 숫자, 한글이 있어야 함, `{`·`"` 로 시작하는 JSON 조각·`<키>:` 조각·"죄송" 거절 문구는 거름, 키 유효성). 누락·실패 항목만 구별로 1회 다시 만들고, 그래도 안 되면 그 키를 뺀다. 한 작업 호출은 30회 이하(보통 1회, 최대 27회). 입력은 집계 숫자(구별 total, ㎡당 상위 법정동 3개, 서울 합계)뿐이다. 일괄 응답의 `stopReason` 을 로그에 남기고 `max_tokens` 면 잘렸다고 경고한다.
+- 어떻게: Bedrock Converse 로 한 번에 26개를 JSON 으로 받고, 코드로 검증한다(100자, 줄바꿈 없음, 금지어 `추천|매수|매도|사세요|팔세요|오를|내릴|전망|유망|투자하`, 번지·지번 숫자, 한글이 있어야 함, `{`·`"` 로 시작하는 JSON 조각·다른 키의 `<키>:` 조각·"죄송" 거절 문구는 거름, 그 항목 자신의 키로 시작하는 "종로구: …" 는 받음, 키 유효성). 걸린 항목은 로그에 이유(`해설 검증 실패` 의 `reason`: length·forbidden·lot·key·json·hangul·refusal·multiline·missing)를 남기고, **걸린 이유를 알려 주며**("앞 문장은 97자였습니다. 70자 안팎, 최대 90자로 줄여 주세요" 등) 구별로 1회 다시 만든다. 그래도 걸리면 **데이터로 만든 틀 문장**으로 채운다(생략하지 않음): 구는 "{구} {M}월 매매 {n}건(취소 {c}건), ㎡당 중앙값 {v}만원, 최고 {억 표기}.", 서울 전체는 "{M}월 서울 매매 {n}건, ㎡당 중앙값이 가장 높은 구는 {구}({v}만원)입니다."(서울 전체 중앙값은 구별 집계로 알 수 없어 쓰지 않는다), 거래 0건은 "{구} {M}월에는 매매 거래가 없었습니다.". 일괄 호출이 권한·모델 ID 오류면 작업 `error`, 스로틀링 같은 다른 오류면 다시 부르지 않고 모두 틀 문장. `done` 메시지는 틀 문장 수와 이유 집계를 담는다(예: "모델 문장이 검사를 통과하지 못해 3곳은 데이터로 만든 문장으로 채웠습니다(길이 2, 키 조각 1): 종로구, 중구, 용산구."). 한 작업 호출은 30회 이하(보통 1회, 최대 27회).
+- 빈 곳만 채우기: 작업자 `{"action":"narrate","jobId":"<id>","month":"<YYYYMM>","onlyMissing":true}` 은 기존 narration.json 을 읽어 **빠진 키만** 만들어 합친다(좋은 문장은 그대로). `"refreshTemplates":true` 를 더하면 `source` 가 `template` 인 키도 다시 만든다. 빠진 것이 없으면 Bedrock 을 부르지 않고 `done`("이미 26개 해설이 모두 있어…"). `POST /api/narrate-month` 본문에 같은 두 값을 넣어도 작업자에 넘긴다. 여러 달을 채우려면 달마다 하나씩(잠금 때문에 앞 작업이 끝난 뒤) 부른다:
+
+```bash
+for m in <YYYYMM> <YYYYMM> ...; do
+  aws lambda invoke --region us-east-1 --function-name SeoulArStack-FetchMonthWorker \
+    --cli-binary-format raw-in-base64-out --cli-read-timeout 0 \
+    --payload "{\"action\":\"narrate\",\"jobId\":\"fill-$m-1\",\"month\":\"$m\",\"onlyMissing\":true,\"refreshTemplates\":true}" \
+    /dev/stdout
+done
+```
+
+  (동기 호출이라 한 달이 끝나야 다음 달로 간다. 응답 `{"ok":true}` 이면 그 달은 26개가 다 찼다.) 입력은 집계 숫자(구별 total, ㎡당 상위 법정동 3개, 서울 합계)뿐이다. 일괄 응답의 `stopReason` 을 로그에 남기고 `max_tokens` 면 잘렸다고 경고한다.
 - 읽지 못한(없거나 깨진) 구 파일은 "거래 없음"으로 지어내지 않고 그 키를 뺀다. 구가 하나라도 빠지면 서울 합계가 틀리므로 "서울 전체"도 뺀다.
-- 재시도 중 제한 시간(남은 90초)에 걸리면 거기서 멈추고 지금까지 통과한 항목만 저장한 뒤 `done`(빠진 키 이름을 `message` 로)을 알린다.
+- 재시도 중 제한 시간(남은 90초)에 걸리면 재시도를 멈추고 남은 항목은 틀 문장으로 채워 저장한 뒤 `done` 을 알린다.
 - 모델: env `BEDROCK_MODEL_ID`, 기본 `us.anthropic.claude-haiku-5-5`(인퍼런스 프로파일. 이 계정·리전에서 실제 Converse 로 확인: 기반 모델 ID `anthropic.claude-haiku-5-5` 는 on-demand 호출이 안 된다). 바꾸려면 `npx cdk deploy -c bedrockModelId=<ID>`(예: `us.anthropic.claude-haiku-4-5-20251001-v1:0`). on-demand 호출이 안 되는 모델이면 작업자가 `us.` 인퍼런스 프로파일로 한 번 바꿔 부르고, 실제로 쓴 ID 를 `model` 에 적는다.
 - IAM: 작업자만 `bedrock:InvokeModel`, 대상은 `arn:aws:bedrock:*::foundation-model/<기반 모델>` 과 `arn:aws:bedrock:us-east-1:<계정>:inference-profile/us.<기반 모델>` 둘뿐. 공개 함수(API)에는 Bedrock 권한이 없다.
 - 계정에서 그 모델 접근이 막혀 있으면 작업은 `error`("Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요")로 끝난다. Bedrock 콘솔 Model access 에서 Anthropic Claude Haiku 를 켠다(처음이면 사용 목적 양식).

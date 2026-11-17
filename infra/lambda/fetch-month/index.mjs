@@ -20,7 +20,7 @@ import {
   acquireLock, releaseLock, writeJobRecord, mergeIndex, rebuildIndexFromStore, mapPool, JobError, INDEX_KEY, LOCK_KEY, JSON_PUT, guKey,
 } from "./job.mjs";
 import { jobMessage, createReporter } from "./publish.mjs";
-import { generateNarration, narrationKey, NARRATION_KEYS } from "./narrate.mjs";
+import { generateNarration, narrationKey, NARRATION_KEYS, tallyText } from "./narrate.mjs";
 import { clientIp, authKey, registerAttempt, clearAttempts } from "./auth.mjs";
 
 export const MIN_MONTH = "200601";
@@ -211,7 +211,10 @@ async function handleHttp(event, deps, caches) {
 
   try {
     await writeJobRecord(store, jobMessage({ ...jobKind, jobId, month, state: "running", done: 0, total, ts: nowMs }));
-    const payload = kind === "narration" ? { action: "narrate", jobId, month } : { jobId, month };
+    const flags = kind === "narration"
+      ? { ...(body.onlyMissing === true ? { onlyMissing: true } : {}), ...(body.refreshTemplates === true ? { refreshTemplates: true } : {}) }
+      : {};
+    const payload = kind === "narration" ? { action: "narrate", jobId, month, ...flags } : { jobId, month };
     await deps.invoke({ functionName: env.SELF_FUNCTION_NAME, payload });
   } catch (e) {
     log("error", "작업자 호출 실패", errFields(e));
@@ -246,17 +249,39 @@ function makeDeadline(deps, context) {
   };
 }
 
-function missingNote(missing) {
-  if (missing.length === 0) return {};
-  const names = missing.slice(0, 5).join(", ") + (missing.length > 5 ? ` 외 ${missing.length - 5}곳` : "");
-  return { message: `일부 해설은 만들지 못해 비워 두었습니다: ${names}` };
+const nameList = (keys) => keys.slice(0, 5).join(", ") + (keys.length > 5 ? ` 외 ${keys.length - 5}곳` : "");
+
+/** 해설 done 메시지: 틀 문장으로 채운 키(이유 집계)와 비운 키(읽지 못한 구 파일). 없으면 {}. */
+function narrationNote({ missing = [], templated = [], tally = {} }) {
+  const parts = [];
+  if (templated.length > 0) {
+    parts.push(`모델 문장이 검사를 통과하지 못해 ${templated.length}곳은 데이터로 만든 문장으로 채웠습니다(${tallyText(tally)}): ${nameList(templated)}`);
+  }
+  if (missing.length > 0) parts.push(`일부 해설은 만들지 못해 비워 두었습니다: ${nameList(missing)}`);
+  return parts.length > 0 ? { message: `${parts.join(". ")}.` } : {};
+}
+
+/** 기존 narration.json → { items, source } (source 가 없는 옛 파일은 모두 model). 없거나 깨졌으면 null. */
+function readableNarration(text) {
+  let n = null;
+  try { n = JSON.parse(text); } catch { return null; }
+  if (!n || typeof n.items !== "object" || n.items === null || Array.isArray(n.items)) return null;
+  const items = {};
+  const source = {};
+  for (const key of NARRATION_KEYS) {
+    if (typeof n.items[key] !== "string" || n.items[key] === "") continue;
+    items[key] = n.items[key];
+    source[key] = n.source?.[key] === "template" ? "template" : "model";
+  }
+  return { items, source, model: typeof n.model === "string" ? n.model : null };
 }
 
 /**
  * 해설 생성 → data/{month}/narration.json → /data/{month}/narration.json 무효화. 진행은 send 로(kind narration).
- * 실패는 사용자용 JobError 로 정리해 던진다.
+ * existing(onlyMissing)이 있으면 only 키만 만들어 기존 항목과 합친다. 실패는 사용자용 JobError 로 정리해 던진다.
+ * @returns {{ narration, missing, templated, tally, calls, stoppedEarly }}
  */
-async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip = [] }) {
+async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip = [], existing = null, only = null }) {
   const { env, store, log } = deps;
   if (!env.BEDROCK_MODEL_ID || typeof deps.converse !== "function") {
     throw new JobError("AI 해설 설정(BEDROCK_MODEL_ID)이 없어 해설을 만들지 못했습니다.");
@@ -269,6 +294,7 @@ async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline
       month,
       perGu,
       skip,
+      only,
       generatedAt: new Date(deps.now()).toISOString(),
       beforeCall: checkDeadline,
       log,
@@ -279,11 +305,25 @@ async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline
     log("error", "Bedrock 호출 실패", errFields(e));
     throw new JobError("AI 해설을 만들지 못했습니다(Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요).");
   }
-  if (Object.keys(result.narration.items).length === 0) {
+  // 합치기: 이번에 만든 키는 새 값, 나머지는 기존 값(onlyMissing). 키 순서는 NARRATION_KEYS.
+  const items = {};
+  const source = {};
+  for (const key of NARRATION_KEYS) {
+    if (key in result.narration.items) {
+      items[key] = result.narration.items[key];
+      source[key] = result.narration.source[key];
+    } else if (existing && key in existing.items) {
+      items[key] = existing.items[key];
+      source[key] = existing.source[key];
+    }
+  }
+  const narration = { v: 1, month, generatedAt: result.narration.generatedAt, model: result.narration.model, items, source };
+  const missing = NARRATION_KEYS.filter((k) => !(k in items));
+  if (Object.keys(items).length === 0) {
     throw new JobError("AI 해설을 하나도 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
   }
   try {
-    await store.put(narrationKey(month), JSON.stringify(result.narration, null, 2) + "\n", JSON_PUT);
+    await store.put(narrationKey(month), JSON.stringify(narration, null, 2) + "\n", JSON_PUT);
   } catch (e) {
     log("error", "narration.json 저장 실패", errFields(e));
     throw new JobError("해설 파일을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
@@ -295,9 +335,9 @@ async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline
       log("warn", "CloudFront 무효화 실패", errFields(e));
     }
   }
-  if (result.stoppedEarly) log("warn", "마감에 걸려 지금까지 만든 해설만 저장", { jobId, month, missing: result.missing });
-  log("info", "해설 완료", { jobId, month, calls: result.calls, missing: result.missing, model: result.narration.model });
-  return result;
+  if (result.stoppedEarly) log("warn", "마감에 걸려 남은 해설은 틀 문장으로 저장", { jobId, month, templated: result.templated });
+  log("info", "해설 완료", { jobId, month, calls: result.calls, missing, templated: result.templated, tally: result.tally, model: narration.model });
+  return { narration, missing, templated: result.templated, tally: result.tally, calls: result.calls, stoppedEarly: result.stoppedEarly };
 }
 
 function narrationSender(deps, jobId, month) {
@@ -327,7 +367,7 @@ async function autoNarrate({ deps, jobId, month, perGu, checkDeadline }) {
   let terminal;
   try {
     const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });
-    terminal = { state: "done", done: NARR_TOTAL, ...missingNote(result.missing) };
+    terminal = { state: "done", done: NARR_TOTAL, ...narrationNote(result) };
   } catch (e) {
     const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";
     if (!(e instanceof JobError)) deps.log("error", "자동 해설 실패", errFields(e));
@@ -398,8 +438,29 @@ async function runNarrateJob(event, deps, context) {
       return { ...data, gu, month };
     })).filter(Boolean);
     if (perGu.length === 0) throw new JobError("이 달의 구 파일을 읽지 못해 해설을 만들 수 없습니다.");
-    const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip: unreadable });
-    terminal = { state: "done", done: NARR_TOTAL, ...missingNote(result.missing) };
+
+    // onlyMissing: 기존 narration.json 의 빈 키(와 refreshTemplates 면 틀 문장 키)만 만들어 합친다
+    let existing = null;
+    let only = null;
+    if (event.onlyMissing === true) {
+      try {
+        const cur = await store.get(narrationKey(month));
+        existing = cur ? readableNarration(cur.text) : null;
+        if (cur && !existing) log("warn", "기존 narration.json 을 읽지 못해 26개를 모두 만든다", { month });
+      } catch (e) {
+        log("warn", "기존 narration.json 을 읽지 못해 26개를 모두 만든다", { month, ...errFields(e) });
+      }
+      if (existing) {
+        only = NARRATION_KEYS.filter((k) => !(k in existing.items) || (event.refreshTemplates === true && existing.source[k] === "template"));
+      }
+    }
+    if (only && only.length === 0) {
+      log("info", "빠진 해설이 없어 새로 만들지 않음", { month });
+      terminal = { state: "done", done: NARR_TOTAL, message: "이미 26개 해설이 모두 있어 새로 만들지 않았습니다." };
+    } else {
+      const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline, skip: unreadable, existing, only });
+      terminal = { state: "done", done: NARR_TOTAL, ...narrationNote(result) };
+    }
   } catch (e) {
     const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";
     if (!(e instanceof JobError)) log("error", "해설 작업 실패", errFields(e));

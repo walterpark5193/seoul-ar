@@ -561,6 +561,8 @@ describe("작업자 {action: narrate}", () => {
     assert.equal(n.model, "anthropic.claude-haiku-5-5");
     assert.equal(n.generatedAt, new Date(NOW).toISOString());
     assert.equal(Object.keys(n.items).length, 26);
+    assert.equal(Object.keys(n.source).length, 26);
+    assert.ok(Object.values(n.source).every((x) => x === "model"));
     assert.ok(f.deps.converse.calls[0].prompt.includes("강남구"));
     assert.deepEqual(f.invalidations, [{ distributionId: "EDISTTEST", paths: ["/data/202611/narration.json"], callerReference: "job-0001-aaaa" }]);
     assert.ok(f.published.length >= 2);
@@ -581,13 +583,17 @@ describe("작업자 {action: narrate}", () => {
     assert.equal(f.deps.store.puts.some((p) => p.key === INDEX_KEY), false);
   });
 
-  test("일부 생략이면 done 에 사용자 문장으로 알린다", async () => {
+  test("걸린 항목은 틀 문장으로 채우고(생략 없음) done 메시지와 작업 기록에 이유 집계", async () => {
     const converse = fakeConverse((c) => (c.single === null ? bulkReply({ 중구: undefined }) : "JSON 도 문장도 아닌\n두 줄"));
     const f = await narrateJob({ converse });
     const last = f.published.at(-1);
     assert.equal(last.state, "done");
-    assert.match(last.message, /중구/);
-    assert.equal("중구" in JSON.parse(f.deps.store.puts.find((p) => p.key === "data/202611/narration.json").text).items, false);
+    assert.equal(last.message, "모델 문장이 검사를 통과하지 못해 1곳은 데이터로 만든 문장으로 채웠습니다(여러 줄 1): 중구.");
+    assert.deepEqual(f.deps.store.json("data/jobs/job-0001-aaaa.json"), last);
+    const n = JSON.parse(f.deps.store.puts.find((p) => p.key === "data/202611/narration.json").text);
+    assert.equal(Object.keys(n.items).length, 26);
+    assert.equal(n.source["중구"], "template");
+    assert.match(n.items["중구"], /^중구 11월/);
   });
 
   test("모델 권한 없음 → error(kind narration, Bedrock 안내), 파일 안 씀, 잠금 해제", async () => {
@@ -1428,5 +1434,82 @@ describe("Task 13: 운영자가 narrate 를 직접 부르면 스스로 잠금을
     assert.equal(out.error, "busy");
     assert.equal(f.deps.converse.calls.length, 0);
     assert.equal(f.deps.store.json(LOCK_KEY).jobId, "year-2024-x");
+  });
+});
+
+
+describe("Task 11b: narrate onlyMissing / refreshTemplates", () => {
+  function putNarration(store, { omit = [], template = [], withSource = true } = {}) {
+    const keys = ["서울 전체", ...GU_ORDER].filter((k) => !omit.includes(k));
+    const n = { v: 1, month: "202611", generatedAt: "old", model: "us.anthropic.claude-haiku-5-5", items: Object.fromEntries(keys.map((k) => [k, `기존 ${k} 문장입니다.`])) };
+    if (withSource) n.source = Object.fromEntries(keys.map((k) => [k, template.includes(k) ? "template" : "model"]));
+    store.objects.set("data/202611/narration.json", { text: JSON.stringify(n), etag: '"n"', opts: {} });
+  }
+  const run = (f, extra) => createHandler(f.deps)({ action: "narrate", jobId: "n-202611-fill1", month: "202611", onlyMissing: true, ...extra });
+
+  test("없는 키만 묻고 기존 문장은 그대로 합친다(26/26)", async () => {
+    const store = storeWith202611();
+    putNarration(store, { omit: ["서울 전체", "중구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    const out = await run(f);
+    assert.equal(out.ok, true);
+    assert.equal(f.deps.converse.calls.length, 1);
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 2개\): 서울 전체, 중구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(Object.keys(n.items).length, 26);
+    assert.deepEqual(Object.keys(n.items), ["서울 전체", ...GU_ORDER]);
+    assert.equal(n.items["강남구"], "기존 강남구 문장입니다.");
+    assert.equal(n.items["중구"], "중구 10월 요약입니다.");
+    assert.equal(n.source["중구"], "model");
+    assert.equal(n.source["강남구"], "model");
+    assert.equal(n.generatedAt, new Date(NOW).toISOString());
+    assert.equal(f.published.at(-1).state, "done");
+  });
+
+  test("refreshTemplates: source 가 template 인 키도 다시 만든다", async () => {
+    const store = storeWith202611();
+    putNarration(store, { template: ["강남구", "송파구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f, { refreshTemplates: true });
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 2개\): 강남구, 송파구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(n.source["강남구"], "model");
+    assert.equal(n.items["강남구"], "강남구 10월 요약입니다.");
+    assert.equal(n.items["종로구"], "기존 종로구 문장입니다.");
+  });
+
+  test("빠진 것이 없으면 Bedrock 을 부르지 않고 done '이미'", async () => {
+    const store = storeWith202611();
+    putNarration(store, { template: ["강남구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f);
+    assert.equal(f.deps.converse.calls.length, 0);
+    assert.equal(f.published.at(-1).state, "done");
+    assert.match(f.published.at(-1).message, /이미/);
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+  });
+
+  test("source 가 없는 옛 파일은 모두 model 로 본다(refreshTemplates 여도 다시 만들지 않음)", async () => {
+    const store = storeWith202611();
+    putNarration(store, { withSource: false, omit: ["용산구"] });
+    const f = fakeDeps({ nowMs: NOW, store, env: NARR_ENV });
+    await run(f, { refreshTemplates: true });
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 1개\): 용산구/);
+    const n = f.deps.store.json("data/202611/narration.json");
+    assert.equal(n.source["종로구"], "model");
+  });
+
+  test("기존 파일이 없으면 26개 모두 만든다", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    await run(f);
+    assert.match(f.deps.converse.calls[0].prompt, /키 목록\(정확히 이 26개\)/);
+    assert.equal(Object.keys(f.deps.store.json("data/202611/narration.json").items).length, 26);
+  });
+
+  test("API: narrate-month 본문의 onlyMissing·refreshTemplates 를 작업자에 넘긴다", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    const ev = httpEvent({ path: "/api/narrate-month", headers: { "x-presenter-key": PASS }, body: JSON.stringify({ month: "202611", onlyMissing: true, refreshTemplates: true }) });
+    assert.equal((await createHandler(f.deps)(ev)).statusCode, 202);
+    assert.deepEqual(f.invokes[0].payload, { action: "narrate", jobId: "job-0001-aaaa", month: "202611", onlyMissing: true, refreshTemplates: true });
   });
 });
