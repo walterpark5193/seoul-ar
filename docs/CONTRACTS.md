@@ -353,3 +353,12 @@ export function isJobMessage(x: unknown): x is JobMessage;
 ## 13. 큰 화면 3D 모드 (Task 12, 2026-11-17 추가)
 
 `#/3d?stage=1` = 무대 모드. 기존 3D 뷰어와 같은 씬·같은 실시간 따라가기(follow 고정, 직접 조작 비활성)지만 레이아웃이 큰 화면용이다: 바텀시트 대신 왼쪽 위 큰 제목(구 이름 또는 "서울 전체", 월), 그 아래 큰 수치 3개(㎡당 중앙값, 거래, 최고가)와 AI 해설 한 줄, 오른쪽 아래 QR(관객용 주소)과 "폰으로 QR을 찍어 그림을 비춰 보세요" 안내, 자동 회전(reducedMotion 이면 정지), 커서 숨김, 어두운 배경. 라우터는 `#/3d` 에도 query 를 넘긴다. 호스트 화면에 "큰 화면 열기" 버튼(새 창으로 `#/3d?stage=1`)과 안내 "프로젝터 쪽 창에 두세요".
+
+## 14. 정정 (2026-11-17 09:55, 구현·리뷰 결과 반영)
+
+- **2절 `truncated`**: 빌드 시 스냅샷(MCP, 한 호출 최대 1000건)에서는 "원자료 1000행"이 기준이지만, Lambda 라이브 수집에서는 **페이지 캡(30페이지) 도달 = 데이터 불완전**을 뜻한다. 프론트 문구는 "거래가 많아 일부만 집계했습니다."
+- **10.2**: Function URL 은 `AWS_IAM` + CloudFront OAC 로 잠겨 있어 직접 호출은 불가하다. 브라우저는 `/api/*` POST 에 본문의 SHA-256 hex 를 `x-amz-content-sha256` 헤더로 보낸다. 암호 실패는 IP(IPv6 는 /64)별 10회/10분 잠금(429). 401 → 프론트는 저장된 암호를 지우고 다시 묻는다.
+- **10.3**: 중단 규칙은 "페이지의 가장 새로운 `CTRT_DAY` 가 해당 월 1일 이전"일 때. 페이지 캡 30, 구 4개 병렬, `list_total_count` 도달 시 중단. 11·12월은 다음 해 신고분이 빠질 수 있음을 done 메시지로 고지(RCPT_YR+1 미조회).
+- **10.4**: 자동 해설 작업의 jobId 는 `{jobId}-narration`, `kind:"narration"`. 프론트는 done/error 이벤트를 `data/jobs/{jobId}.json` 으로 확인한 뒤 반영한다.
+- **10.6**: Lambda 는 둘(API: Function URL·암호·잠금 / worker: 수집·집계·쓰기·무효화·발행·해설). 배포는 site(`data/*` 제외, prune) + seed(`data/`, prune 없음) 두 개와 매 배포 `rebuild-index` 호출로 구성된다.
+- **12.1/12.2**: 기본 모델 ID 는 인퍼런스 프로파일 `us.anthropic.claude-haiku-5-5`(온디맨드 `anthropic.claude-haiku-5-5` 는 이 계정에서 호출 불가, 2026-11-17 실호출로 확인). IAM 은 프로파일 ARN + `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-5-5`.
