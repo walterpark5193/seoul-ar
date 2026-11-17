@@ -12,7 +12,7 @@
 
 ## 무대 모델 받기
 
-`#/stage`의 손 인식은 MediaPipe GestureRecognizer 모델 파일 하나가 필요합니다. 용량 때문에 git에는 없고(`frontend/public/models/`는 제외), 직접 한 번 받습니다. 없으면 무대는 마우스 모드로만 동작합니다.
+`#/stage`의 손 인식은 MediaPipe GestureRecognizer 모델 파일 하나가 필요합니다. 이 파일은 저장소에 들어 있습니다(`frontend/public/models/gesture_recognizer.task`, float16, 8,373,440바이트, SHA-256 `97952348cf6a6a4915c2ea1496b4b37ebabc50cbbf80571435643c455f2b0482`, Apache 2.0). 그래서 저장소를 받기만 하면 손 인식이 동작합니다. 파일이 없거나 손상되면 무대는 마우스 모드로만 동작합니다. 모델을 새 버전으로 바꿀 때만 아래처럼 다시 받습니다.
 
 무대 사용법(손짓·키·투표)은 `docs/GUIDE.md` 7절. 빈 곳 주먹 끌기나 두 주먹으로 지도를 지구본처럼 돌리고(빠르게 놓으면 관성, 다시 쥐면 멈춤) 두 주먹 벌리기·휠로 확대하며, 이 회전·확대는 큰 화면(`#/3d?stage=1`)만 따라옵니다.
 
@@ -24,7 +24,7 @@ curl -L -o frontend/public/models/gesture_recognizer.task \
 
 - 경로: `frontend/public/models/gesture_recognizer.task` (float16, 약 8MB)
 - wasm은 `npm run dev`와 `npm run build` 전에 `node_modules`에서 `frontend/public/mediapipe/wasm/`으로 자동 복사됩니다(git 제외).
-- 받은 파일이 zip(`PK` 시그니처)이 아니면 빌드 시 경고가 나옵니다(받다 만 파일이나 오류 페이지).
+- 받은 파일이 zip이 아니면(끝의 zip 디렉터리 서명으로 판정) 빌드 시 경고가 나옵니다(받다 만 파일이나 오류 페이지).
 
 ### 카메라와 외부 호출
 
