@@ -3,12 +3,11 @@ import { PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
-import { bindStageFollow } from "./stageFollow";
+import { bindStageFollow, createVoteLine } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
 export const AUTO_ROTATE_RAD_PER_S = 0.3;
 const RESUME_AFTER_MS = 4000;
-export const VOTE_LINE_MS = 6000;
 
 /** OrbitControls.update(dt초)는 autoRotateSpeed × 2π/60 rad/s로 돈다. */
 export function autoRotateSpeedFor(radPerSec: number): number {
@@ -117,7 +116,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
 
   // 무대를 따라가기: 펼침·들어올림은 follow가 true일 때만, 투표 결과 한 줄은 늘 6초.
   const voteEl = root.querySelector<HTMLElement>("[data-vote]")!;
-  let voteTimer: ReturnType<typeof setTimeout> | null = null;
+  const voteLine = createVoteLine(voteEl);
   const unbindFollow = bindStageFollow({
     channel: ctx.stageChannel,
     store: ctx.store,
@@ -127,17 +126,12 @@ export const mountOrbitView: MountView = (root, ctx) => {
       city.setLayout(mode, ctx.index.summary[st.month] ?? {}, st.metric);
     },
     onLift: (gu) => city.lift(gu),
-    onVote: (text) => {
-      voteEl.textContent = text;
-      voteEl.hidden = false;
-      if (voteTimer) clearTimeout(voteTimer);
-      voteTimer = setTimeout(() => { voteEl.hidden = true; }, VOTE_LINE_MS);
-    },
+    onVote: (text) => voteLine.show(text),
   });
 
   return () => {
     unbindFollow();
-    if (voteTimer) clearTimeout(voteTimer);
+    voteLine.dispose();
     unbind();
     sheet.destroy();
     if (resumeTimer) clearTimeout(resumeTimer);

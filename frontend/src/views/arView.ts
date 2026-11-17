@@ -7,12 +7,11 @@ import type { GuData } from "../data/types";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
 import { isStageMessage } from "../stage/net/messages";
-import { bindStageFollow } from "./stageFollow";
+import { bindStageFollow, createVoteLine } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
 export const TARGET_SRC = "/marker/target.mind";
 export const STAGE_BANNER_TEXT = "무대 진행 중 · 3D로 따라가기";
-export const VOTE_LINE_MS = 6000;
 export const UNSUPPORTED_MESSAGE = "이 브라우저에서는 카메라 AR을 쓸 수 없어 3D 화면으로 바꿨습니다.";
 
 export function fallbackMessage(err: unknown): string {
@@ -129,7 +128,7 @@ export const mountArView: MountView = (root, ctx) => {
   const banner = root.querySelector<HTMLButtonElement>("[data-banner]")!;
   const voteEl = root.querySelector<HTMLElement>("[data-vote]")!;
   banner.addEventListener("click", () => ctx.navigate("#/3d"));
-  let voteTimer: ReturnType<typeof setTimeout> | null = null;
+  const voteLine = createVoteLine(voteEl);
   const viewerEl = root.querySelector<HTMLElement>(".viewer");
   const sheetRo = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
     const h = Math.round(sheetHost.getBoundingClientRect().height);
@@ -145,12 +144,7 @@ export const mountArView: MountView = (root, ctx) => {
     index: ctx.index,
     onLayout: () => {},
     onLift: () => {},
-    onVote: (text) => {
-      voteEl.textContent = text;
-      voteEl.hidden = false;
-      if (voteTimer) clearTimeout(voteTimer);
-      voteTimer = setTimeout(() => { voteEl.hidden = true; }, VOTE_LINE_MS);
-    },
+    onVote: (text) => voteLine.show(text),
   });
 
   startBtn.addEventListener("click", async () => {
@@ -183,7 +177,7 @@ export const mountArView: MountView = (root, ctx) => {
     sheetRo?.disconnect();
     offBanner();
     offVote();
-    if (voteTimer) clearTimeout(voteTimer);
+    voteLine.dispose();
     unbind();
     sheet.destroy();
     running?.stop();

@@ -61,6 +61,36 @@ describe("stageFollow", () => {
     expect(o.onLayout).toHaveBeenLastCalledWith("spread");
   });
 
+  it("turning follow off returns to map and clears lift once", () => {
+    const store = createStore({ ...INITIAL_STATE, month: "202611", follow: true });
+    const f = fakeChannel();
+    const o = { onLayout: vi.fn(), onLift: vi.fn(), onVote: vi.fn() };
+    bindStageFollow({ channel: f.channel, store, index, ...o });
+    f.emit({ v: 1, type: "stage", mode: "spread", lifted: "마포구", ts: 1 });
+    o.onLayout.mockClear(); o.onLift.mockClear();
+    store.dispatch({ type: "local", metric: "count" });
+    expect(store.getState().follow).toBe(false);
+    expect(o.onLayout).toHaveBeenCalledTimes(1);
+    expect(o.onLayout).toHaveBeenCalledWith("map");
+    expect(o.onLift).toHaveBeenCalledTimes(1);
+    expect(o.onLift).toHaveBeenCalledWith(null);
+  });
+
+  it("stores stage messages while follow is off and re-applies the last on follow on", () => {
+    const store = createStore({ ...INITIAL_STATE, month: "202611", follow: false });
+    const f = fakeChannel();
+    const o = { onLayout: vi.fn(), onLift: vi.fn(), onVote: vi.fn() };
+    bindStageFollow({ channel: f.channel, store, index, ...o });
+    f.emit({ v: 1, type: "stage", mode: "spread", lifted: "노원구", ts: 1 });
+    f.emit({ v: 1, type: "stage", mode: "map", lifted: "마포구", ts: 2 });
+    expect(o.onLayout).not.toHaveBeenCalled();
+    store.dispatch({ type: "follow" });
+    expect(store.getState().follow).toBe(true);
+    expect(o.onLayout).toHaveBeenCalledTimes(1);
+    expect(o.onLayout).toHaveBeenCalledWith("map");
+    expect(o.onLift).toHaveBeenCalledWith("마포구");
+  });
+
   it("malformed ignored", () => {
     const { f, o } = setup(true);
     f.emit(null);
