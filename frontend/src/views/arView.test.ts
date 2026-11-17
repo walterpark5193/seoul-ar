@@ -5,6 +5,7 @@ import type { ViewContext } from "./types";
 import type { ArSession } from "../ar/session";
 import type { SeoulScene } from "../scene/seoulScene";
 import { INITIAL_STATE, createStore } from "../state/store";
+import { createIndexSource } from "../data/indexSource";
 
 function fakeScene(): SeoulScene {
   return {
@@ -52,6 +53,7 @@ function fakeCtx(arSupported: () => boolean, createArSession = vi.fn()): ViewCon
   return {
     store: createStore({ ...INITIAL_STATE, month: "202611" }),
     index: { v: 1, generatedAt: "", source: "", months: ["202611"], gus: [], summary: {} },
+    indexSource: createIndexSource({ v: 1, generatedAt: "", source: "", months: ["202611"], gus: [], summary: {} }, vi.fn()),
     config: { v: 1, appUrl: null, events: null },
     realtime: {} as ViewContext["realtime"],
     loadGu: vi.fn(),

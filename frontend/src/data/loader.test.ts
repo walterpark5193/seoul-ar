@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadGu, loadIndex } from "./loader";
+import { forgetMonth, loadGu, loadIndex, reloadIndex } from "./loader";
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -32,5 +32,23 @@ describe("loader", () => {
     vi.stubGlobal("fetch", f);
     await expect(loadGu("202610", "중구")).rejects.toThrow("404");
     await expect(loadGu("202610", "중구")).resolves.toMatchObject({ gu: "중구" });
+  });
+
+  it("reloadIndex bypasses the HTTP cache", async () => {
+    const f = vi.fn(async () => ok({ v: 1, months: ["202610", "202611"] }));
+    vi.stubGlobal("fetch", f);
+    await expect(reloadIndex()).resolves.toMatchObject({ months: ["202610", "202611"] });
+    expect(f).toHaveBeenCalledWith("/data/index.json", { cache: "no-store" });
+  });
+
+  it("forgetMonth drops cached gu data for that month only", async () => {
+    const f = vi.fn(async (url: string) => ok({ v: 1, url }));
+    vi.stubGlobal("fetch", f);
+    await loadGu("202501", "중구");
+    await loadGu("202502", "중구");
+    forgetMonth("202501");
+    await loadGu("202501", "중구");
+    await loadGu("202502", "중구");
+    expect(f).toHaveBeenCalledTimes(3);
   });
 });

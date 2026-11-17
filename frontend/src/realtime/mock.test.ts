@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMockRealtime, type BroadcastLike } from "./mock";
-import type { StateMessage } from "./types";
+import type { JobMessage, StateMessage } from "./types";
 
 const msg: StateMessage = { v: 1, type: "state", month: "202611", gu: "중구", metric: "price", ts: 1 };
 
@@ -62,5 +62,38 @@ describe("createMockRealtime", () => {
     a.postMessage({ v: 9, junk: true });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(msg);
+  });
+});
+
+describe("createMockRealtime jobs", () => {
+  const job: JobMessage = { v: 1, type: "job", jobId: "j", month: "202610", state: "running", done: 3, total: 25, gu: "중구", ts: 1 };
+
+  it("delivers jobs to job subscribers only, and stops after unsubscribe", async () => {
+    const rt = createMockRealtime({ channel: () => null });
+    await rt.connect();
+    const onJob = vi.fn();
+    const onState = vi.fn();
+    const off = rt.subscribeJobs(onJob);
+    rt.subscribe(onState);
+    rt.publishJob(job);
+    expect(onJob).toHaveBeenCalledWith(job);
+    expect(onState).not.toHaveBeenCalled();
+    await rt.publish(msg);
+    expect(onJob).toHaveBeenCalledTimes(1);
+    off();
+    rt.publishJob(job);
+    expect(onJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("relays jobs to another tab", async () => {
+    const [a, b] = fakePair();
+    const host = createMockRealtime({ channel: () => a });
+    const other = createMockRealtime({ channel: () => b });
+    await host.connect();
+    await other.connect();
+    const onJob = vi.fn();
+    other.subscribeJobs(onJob);
+    host.publishJob(job);
+    expect(onJob).toHaveBeenCalledWith(job);
   });
 });

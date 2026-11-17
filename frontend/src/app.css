@@ -433,6 +433,26 @@ kbd {
 .gu-val { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .gu-btn[aria-pressed="true"] .gu-val { color: var(--ink-on-light); }
 
+/* 월 가져오기: 칩과 같은 결의 입력과 버튼. 진행 한 줄은 숫자가 흔들리지 않게 tabular */
+.host-fetch { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.fetch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fetch-row input {
+  min-height: var(--tap); padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  background: rgb(229 231 235 / 0.06); color: var(--ink);
+  font: 500 16px/1 var(--font); font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+.fetch-row input[type="month"] { min-width: 11em; }
+.fetch-row input[type="password"] { flex: 1 1 10em; min-width: 0; }
+.chip:disabled { color: var(--ink-2); border-color: var(--line); cursor: not-allowed; }
+.chip--primary { background: var(--amber); border-color: var(--amber); color: var(--night); }
+.fetch-key { display: grid; gap: 8px; margin-top: 12px; }
+.fetch-key label { font-size: 14px; font-weight: 600; }
+.fetch-hint { color: var(--ink-2); font-size: 13px; }
+.fetch-status { margin-top: 10px; min-height: 1.5em; font-size: 14px; font-variant-numeric: tabular-nums; }
+.fetch-error { margin-top: 6px; color: var(--alert); font-size: 14px; font-weight: 600; line-height: 1.5; }
+
 .host-tools { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .host-tools .btn { min-height: 48px; font-size: 15px; }
 .host-exit {

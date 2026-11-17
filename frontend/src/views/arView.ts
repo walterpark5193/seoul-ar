@@ -158,7 +158,7 @@ export const mountArView: MountView = (root, ctx) => {
   const freezeState = root.querySelector<HTMLElement>("[data-freeze-state]")!;
 
   const tuning = parseArTuning(ctx.query ?? "");
-  const sheet = mountSheet(sheetHost, ctx.store, ctx.index, {
+  const sheet = mountSheet(sheetHost, ctx.store, () => ctx.index, {
     altView: { href: "#/3d", label: "3D로 보기" },
     tuningNote: describeArTuning(tuning),
   });

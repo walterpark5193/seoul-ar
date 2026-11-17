@@ -9,7 +9,8 @@ export interface SheetHandle {
   destroy(): void;
 }
 
-export function mountSheet(host: HTMLElement, store: Store, index: DataIndex, opts: SheetOptions = {}): SheetHandle {
+/** getIndex: 새 달을 가져오면 index가 바뀌므로 그릴 때마다 읽는다. */
+export function mountSheet(host: HTMLElement, store: Store, getIndex: () => DataIndex | null, opts: SheetOptions = {}): SheetHandle {
   const onClick = (ev: Event) => {
     const btn = (ev.target as Element).closest<HTMLElement>("button[data-action]");
     if (!btn || !host.contains(btn)) return;
@@ -26,7 +27,7 @@ export function mountSheet(host: HTMLElement, store: Store, index: DataIndex, op
 
   return {
     render(state, data) {
-      replaceKeepingFocus(host, renderSheet(state, data, index, opts));
+      replaceKeepingFocus(host, renderSheet(state, data, getIndex(), opts));
     },
     destroy() {
       host.removeEventListener("click", onClick);

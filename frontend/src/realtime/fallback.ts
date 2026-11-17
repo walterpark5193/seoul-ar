@@ -3,15 +3,18 @@
 //   스스로 재연결에 성공하면 그 메시지가 그대로 들어오고, 상태도 "open"으로 돌아온다.
 // - 첫 연결이 실패하면 모의 클라이언트(같은 기기의 다른 탭)를 함께 붙인다. 그동안 상태는 주 클라이언트를 따라 "error".
 // - 발행은 모의(있으면, 같은 기기 탭)와 주 클라이언트(HTTP)에 모두 보낸다. 주 클라이언트의 실패만 호출자에게 알린다.
-import type { ConnStatus, RealtimeClient, StateMessage } from "./types";
+// - 수집 진행(jobs)은 처음 subscribeJobs 할 때만 주 클라이언트(와 모의)에 붙인다. 뷰어 폰은 jobs 채널에 연결하지 않는다.
+import type { ConnStatus, JobMessage, RealtimeClient, StateMessage } from "./types";
 
 export function withFallback(primary: RealtimeClient | null, makeFallback: () => RealtimeClient): RealtimeClient {
   const handlers = new Set<(msg: StateMessage) => void>();
+  const jobHandlers = new Set<(msg: JobMessage) => void>();
   const statusSubs = new Set<(s: ConnStatus) => void>();
   const detach: Array<() => void> = [];
   let status: ConnStatus = "idle";
   let fallback: RealtimeClient | null = null;
   let connecting: Promise<void> | null = null;
+  let jobsWanted = false;
 
   const setStatus = (s: ConnStatus) => {
     if (s === status) return;
@@ -19,6 +22,8 @@ export function withFallback(primary: RealtimeClient | null, makeFallback: () =>
     for (const cb of [...statusSubs]) cb(s);
   };
   const fanOut = (msg: StateMessage) => { for (const h of [...handlers]) h(msg); };
+  const fanOutJobs = (msg: JobMessage) => { for (const h of [...jobHandlers]) h(msg); };
+  const attachJobs = (c: RealtimeClient) => { detach.push(c.subscribeJobs(fanOutJobs)); };
 
   if (primary) {
     detach.push(primary.subscribe(fanOut));
@@ -30,6 +35,7 @@ export function withFallback(primary: RealtimeClient | null, makeFallback: () =>
     const fb = makeFallback();
     fallback = fb;
     detach.push(fb.subscribe(fanOut));
+    if (jobsWanted) attachJobs(fb);
     if (!primary) detach.push(fb.onStatus(setStatus));
     await fb.connect();
   }
@@ -61,6 +67,15 @@ export function withFallback(primary: RealtimeClient | null, makeFallback: () =>
     subscribe(handler) {
       handlers.add(handler);
       return () => { handlers.delete(handler); };
+    },
+    subscribeJobs(handler) {
+      jobHandlers.add(handler);
+      if (!jobsWanted) {
+        jobsWanted = true;
+        if (primary) attachJobs(primary);
+        if (fallback) attachJobs(fallback);
+      }
+      return () => { jobHandlers.delete(handler); };
     },
     async publish(msg) {
       await client.connect();

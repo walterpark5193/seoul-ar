@@ -31,7 +31,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     `</div>`;
   const stage = root.querySelector<HTMLElement>("[data-stage]")!;
   const sheetHost = root.querySelector<HTMLElement>("[data-sheet]")!;
-  const sheet = mountSheet(sheetHost, ctx.store, ctx.index, { altView: { href: "#/ar", label: "카메라로 보기" } });
+  const sheet = mountSheet(sheetHost, ctx.store, () => ctx.index, { altView: { href: "#/ar", label: "카메라로 보기" } });
 
   const renderer = tryRenderer();
   if (!renderer) {

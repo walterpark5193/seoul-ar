@@ -1,5 +1,8 @@
 // #/host: 왼쪽 그림+QR, 오른쪽 월·자치구·지표·연결 상태. 바꾸면 즉시 publish.
 // S 키나 버튼으로 슬라이드 모드(그림·QR·제목만). 늦게 들어온 관객을 위해 10초마다 현재 상태를 다시 보낸다.
+// "월 가져오기"(CONTRACTS 10.5)는 monthFetch.ts가 상태를 맡고, 여기서는 DOM만 잇는다.
+import { forgetMonth } from "../data/loader";
+import { currentMonth } from "../data/months";
 import type { DataIndex, Metric } from "../data/types";
 import type { StateMessage } from "../realtime/types";
 import type { AppState } from "../state/store";
@@ -7,6 +10,7 @@ import { fmtCount, fmtMonth, fmtNumber, NO_TRADE } from "../ui/format";
 import { esc } from "../ui/html";
 import { replaceKeepingFocus } from "../ui/patch";
 import { drawQr } from "../ui/qr";
+import { createMonthFetch, defaultFetchMonth, monthInputValue, renderMonthFetch, type FetchView, type StorageLike } from "./monthFetch";
 import type { MountView } from "./types";
 
 const HEARTBEAT_MS = 10000;
@@ -66,11 +70,15 @@ function renderHost(url: string): string {
     `<figcaption><strong>폰 카메라로 QR을 찍고</strong><span>열린 화면을 왼쪽 그림에 비춰 보세요</span>` +
     `<span class="host-url">${esc(url)}</span></figcaption></figure>` +
     `</section>` +
-    `<section class="host-panel" aria-label="발표자 조정"><div data-controls></div>` +
+    `<section class="host-panel" aria-label="발표자 조정"><div data-controls></div><div data-fetch></div>` +
     `<div class="host-tools"><button type="button" class="btn btn-secondary" data-action="slide">슬라이드 모드 <kbd>S</kbd></button>` +
     `<a class="host-exit" href="#/">처음으로</a></div></section>` +
     `<button type="button" class="slide-exit" data-action="slide">슬라이드 모드 끝내기 <kbd>Esc</kbd></button>` +
     `</div>`;
+}
+
+function sessionStore(): StorageLike | null {
+  try { return window.sessionStorage; } catch { return null; }
 }
 
 export const mountHostView: MountView = (root, ctx) => {
@@ -99,6 +107,47 @@ export const mountHostView: MountView = (root, ctx) => {
   const render = (s: AppState) => replaceKeepingFocus(controls, renderHostControls(s, ctx.index));
   render(ctx.store.getState());
   publish();
+  // 새 달을 가져와 index가 바뀌면 월 칩을 다시 그린다.
+  const offIndex = ctx.indexSource.subscribe(() => render(ctx.store.getState()));
+
+  // 월 가져오기: 진행 표시가 바뀌어도 입력한 월이 지워지지 않게 값을 따로 들고 있는다.
+  const fetchHost = root.querySelector<HTMLElement>("[data-fetch]")!;
+  let fetchValue = monthInputValue(defaultFetchMonth(ctx.index, Date.now()));
+  let lastPhase: FetchView["phase"] = "idle";
+  const renderFetch = (v: FetchView) => {
+    replaceKeepingFocus(fetchHost, renderMonthFetch(v, { value: fetchValue, max: monthInputValue(currentMonth(Date.now())) }));
+    if (v.phase === "key" && lastPhase !== "key") fetchHost.querySelector<HTMLInputElement>("#presenter-key")?.focus();
+    lastPhase = v.phase;
+  };
+  const monthFetch = createMonthFetch({
+    fetch: (input, init) => window.fetch(input, init),
+    storage: sessionStore(),
+    subscribeJobs: (h) => ctx.realtime.subscribeJobs(h),
+    refreshIndex: () => ctx.indexSource.refresh(),
+    forgetMonth: (m) => forgetMonth(m),
+    toast: ctx.toast,
+    onChange: renderFetch,
+  });
+  renderFetch(monthFetch.view);
+  const onSubmit = (ev: Event) => {
+    const form = ev.target as HTMLFormElement;
+    if (form.dataset.form === "fetch") {
+      ev.preventDefault();
+      const input = form.elements.namedItem("month") as HTMLInputElement | null;
+      fetchValue = input?.value ?? fetchValue;
+      void monthFetch.submit(fetchValue);
+    } else if (form.dataset.form === "key") {
+      ev.preventDefault();
+      const input = form.elements.namedItem("key") as HTMLInputElement | null;
+      void monthFetch.submitKey(input?.value ?? "");
+    }
+  };
+  const onInput = (ev: Event) => {
+    const t = ev.target as HTMLInputElement;
+    if (t.id === "fetch-month") fetchValue = t.value;
+  };
+  hostEl.addEventListener("submit", onSubmit);
+  hostEl.addEventListener("input", onInput);
 
   const off = ctx.store.subscribe((s, prev) => {
     render(s);
@@ -120,6 +169,7 @@ export const mountHostView: MountView = (root, ctx) => {
     if (action === "month" && value) ctx.store.dispatch({ type: "local", month: value });
     if (action === "metric" && (value === "price" || value === "count")) ctx.store.dispatch({ type: "local", metric: value });
     if (action === "slide") setSlide(!hostEl.classList.contains("is-slide"));
+    if (action === "fetch-cancel") monthFetch.cancelKey();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
@@ -137,6 +187,10 @@ export const mountHostView: MountView = (root, ctx) => {
 
   return () => {
     off();
+    offIndex();
+    monthFetch.dispose();
+    hostEl.removeEventListener("submit", onSubmit);
+    hostEl.removeEventListener("input", onInput);
     clearInterval(beat);
     hostEl.removeEventListener("click", onClick);
     document.removeEventListener("keydown", onKey);

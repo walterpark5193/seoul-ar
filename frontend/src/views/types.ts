@@ -1,6 +1,7 @@
 // 뷰가 받는 공용 의존성. 씬·AR 모듈은 main.ts가 주입한다(테스트는 가짜를 넣는다).
 import type { ArSession, ArSessionOptions } from "../ar/session";
 import type { AppConfig } from "../config";
+import type { IndexSource } from "../data/indexSource";
 import type { DataIndex, GuData } from "../data/types";
 import type { RealtimeClient } from "../realtime/types";
 import type { SeoulScene } from "../scene/seoulScene";
@@ -13,7 +14,10 @@ export interface ArDeps {
 
 export interface ViewContext {
   store: Store;
+  /** 지금 쓰는 index. 새 달을 가져오면 바뀌므로 쓸 때마다 읽는다(붙잡아 두지 않는다). */
   index: DataIndex;
+  /** index를 다시 읽고 바뀌면 알린다(월 가져오기, 모르는 달의 원격 상태). */
+  indexSource: IndexSource;
   config: AppConfig;
   realtime: RealtimeClient;
   loadGu(month: string, gu: string): Promise<GuData>;

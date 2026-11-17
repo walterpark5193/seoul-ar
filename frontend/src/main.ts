@@ -1,7 +1,8 @@
 // 앱 셸: 설정 → 실시간(없으면 모의) → 연결(기다리지 않음) → 데이터 인덱스 → 라우터.
 import "./app.css";
 import { loadConfig } from "./config";
-import { loadGu, loadIndex } from "./data/loader";
+import { createIndexSource } from "./data/indexSource";
+import { loadGu, loadIndex, reloadIndex } from "./data/loader";
 import { loadGeo, westToEast } from "./geoSource";
 import { createAppSyncRealtime } from "./realtime/appsync";
 import { withFallback } from "./realtime/fallback";
@@ -84,13 +85,21 @@ async function main(): Promise<void> {
   void connecting.then(() => store.dispatch({ type: "conn", status: realtime.status }));
 
   let route: Route = "landing";
-  bindRemote({ realtime, store, index, isHost: () => route === "host" });
+  // 새 달을 가져오면(호스트) 또는 원격 상태가 모르는 달을 가리키면(뷰어) index를 no-store로 다시 읽는다.
+  const indexSource = createIndexSource(index, () => reloadIndex());
+  bindRemote({
+    realtime, store,
+    index: () => indexSource.current,
+    refreshIndex: () => indexSource.refresh(),
+    isHost: () => route === "host",
+  });
 
   const geo = loadGeo();
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ctx: ViewContext = {
     store,
-    index,
+    get index() { return indexSource.current; },
+    indexSource,
     config,
     realtime,
     loadGu: (month, gu) => loadGu(month, gu),
@@ -125,7 +134,8 @@ async function main(): Promise<void> {
       root.innerHTML = "";
     }
     // 해시 쿼리(조정 파라미터)는 AR 뷰에만 넘긴다.
-    unmount = views[next](root, next === "ar" ? { ...ctx, query } : ctx);
+    ctx.query = next === "ar" ? query : undefined;
+    unmount = views[next](root, ctx);
   });
 }
 
