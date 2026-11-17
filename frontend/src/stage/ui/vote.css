@@ -7,9 +7,9 @@
 .vote-confirm { margin-left: auto; min-height: var(--tap); padding: 0 24px; font: 700 22px var(--font); color: var(--night); background: var(--amber); border: 0; border-radius: var(--r-btn); cursor: pointer; }
 .vote-top .vote-timer + .vote-confirm { margin-left: 0; }
 
-.vote-row { display: grid; grid-template-columns: 140px minmax(160px, 1fr) 90px 80px auto; align-items: center; gap: 20px; padding: 10px 0; opacity: 0.8; }
-.vote-row.is-now, .vote-row.is-review { opacity: 1; }
-.vote-row.is-future { opacity: 0.55; }
+.vote-row { display: grid; grid-template-columns: 140px minmax(160px, 1fr) 90px 80px auto; align-items: center; gap: 20px; padding: 10px 0; }
+.vote-row.is-future .vote-gu, .vote-row.is-future .vote-count { color: var(--ink-2); } /* --ink-2 #b8c0cc on #0b1020 = 10.3:1 (>=4.5). 행 opacity 사용 안 함 */
+.vote-row.is-future .vote-fill { background: var(--no-data); }
 .vote-row.is-review .vote-gu { color: var(--amber); }
 .vote-gu { font-size: 32px; font-weight: 700; }
 .vote-bar { height: 22px; background: var(--night-raise); border-radius: 11px; overflow: hidden; }

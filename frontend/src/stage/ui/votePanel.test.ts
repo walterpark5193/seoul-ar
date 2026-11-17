@@ -63,6 +63,14 @@ describe("renderVotePanel", () => {
   it("result: winner 선정", () => {
     expect(renderVotePanel(vote({ phase: "result", counts: [2, 1, 0], winner: "강남구" }), ui)).toContain("강남구 선정");
   });
+  it("result: 모든 버튼 비활성, allZero 문구, aria-label", () => {
+    const h = renderVotePanel(vote({ phase: "result", counts: [0, 0, 0], winner: "마포구", allZero: true }), ui);
+    expect(h).toContain("아무도 손을 들지 않아 마포구로 갑니다");
+    const btns = h.match(/<button[^>]*data-vote-set[^>]*>/g)!;
+    expect(btns).toHaveLength(21);
+    expect(btns.every((b) => b.includes("disabled"))).toBe(true);
+    expect(h).toContain('aria-label="강남구 2손"');
+  });
   it("method toggle pressed state", () => {
     const c = renderVotePanel(vote({ method: "camera" }), ui);
     expect(c).toMatch(/data-vote-method="camera"[^>]*aria-pressed="true"/);

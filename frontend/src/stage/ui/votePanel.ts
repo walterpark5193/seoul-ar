@@ -23,7 +23,7 @@ function head(v: VoteState, now: number): string {
     case "review":
       return `<p class="vote-head">집계 확인 · 고칠 곳이 있으면 개수를 누르세요</p>${timer}<button type="button" class="vote-confirm" data-vote-confirm>확정 Enter</button>`;
     case "result":
-      return `<p class="vote-head">${v.winner ? `${esc(v.winner)} 선정` : "집계된 표가 없어요"}</p>`;
+      return `<p class="vote-head">${!v.winner ? "집계된 표가 없어요" : v.allZero ? `아무도 손을 들지 않아 ${esc(v.winner)}로 갑니다` : `${esc(v.winner)} 선정`}</p>`;
   }
 }
 
@@ -39,7 +39,7 @@ function row(v: VoteState, i: number, reviewRow: number): string {
   const pct = n === null ? 0 : Math.round((Math.min(n, VOTE_MAX) / VOTE_MAX) * 100);
   const cls = ["vote-row", isNow ? "is-now" : "", v.phase === "review" && i === reviewRow ? "is-review" : "", future ? "is-future" : ""].filter(Boolean).join(" ");
   const btns = Array.from({ length: VOTE_MAX + 1 }, (_, k) =>
-    `<button type="button" class="vote-n" data-vote-set="${i}:${k}" aria-pressed="${n === k}"${locked ? " disabled" : ""}>${k}</button>`).join("");
+    `<button type="button" class="vote-n" data-vote-set="${i}:${k}" aria-label="${esc(v.candidates[i])} ${k}손" aria-pressed="${n === k}"${locked ? " disabled" : ""}>${k}</button>`).join("");
   return `<div class="${cls}"><span class="vote-gu">${esc(v.candidates[i])}</span>` +
     `<span class="vote-bar" aria-hidden="true"><span class="vote-fill" style="width:${pct}%"></span></span>` +
     `<span class="vote-count">${countText}</span><span class="vote-src">${srcText}</span>` +
