@@ -1,0 +1,8 @@
+node_modules/
+dist/
+cdk.out/
+cdk-outputs.json
+.superpowers/
+tools/data/raw/
+*.log
+.DS_Store

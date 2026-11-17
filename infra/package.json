@@ -1,0 +1,20 @@
+{
+  "name": "seoul-ar-infra",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "bin": { "seoul-ar-infra": "bin/app.js" },
+  "scripts": {
+    "test": "node --test test/",
+    "synth": "cdk synth --strict",
+    "deploy": "cdk deploy --require-approval never --outputs-file cdk-outputs.json",
+    "destroy": "cdk destroy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.277.0",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1148.1"
+  }
+}
