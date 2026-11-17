@@ -318,6 +318,8 @@ async function autoNarrate({ deps, jobId, month, perGu, checkDeadline }) {
     return;
   }
   const send = narrationSender(deps, jobId, month);
+  // API 경로처럼 잠금을 잡자마자 running 0/26 을 알리고 기록한다(Bedrock 응답을 기다리지 않고 작업이 보이게)
+  await send({ state: "running", done: 0 });
   let terminal;
   try {
     const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });

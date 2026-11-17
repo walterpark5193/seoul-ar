@@ -1120,3 +1120,26 @@ describe("final: 2xx 가 아닌 응답은 모두 { error, message(한국어 한 
     }
   });
 });
+
+describe("final micro: 자동 해설은 잠금을 잡자마자 running 0/26 을 알린다", () => {
+  test("첫 해설 이벤트와 작업 기록은 Bedrock 호출 전에 running 0/26", async () => {
+    const f = workerSetup({ env: NARR_ENV });
+    let seenAtCall = null;
+    f.deps.converse = fakeConverse(() => {
+      seenAtCall = {
+        events: f.published.filter((m) => m.kind === "narration").map((m) => ({ state: m.state, done: m.done, total: m.total })),
+        record: f.deps.store.json("data/jobs/job-0001-aaaa-narration.json"),
+      };
+      return bulkReply();
+    });
+    await startedJob(f);
+    assert.deepEqual(seenAtCall.events, [{ state: "running", done: 0, total: 26 }]);
+    assert.equal(seenAtCall.record.state, "running");
+    assert.equal(seenAtCall.record.done, 0);
+    assert.equal(seenAtCall.record.total, 26);
+    assert.equal(seenAtCall.record.kind, "narration");
+    const narr = f.published.filter((m) => m.kind === "narration");
+    assert.deepEqual({ state: narr[0].state, done: narr[0].done, jobId: narr[0].jobId }, { state: "running", done: 0, jobId: "job-0001-aaaa-narration" });
+    assert.equal(narr.at(-1).state, "done");
+  });
+});

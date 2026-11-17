@@ -91,7 +91,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 | 400 | `{"error": "bad_month" \| "bad_request", "message"}` | YYYYMM 형식, 200601 이상, 한국 시간 이번 달 이하가 아님 / 본문이 JSON 이 아님 |
 | 401 | `{"error": "unauthorized", "message"}` | 암호 헤더 없음 또는 불일치(sha256 다이제스트를 `timingSafeEqual` 로 비교). 월 검사보다 먼저 |
 | 409 | `{"error": "busy", "message", "jobId"?, "month"?}` | 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시) |
-| 429 | `{"error": "locked", "message": "암호를 너무 많이 틀렸습니다. 약 N분 뒤 다시 시도해 주세요.", "retryAfterSeconds"}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: 비공개 버킷 `AuthStateBucket` 의 `attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 비밀은 Secrets Manager `AuthHmacSecret`(CDK 가 만든 32자 임의 값, 발표자 암호와 무관, 컨테이너마다 한 번 읽음). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). 예약 동시성은 두지 않는다(누구나 채워 발표자를 굶길 수 있다) |
+| 429 | `{"error": "locked", "message": "암호를 너무 많이 틀렸습니다. 약 N분 뒤 다시 시도해 주세요.", "retryAfterSeconds"}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: 비공개 버킷 `AuthStateBucket` 의 `attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 비밀은 Secrets Manager `AuthHmacSecret`(CDK 가 만든 32자 임의 값, 발표자 암호와 무관, 컨테이너마다 한 번 읽음). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 503 `auth_unavailable`(fail-closed, 틀린 암호 401 과 구별). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). 예약 동시성은 두지 않는다(누구나 채워 발표자를 굶길 수 있다) |
 | 503 | `{"error": "auth_unavailable", "message": "잠금 상태를 확인할 수 없어 요청을 받지 않았습니다. 잠시 후 다시 시도해 주세요."}` | 인증 상태 버킷이나 HMAC 비밀을 쓸 수 없음(fail-closed). 틀린 암호(401)와 구별되므로 브라우저는 저장된 암호를 지우지 않는다 |
 | 503 | `{"error": "passcode_too_short", "message": "발표자 암호는 12자 이상이어야 합니다. SSM 값을 바꿔 주세요."}` | SSM 의 발표자 암호가 12자 미만(설정 오류, 시도로 세지 않음) |
 | 405 / 500 | `{"error", "message"}` | POST 아님 / 설정·잠금·작업자 호출 실패 |
@@ -104,7 +104,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 
 Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch)를 쓴다.
 
-- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → 시도 셈(비공개 인증 상태 버킷, 잠금이면 429, 기록 실패면 401) → 암호 읽기(60초 캐시) → 암호 비교(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
+- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → 시도 셈(비공개 인증 상태 버킷, 잠금이면 429, 기록·비밀 실패면 503 `auth_unavailable`) → 암호 읽기(60초 캐시, 실패면 500) → 저장된 암호가 12자 미만이면 503 `passcode_too_short`(시도로 세지 않음) → 암호 비교(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
 - `SeoulArStack-FetchMonthWorker` (512 MB, 600 초, 비동기 재시도 0, 5분 안에 시작 못 한 이벤트는 버림): 페이로드 `{jobId, month}`.
   1. SSM 에서 서울 API 키를 읽는다.
   2. 25구를 동시에 4개씩: `RCPT_YR = month[:4]`, `CGG_NM = 구` 로 1000건씩 페이지 호출. 페이지가 1000건 미만이거나, 페이지의 **가장 최근** `CTRT_DAY` 가 그 달 1일보다 앞서거나(정렬 순서가 확인되지 않아 페이지 전체가 지난 뒤에만 멈춘다), `list_total_count` 에 닿거나, 30페이지면 멈춘다. `CTRT_DAY[:6] === month` 인 행만 남긴다. `INFO-200` 은 빈 결과. 네트워크·429·5xx·형식 오류는 1.5초 쉬고 한 번 다시 시도한다. 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다.
