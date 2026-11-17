@@ -20,23 +20,31 @@ const comma = (v) => Math.round(v).toLocaleString("en-US");
 const eok = (v) => (v / 10000).toFixed(1);
 // 최고 동은 "거래 N건 이상인 동 가운데"라는 단서와 함께일 때만 말할 수 있다(facts.topDongBasis 참고).
 const dongSpeakable = (f) => Boolean(f.topDong) && f.topDongBasis === "min3";
+// 거래 3건 이상인 동 가운데 ㎡당 중위가 최고 동과 같은 동(공동 최고). 말할 수 있을 때만.
+const dongTies = (f) => (dongSpeakable(f) && Array.isArray(f.topDongTiedWith) ? f.topDongTiedWith : []);
 const ym = (month) => ({ y: String(month).slice(0, 4), m: String(Number(String(month).slice(4, 6))) });
+// 집계 중인 달(facts.partial)은 달을 말할 때마다 바로 뒤에 이 표시를 붙인다("11월(집계 중)").
+export const PARTIAL_MARK = "(집계 중)";
+const rankText = (f) => `${f.rankTied ? "공동 " : ""}${f.rankPrice}위`;
 
 export function buildPrompt(facts) {
   const { y, m } = ym(facts.month);
   const lines = [
     `구: ${facts.gu}`,
-    `기간: ${y}년 ${m}월`,
+    `기간: ${y}년 ${m}월` + (facts.partial ? " (집계 중: 이 달이 끝나기 전에 받은 데이터라 지금까지 신고된 거래만 셉니다)" : ""),
     `거래 건수: ${facts.n}건`,
     `취소 건수: ${facts.cancelled}건`,
   ];
   if (facts.n > 0) {
     if (facts.medPerM2 != null) lines.push(`㎡당 중위 가격: ${comma(facts.medPerM2)}만 원`);
-    if (facts.rankPrice != null) lines.push(`㎡당 가격 순위: ${facts.totalGus}개 구 중 ${facts.rankPrice}위`);
+    if (facts.rankPrice != null) {
+      lines.push(`㎡당 가격 순위: ${facts.totalGus}개 구 중 ${rankText(facts)}` + (facts.rankTied ? " (㎡당 중위 가격이 같은 구가 있음)" : ""));
+    }
     if (facts.maxAmt != null) lines.push(`최고 거래가: ${eok(facts.maxAmt)}억 원`);
     if (dongSpeakable(facts)) {
-      lines.push(`거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데 ㎡당 중위 가격이 가장 높은 동: ${facts.topDong}` +
-        (facts.topDongMedPerM2 != null ? ` (㎡당 중위 ${comma(facts.topDongMedPerM2)}만 원)` : ""));
+      const ties = dongTies(facts);
+      lines.push(`거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데 ㎡당 중위 가격이 가장 높은 동: ${[facts.topDong, ...ties].join(", ")}` +
+        (facts.topDongMedPerM2 != null ? ` (${ties.length ? "공동, " : ""}㎡당 중위 ${comma(facts.topDongMedPerM2)}만 원)` : ""));
     }
   } else {
     lines.push("이번 달 거래 없음");
@@ -53,9 +61,12 @@ export function buildPrompt(facts) {
     `- caption은 자막 한 개만 씁니다. 자막용이며 공백 포함 ${MAX_CAPTION}자 이내입니다. 숫자는 아라비아 숫자로 쓰고 금액은 "2,890만 원", "52.6억 원"처럼 씁니다.`,
     "- 사실표에 있는 숫자만 사용합니다. 계산해서 새 숫자를 만들거나 다른 달·다른 구와 비교하는 숫자를 쓰지 않습니다.",
     "- 아파트 이름(단지명), 건물명, 지번, 본번, 부번은 쓰지 않습니다.",
-    `- 순위는 사실표의 순위만 씁니다. 구를 "가장 비싸다·높다"고 하는 것은 1위일 때만, "가장 낮다·싸다"는 ${facts.totalGus}위일 때만 씁니다. 거래 건수로 "가장 많다·적다"고 쓰지 않습니다.`,
+    `- 순위는 사실표의 순위만 씁니다("공동"은 사실표에 있을 때만 붙입니다). 구를 "가장 비싸다·높다"고 하는 것은 1위일 때만, "가장 낮다·싸다"는 ${facts.totalGus}위일 때만 씁니다. 거래 건수로 "가장 많다·적다"고 쓰지 않습니다.`,
+    ...(facts.rankTied ? [`- ㎡당 중위 가격이 같은 구가 있으므로 순위는 "공동 ${facts.rankPrice}위"로 씁니다.`] : []),
+    ...(facts.partial ? [`- 이 달은 집계 중입니다. 달을 반드시 한 번 이상 말하고, 달을 말할 때마다 바로 뒤에 "${PARTIAL_MARK}"를 붙여 "${m}월${PARTIAL_MARK}"처럼 씁니다.`] : []),
     dongSpeakable(facts)
-      ? `- 동을 말할 때는 "거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데"라는 단서를 반드시 붙입니다. 거래가 적은 동 중에 더 비싼 곳이 있을 수 있으므로 이 단서 없이 어떤 동이 "가장 높다"고 쓰지 않습니다.`
+      ? `- 동을 말할 때는 "거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데"라는 단서를 반드시 붙입니다. 거래가 적은 동 중에 더 비싼 곳이 있을 수 있으므로 이 단서 없이 어떤 동이 "가장 높다"고 쓰지 않습니다.` +
+        (dongTies(facts).length ? ` 가장 높은 동이 여럿(공동)이므로 함께 이름을 들거나 "공동"이라고 밝히고, 한 동만 "가장 높다"고 쓰지 않습니다.` : "")
       : "- 동 이름은 쓰지 않습니다. 이번 달에는 대표로 말할 만큼 거래가 많은 동이 없습니다.",
     '- 투자 권유와 과장("폭등", "대박", "꼭 사야" 등)은 쓰지 않습니다.',
     '- 거래가 없으면 "이번 달 거래가 없었습니다"는 취지로만 씁니다.',
@@ -132,6 +143,8 @@ const PARTICLE_AFTER_DONG = "(?=[이가은는을를의에도와과로으만]|[^�
 const DONG_TOKEN = new RegExp(`[가-힣]+동(?:\\d+가)?${PARTICLE_AFTER_DONG}`, "g");
 const GU_NAMES = [...GU_ORDER].sort((a, b) => b.length - a.length);
 const num = (t) => Number(String(t).replaceAll(",", ""));
+const TIE_WORD = /공동|함께|나란히/;
+const NOT_DONG = new Set(["공동"]); // "공동 13위", "공동으로"의 공동은 동 이름이 아니다
 
 // 문장 단위로 나눈다. 숫자 사이 점(27.5)은 문장 끝이 아니다.
 function sentences(text) {
@@ -156,7 +169,7 @@ function entities(sentence) {
       at = masked.indexOf(gu, at + gu.length);
     }
   }
-  for (const m of masked.matchAll(DONG_TOKEN)) list.push({ kind: "dong", name: m[0], at: m.index });
+  for (const m of masked.matchAll(DONG_TOKEN)) if (!NOT_DONG.has(m[0])) list.push({ kind: "dong", name: m[0], at: m.index });
   return list.sort((a, b) => a.at - b.at);
 }
 // pos 앞에서 가장 가까운 이름(없으면 구 자신으로 본다).
@@ -166,13 +179,17 @@ function semanticErrors(facts, caption) {
   const errors = [];
   const speakable = dongSpeakable(facts);
   const clue = new RegExp(`${TOP_DONG_MIN_N}건\\s*이상`);
-  const dongOk = (name) => speakable && name === facts.topDong;
+  const ties = dongTies(facts);
+  const dongOk = (name) => speakable && (name === facts.topDong || ties.includes(name));
   for (const sen of sentences(caption)) {
     const t = sen.text;
     const ents = entities(t);
-    for (const m of t.matchAll(/(?<![\d.,])(\d+)\s*위/g)) {
-      if (facts.rankPrice == null || num(m[1]) !== facts.rankPrice) errors.push(`순위가 사실과 다름: ${m[1]}위(실제 ${facts.rankPrice ?? "없음"})`);
+    for (const m of t.matchAll(/(?<![\d.,])(공동\s*)?(\d+)\s*위/g)) {
+      if (facts.rankPrice == null || num(m[2]) !== facts.rankPrice) errors.push(`순위가 사실과 다름: ${m[2]}위(실제 ${facts.rankPrice ?? "없음"})`);
+      else if (m[1] && facts.rankTied !== true) errors.push(`같은 순위의 구가 없는데 "공동": ${m[0]}`);
     }
+    // 공동 최고를 밝히는 말("공동 N위"의 공동은 빼고 본다)
+    const saysTie = TIE_WORD.test(t.replace(/공동\s*\d+\s*위/g, ""));
     for (const m of t.matchAll(/(?<![\d.,])(\d+)\s*개\s*구/g)) {
       if (num(m[1]) !== facts.totalGus) errors.push(`구 개수가 사실과 다름: ${m[1]}개 구`);
     }
@@ -205,11 +222,22 @@ function semanticErrors(facts, caption) {
       if (who.kind === "dong") {
         if (!HIGH.test(word)) errors.push(`사실표에 없는 동 비교: ${who.name} ${m[0]}`);
         else if (!dongOk(who.name)) errors.push(`사실표에 없는 동의 최상급: ${who.name}`);
+        else if (ties.length && !saysTie) errors.push(`동 최상급인데 같은 값의 동이 있음(공동이라고 밝혀야 함): ${[facts.topDong, ...ties].join(", ")}`);
         else if (!clue.test(t) && facts.topDongIsMax !== true) errors.push(`동 최상급에 "${TOP_DONG_MIN_N}건 이상" 단서 필요: ${who.name}(거래가 적은 동 중에 더 비싼 곳이 있음)`);
       } else if (HIGH.test(word) ? facts.rankPrice !== 1 : facts.rankPrice !== facts.totalGus) {
         errors.push(`구 최상급이 순위와 다름: ${m[0]}(실제 ${facts.rankPrice ?? "없음"}위)`);
+      } else if (HIGH.test(word) && facts.rankTied === true && !saysTie) {
+        errors.push(`구 최상급인데 같은 순위의 구가 있음(공동이라고 밝혀야 함): ${m[0]}`);
       }
     }
+  }
+  // 집계 중인 달: 달을 말하고, 말할 때마다 바로 뒤에 "(집계 중)". 아닌 달에는 붙이지 않는다.
+  const monthMentions = [...caption.matchAll(/(?<![\d.,])(\d+)\s*월(\(집계 중\))?/g)];
+  if (facts.partial === true) {
+    if (!monthMentions.length) errors.push(`집계 중인 달인데 달을 말하지 않음("${ym(facts.month).m}월${PARTIAL_MARK}"처럼)`);
+    for (const m of monthMentions) if (!m[2]) errors.push(`집계 중인 달은 "${m[1]}월${PARTIAL_MARK}"처럼 표시: ${m[0]}`);
+  } else if (caption.includes("집계 중")) {
+    errors.push("집계 중인 달이 아닌데 \"집계 중\"");
   }
   return errors;
 }
@@ -233,7 +261,7 @@ export function validateScript(facts, script) {
   }
   const allowed = allowedNumbers(facts);
   let scan = caption;
-  for (const name of [facts.gu, facts.topDong]) if (name) scan = scan.replaceAll(name, " ");
+  for (const name of [facts.gu, facts.topDong, ...dongTies(facts)]) if (name) scan = scan.replaceAll(name, " ");
   const tokens = scan.match(/\d[\d,]*(\.\d+)?/g) ?? [];
   for (let t of tokens) {
     t = t.replace(/,+$/, "");
@@ -246,15 +274,18 @@ export function validateScript(facts, script) {
 
 export function fallbackScript(facts) {
   const { y, m } = ym(facts.month);
+  const mark = facts.partial ? PARTIAL_MARK : "";
   if (!facts.n) {
-    const t = `${facts.gu}는 이번 달 거래가 없었습니다. 다른 구를 살펴보겠습니다.`;
+    const t = facts.partial
+      ? `${facts.gu}는 ${m}월${mark} 거래가 없었습니다. 다른 구를 살펴보겠습니다.`
+      : `${facts.gu}는 이번 달 거래가 없었습니다. 다른 구를 살펴보겠습니다.`;
     return { caption: t, speech: speechFromCaption(t) };
   }
-  const s1 = `${facts.gu}는 ${y}년 ${m}월 거래가 ${facts.n}건이었습니다.`;
+  const s1 = `${facts.gu}는 ${y}년 ${m}월${mark} 거래가 ${facts.n}건이었습니다.`;
   let s2;
   if (facts.medPerM2 != null) {
     s2 = `㎡당 중위 가격은 ${comma(facts.medPerM2)}만 원` +
-      (facts.rankPrice != null ? `으로 ${facts.totalGus}개 구 중 ${facts.rankPrice}위입니다.` : "입니다.");
+      (facts.rankPrice != null ? `으로 ${facts.totalGus}개 구 중 ${rankText(facts)}입니다.` : "입니다.");
   } else {
     s2 = "㎡당 가격은 집계하지 못했습니다.";
   }

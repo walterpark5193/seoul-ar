@@ -279,3 +279,78 @@ describe("CLI 인자", () => {
     expect(parseOnly(undefined)).toBe(null);
   });
 });
+
+describe("공동 순위·공동 최고 동·집계 중인 달", () => {
+  const ok = (f, caption) => validateScript(f, { caption });
+  const tiedRank = { ...facts, rankPrice: 13, rankTied: true };
+  it("공동 순위: 같은 순위의 구가 있으면 'N위'·'공동 N위' 모두 참, 없으면 '공동' 거절", () => {
+    expect(ok(tiedRank, "강남구는 25개 구 중 공동 13위입니다. 거래는 25건입니다.")).toEqual({ ok: true, errors: [] });
+    expect(ok(tiedRank, "강남구는 25개 구 중 13위입니다. 거래는 25건입니다.").ok).toBe(true);
+    expect(ok(tiedRank, "강남구는 25개 구 중 14위입니다. 거래는 25건입니다.").ok).toBe(false);
+    const r = ok({ ...facts, rankPrice: 13, rankTied: false }, "강남구는 25개 구 중 공동 13위입니다. 거래는 25건입니다.");
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("공동");
+  });
+  it("공동 1위인 구의 '가장 비싸다'는 공동이라고 밝힐 때만", () => {
+    const top = { ...facts, rankPrice: 1, rankTied: true };
+    expect(ok(top, "강남구는 서울에서 가장 비쌉니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok(top, "강남구는 공동으로 가장 비쌉니다. 거래는 25건입니다.").ok).toBe(true);
+    expect(ok(top, "강남구는 25개 구 중 공동 1위입니다. 거래는 25건입니다.").ok).toBe(true);
+  });
+  it("buildPrompt: 공동 순위면 '공동 N위'로 알려 준다", () => {
+    expect(buildPrompt(tiedRank)).toContain("25개 구 중 공동 13위");
+    expect(buildPrompt(tiedRank)).toContain('"공동 13위"로 씁니다');
+    expect(buildPrompt(facts)).not.toContain("공동 1위");
+    expect(fallbackScript(tiedRank).caption).toContain("공동 13위");
+    expect(validateScript(tiedRank, fallbackScript(tiedRank)).ok).toBe(true);
+  });
+
+  const tiedDong = { ...facts, topDong: "금호동3가", topDongMedPerM2: 2335, topDongIsMax: false, topDongTiedWith: ["행당동"] };
+  it("공동 최고 동: 한 동만 '가장 높다'면 거절, 함께·공동이라고 밝히면 통과(짝 동 이름·금액 허용)", () => {
+    const solo = "강남구는 25건이 거래됐습니다. 거래 3건 이상인 동 가운데 금호동3가가 ㎡당 2,335만 원으로 가장 높습니다.";
+    const r = ok(tiedDong, solo);
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("행당동");
+    expect(ok(tiedDong, "강남구는 25건이 거래됐습니다. 3건 이상 거래된 동 중 금호동3가와 행당동이 ㎡당 2,335만 원으로 함께 가장 높습니다.")).toEqual({ ok: true, errors: [] });
+    expect(ok(tiedDong, "강남구는 25건이 거래됐습니다. 3건 이상 거래된 동 중 금호동3가가 ㎡당 2,335만 원으로 공동으로 가장 높습니다.").ok).toBe(true);
+    // 짝 동의 금액이 다르면 거절, 짝이 아닌 동은 거절
+    expect(ok(tiedDong, "3건 이상 거래된 동 중 행당동이 ㎡당 2,000만 원입니다. 거래는 25건입니다.").ok).toBe(false);
+    expect(ok(tiedDong, "3건 이상 거래된 동 중 금호동3가와 옥수동이 함께 가장 높습니다. 거래는 25건입니다.").ok).toBe(false);
+    // 3건 이상 단서 없이도 안 된다(topDongIsMax false)
+    expect(ok(tiedDong, "강남구는 25건이 거래됐습니다. 금호동3가와 행당동이 ㎡당 2,335만 원으로 함께 가장 높습니다.").ok).toBe(false);
+  });
+  it("buildPrompt: 공동 최고 동이면 두 이름과 공동을 알려 준다", () => {
+    const p = buildPrompt(tiedDong);
+    expect(p).toContain("금호동3가, 행당동 (공동, ㎡당 중위 2,335만 원)");
+    expect(p).toContain("한 동만");
+    expect(buildPrompt(facts)).not.toContain("한 동만");
+  });
+
+  const partial = { ...facts, partial: true };
+  it('집계 중인 달은 달 바로 뒤에 "(집계 중)", 달을 반드시 말한다', () => {
+    expect(ok(partial, "강남구 11월(집계 중) 거래는 25건입니다. ㎡당 중위 2,890만 원으로 1위입니다.")).toEqual({ ok: true, errors: [] });
+    expect(ok(partial, "강남구는 2026년 11월(집계 중) 거래가 25건입니다. ㎡당 중위 2,890만 원입니다.").ok).toBe(true);
+    const r = ok(partial, "강남구 11월 거래는 25건입니다. ㎡당 중위 2,890만 원으로 1위입니다.");
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("11월(집계 중)");
+    expect(ok(partial, "강남구 11월 (집계 중) 거래는 25건입니다. 1위입니다.").ok).toBe(false);
+    expect(ok(partial, "강남구 11월(집계 중) 거래는 25건입니다. 11월 1위입니다.").ok).toBe(false);
+    expect(ok(partial, "강남구 거래는 25건입니다. ㎡당 중위 2,890만 원으로 1위입니다.").ok).toBe(false);
+  });
+  it('집계 중이 아닌 달에 "집계 중"이면 거절', () => {
+    expect(ok({ ...facts, partial: false }, "강남구 11월(집계 중) 거래는 25건입니다. 1위입니다.").ok).toBe(false);
+    expect(ok(facts, "강남구 11월(집계 중) 거래는 25건입니다. 1위입니다.").ok).toBe(false);
+  });
+  it("buildPrompt·fallbackScript: 집계 중인 달 표시", () => {
+    const p = buildPrompt(partial);
+    expect(p).toContain('"11월(집계 중)"처럼');
+    expect(p).toMatch(/기간: 2026년 11월 \(집계 중/);
+    expect(buildPrompt(facts)).not.toContain("집계 중");
+    for (const f of [partial, { ...zero, partial: true }]) {
+      const fb = fallbackScript(f);
+      expect(fb.caption).toContain("11월(집계 중)");
+      expect(validateScript(f, fb)).toEqual({ ok: true, errors: [] });
+    }
+    expect(fallbackScript(facts).caption).not.toContain("집계 중");
+  });
+});
