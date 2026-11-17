@@ -59,11 +59,18 @@ export function voteCandidates(hash: string, summary: Record<string, Stat>, metr
   return [picked[0]!, picked[1]!, picked[2]!];
 }
 
-/** 한글 입력 상태에서는 V가 "ㅍ"로 들어온다. 물리 키(code)가 글자 키면 그 영문 소문자로 바꾼다. */
+/**
+ * 한글 입력 상태에서는 V가 "ㅍ"로, Windows 한국어 IME에서는 "Process"로 들어온다.
+ * 그럴 때는 물리 키(code)로 바꾼다: 글자 키는 영문 소문자, 숫자 키는 숫자, 스페이스는 " ".
+ */
 export function normalizeKey(key: string, code: string | undefined): string {
-  if (!code || !/^[ㄱ-ㅣ]$/.test(key)) return key;
-  const m = /^Key([A-Z])$/.exec(code);
-  return m ? m[1]!.toLowerCase() : key;
+  if (!code || !(key === "Process" || /^[ㄱ-ㅣ]$/.test(key))) return key;
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1]!.toLowerCase();
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1]!;
+  if (code === "Space") return " ";
+  return key;
 }
 
 /** 상단 연결 표시: 두 채널(본체 state, 무대 stage)이 모두 열려야 "실시간 연결". */

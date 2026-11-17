@@ -185,6 +185,15 @@ describe("normalizeKey", () => {
     expect(normalizeKey(" ", "Space")).toBe(" ");
     expect(normalizeKey("ㅍ", undefined)).toBe("ㅍ");
   });
+  it("maps the Windows IME \"Process\" key back to the physical key", () => {
+    expect(normalizeKey("Process", "KeyG")).toBe("g");
+    expect(normalizeKey("Process", "KeyV")).toBe("v");
+    expect(normalizeKey("Process", "Digit3")).toBe("3");
+    expect(normalizeKey("Process", "Space")).toBe(" ");
+    expect(normalizeKey("Process", "Backquote")).toBe("Process"); // 모르는 물리 키는 그대로(아무 동작 없음)
+    expect(normalizeKey("Process", undefined)).toBe("Process");
+    expect(normalizeKey("Enter", "Enter")).toBe("Enter");
+  });
 });
 
 describe("stage controller", () => {
@@ -615,6 +624,8 @@ describe("stage controller", () => {
     expect(s.c.state.vote).not.toBeNull();
     s.key("v");
     expect(s.c.state.vote).toBeNull();
+    expect(s.key("Process", { code: "KeyV" })).toBe(true); // Windows 한국어 IME
+    expect(s.c.state.vote?.round).toBe(2);
   });
 
   it("ui keys toggle hints, diag, preview and mute", async () => {
