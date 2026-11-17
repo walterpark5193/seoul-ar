@@ -58,7 +58,7 @@ function fakeStream() {
 function fakeVideo() {
   let cb: ((now: number) => void) | null = null;
   const v: any = {
-    srcObject: null, muted: false, playsInline: false, readyState: 4, videoWidth: 1280, videoHeight: 720,
+    srcObject: null, muted: false, playsInline: false, readyState: 4, paused: false, videoWidth: 1280, videoHeight: 720,
     play: vi.fn(async () => {}),
     requestVideoFrameCallback: vi.fn((c: (n: number) => void) => { cb = c; return 1; }),
     cancelVideoFrameCallback: vi.fn(() => { cb = null; }),
@@ -89,6 +89,18 @@ function deps(over: Partial<HandSourceDeps> = {}, rec = fakeRecognizer()) {
   return { d, s, v, vis, rec };
 }
 const domErr = (name: string) => Object.assign(new Error(name), { name });
+
+/** 전역 rAF 가짜: 예약된 콜백을 run(t)으로 한 화면 프레임씩 돌린다(감시 루프와 프레임 루프가 같이 쓸 수 있게 여러 개). */
+function stubRaf() {
+  const q = new Map<number, (t: number) => void>();
+  let id = 0;
+  vi.stubGlobal("requestAnimationFrame", (c: (t: number) => void) => { q.set(++id, c); return id; });
+  vi.stubGlobal("cancelAnimationFrame", (h: number) => { q.delete(h); });
+  return {
+    run(t: number) { const cbs = [...q.values()]; q.clear(); for (const c of cbs) c(t); },
+    get pending() { return q.size; },
+  };
+}
 
 describe("startHandSource", () => {
   it("성공: 카메라 제약, 옵션, GPU 델리게이트", async () => {
@@ -227,6 +239,82 @@ describe("startHandSource", () => {
       expect(rec.recognizeForVideo).toHaveBeenCalledTimes(1);
       v.raw.currentTime = 0.04; run(30);
       expect(rec.recognizeForVideo).toHaveBeenCalledTimes(2);
+      r.source.stop();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("재생 중 rVFC가 500ms 동안 오지 않으면 rAF + currentTime 확인으로 바꿔 계속 쓰고, 같은 영상 프레임은 두 번 처리하지 않는다", async () => {
+    const raf = stubRaf();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { d, v, rec } = deps();
+      v.raw.currentTime = 0;
+      const r = await startHandSource(d);
+      if (!r.ok) throw new Error("fail");
+      const got: number[] = [];
+      r.source.onFrame(f => got.push(f.t));
+      // 정상: 화면 프레임마다 새 영상 프레임(rVFC) → rAF 순서
+      let t = 0;
+      for (let i = 1; i <= 5; i++) { t += 33; v.raw.currentTime = i * 0.033; v.tick(t); raf.run(t); }
+      expect(got).toHaveLength(5);
+      const rvfcAsks = v.raw.requestVideoFrameCallback.mock.calls.length;
+      const late = v.raw.requestVideoFrameCallback.mock.calls.at(-1)![0] as (n: number) => void;
+      // rVFC가 멈춘다(미리보기가 렌더 트리에서 빠짐 등). 영상은 재생 중, currentTime은 마지막으로 처리한 프레임 그대로.
+      for (let k = 0; k < 29; k++) raf.run(t += 16);                 // 464ms: 아직 바꾸지 않는다
+      expect(v.raw.cancelVideoFrameCallback).not.toHaveBeenCalled();
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(5);
+      for (let k = 0; k < 4; k++) raf.run(t += 16);                  // 500ms를 넘김: rAF 길로 바꿈
+      expect(v.raw.cancelVideoFrameCallback).toHaveBeenCalledTimes(1);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(5);        // 이미 처리한 프레임은 rAF로 다시 처리하지 않는다
+      // 새 영상 프레임은 rAF로 한 번씩만
+      v.raw.currentTime = 0.2; raf.run(t += 16); raf.run(t += 16);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(6);
+      v.raw.currentTime = 0.233; raf.run(t += 16);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(7);
+      expect(got).toHaveLength(7);
+      // 바꾼 뒤 늦게 온 rVFC 콜백은 처리하지 않고 루프를 하나 더 만들지도 않는다. rVFC는 다시 요청하지 않는다.
+      v.raw.currentTime = 0.266;
+      late(t += 1);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(7);
+      raf.run(t += 16);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(8);
+      expect(raf.pending).toBe(1);
+      expect(v.raw.requestVideoFrameCallback.mock.calls.length).toBe(rvfcAsks);
+      r.source.stop();
+      expect(raf.pending).toBe(0);
+    } finally { vi.unstubAllGlobals(); warn.mockRestore(); }
+  });
+  it("멈춘 영상·준비 안 된 영상에서는 rVFC가 조용해도 바꾸지 않는다", async () => {
+    const raf = stubRaf();
+    try {
+      const { d, v, rec } = deps();
+      v.raw.paused = true;
+      const r = await startHandSource(d);
+      if (!r.ok) throw new Error("fail");
+      let t = 0;
+      for (let k = 0; k < 60; k++) raf.run(t += 16);                 // 약 1초 일시 정지
+      v.raw.paused = false; v.raw.readyState = 1;
+      for (let k = 0; k < 60; k++) raf.run(t += 16);                 // 약 1초 데이터 없음
+      v.raw.readyState = 4;
+      for (let k = 0; k < 29; k++) raf.run(t += 16);                 // 재생 시작부터 다시 잰다(464ms)
+      expect(v.raw.cancelVideoFrameCallback).not.toHaveBeenCalled();
+      v.tick(t += 16); raf.run(t);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(1);        // 여전히 rVFC 길
+      r.source.stop();
+      expect(raf.pending).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("감시 rAF 사이가 길게 벌어지면(숨은 탭에서 돌아옴) 그 간격은 rVFC 정지로 세지 않는다", async () => {
+    const raf = stubRaf();
+    try {
+      const { d, v, rec } = deps();
+      const r = await startHandSource(d);
+      if (!r.ok) throw new Error("fail");
+      v.tick(10); raf.run(10);
+      raf.run(60_010);                                                // 숨은 탭: rAF·rVFC 모두 1분 쉼
+      expect(v.raw.cancelVideoFrameCallback).not.toHaveBeenCalled();
+      v.tick(60_026); raf.run(60_026);
+      expect(rec.recognizeForVideo).toHaveBeenCalledTimes(2);
+      expect(v.raw.cancelVideoFrameCallback).not.toHaveBeenCalled();
       r.source.stop();
     } finally { vi.unstubAllGlobals(); }
   });

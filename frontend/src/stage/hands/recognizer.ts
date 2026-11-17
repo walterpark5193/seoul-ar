@@ -47,6 +47,13 @@ export interface HandSourceDeps {
 }
 
 const FPS_WINDOW = 30;
+/**
+ * 영상이 재생 중인데 requestVideoFrameCallback이 이만큼 새 프레임을 주지 않으면 그 루프를 rAF + currentTime 확인으로
+ * 바꾸고 계속 그 길로 간다. 일부 브라우저는 video가 렌더 트리에서 빠지면(display:none 등) 이 콜백을 멈춘다.
+ */
+export const RVFC_STALL_MS = 500;
+/** 감시 rAF 사이가 이보다 벌어지면(숨은 탭에서 돌아옴·긴 멈춤) 그 사이는 rVFC 정지로 세지 않는다. */
+const WATCH_GAP_MS = 250;
 
 function stopTracks(stream: MediaStream): void {
   for (const t of stream.getTracks()) t.stop();
@@ -104,22 +111,32 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
   const stamps: number[] = [];
   let fps = 0;
   let stopped = false;
-  let handle: number | null = null;
-  const rvfc = typeof video.requestVideoFrameCallback === "function";
+  // 프레임 루프: rVFC가 있으면 새 영상 프레임마다, 없거나 rVFC가 멈춰 바꾼 뒤로는 rAF마다 돌며 currentTime이 바뀐 때만 처리한다.
+  let viaRvfc = typeof video.requestVideoFrameCallback === "function";
+  let handle: number | null = null;  // 다음 step 예약(viaRvfc면 rVFC, 아니면 rAF)
+  let rvfcFrames = 0;                // rVFC가 준 프레임 수(감시용)
 
   const schedule = () => {
     if (stopped) return;
-    handle = rvfc
-      ? video.requestVideoFrameCallback(step)
-      : requestAnimationFrame(() => step(performance.now()));
+    handle = viaRvfc ? video.requestVideoFrameCallback(onVideoFrame) : requestAnimationFrame(onAnimationFrame);
+  };
+  const onVideoFrame = (now: number) => {
+    if (!viaRvfc) return; // rAF로 바꾼 뒤 늦게 온 콜백: rAF 루프가 맡는다(같은 프레임 두 번·루프 둘 방지)
+    handle = null;
+    rvfcFrames++;
+    step(now, true);
+  };
+  const onAnimationFrame = () => {
+    handle = null;
+    step(performance.now(), false);
   };
   let errors = 0;
   let warnedRecognize = false;
   const warnedListeners = new WeakSet<(f: HandFrame) => void>();
   let lastVideoTime = -1;
-  const step = (now: number) => {
+  const step = (now: number, newFrame: boolean) => {
     if (stopped) return;
-    const fresh = rvfc || video.currentTime !== lastVideoTime;
+    const fresh = newFrame || video.currentTime !== lastVideoTime;
     if (video.readyState >= 2 && fresh) {
       lastVideoTime = video.currentTime;
       let frame: HandFrame | null = null;
@@ -147,7 +164,29 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
     }
     schedule();
   };
+
+  // rVFC 감시: 화면 프레임(rAF)마다 rVFC가 새 프레임을 줬는지 본다. 재생 중인데 RVFC_STALL_MS 동안 없으면 rAF 길로 바꾼다.
+  // 숨은 탭에서는 rAF도 쉬므로 잘못 바꾸지 않고, 돌아온 직후의 긴 간격은 WATCH_GAP_MS로 거른다.
+  let watchHandle: number | null = null;
+  let seenFrames = 0;
+  let quietSince = 0;
+  let lastWatch = -Infinity;
+  const watch = (t: number) => {
+    watchHandle = null;
+    if (stopped || !viaRvfc) return;
+    const playing = video.readyState >= 2 && !video.paused;
+    if (rvfcFrames !== seenFrames || !playing || t - lastWatch > WATCH_GAP_MS) { seenFrames = rvfcFrames; quietSince = t; }
+    lastWatch = t;
+    if (t - quietSince < RVFC_STALL_MS) { watchHandle = requestAnimationFrame(watch); return; }
+    console.warn(`[stage] 영상 프레임 콜백이 ${RVFC_STALL_MS}ms 넘게 오지 않아 rAF로 바꿉니다`);
+    viaRvfc = false;
+    if (handle !== null) video.cancelVideoFrameCallback?.(handle);
+    handle = null;
+    schedule();
+  };
+
   schedule();
+  if (viaRvfc && typeof requestAnimationFrame === "function") watchHandle = requestAnimationFrame(watch);
 
   const source: HandSource = {
     video, loadMs, delegate,
@@ -157,7 +196,8 @@ export async function startHandSource(deps: HandSourceDeps = {}): Promise<{ ok: 
     stop() {
       if (stopped) return;
       stopped = true;
-      if (handle !== null) { if (rvfc) video.cancelVideoFrameCallback?.(handle); else cancelAnimationFrame(handle); }
+      if (handle !== null) { if (viaRvfc) video.cancelVideoFrameCallback?.(handle); else cancelAnimationFrame(handle); }
+      if (watchHandle !== null) cancelAnimationFrame(watchHandle);
       listeners.clear();
       try { recognizer.close(); } catch { /* 이미 닫힘 */ }
       stopTracks(stream);
