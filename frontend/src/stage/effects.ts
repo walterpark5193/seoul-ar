@@ -42,7 +42,8 @@ export function diffEffects(prev: StageState, next: StageState): Effect[] {
     pubStage = true;
     if (next.mode === "spread") narr.push(narrate(NARRATION_IDS.spread, true));
     else {
-      const releaseBack = prev.lifted !== null && next.lifted === null;
+      // release는 focus를 lifted로 설정하고, victory는 focus를 null로 만든다.
+      const releaseBack = prev.lifted !== null && next.lifted === null && next.focus === prev.lifted;
       if (!resultEntered && !releaseBack) narr.push(narrate(NARRATION_IDS.mapBack, true));
     }
   }

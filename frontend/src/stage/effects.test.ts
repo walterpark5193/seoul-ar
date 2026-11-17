@@ -57,27 +57,63 @@ describe("diffEffects", () => {
   it("counting entry resets counter", () => {
     expect(diffEffects(s({ vote: vote() }), s({ vote: vote({ phase: "counting" }) }))).toEqual([{ type: "counter.reset" }]);
   });
-  it("result emits vote-result then gu clip then publish.vote; none before result", () => {
-    const pre = s({ vote: vote({ phase: "review", counts: [1, 2, 0] }) });
-    expect(types(diffEffects(vote() && s({ vote: vote({ phase: "counting" }) }), pre))).not.toContain("publish.vote");
-    const e = diffEffects(pre, s({ mode: "map", vote: vote({ phase: "result", counts: [1, 2, 0], winner: "마포구" }) }));
+  it("victory while lifted emits map-back", () => {
+    const e = diffEffects(s({ mode: "spread", lifted: "강남구" }), s({ mode: "map", lifted: null, focus: null }));
     expect(e).toEqual([
+      { type: "scene.layout", mode: "map" },
+      { type: "scene.lift", gu: null },
+      { type: "narrate", id: "map-back", interrupt: true, protect: false },
+      { type: "publish.stage" },
+    ]);
+  });
+  it("no publish.vote before result", () => {
+    const e = diffEffects(s({ vote: vote({ phase: "counting" }) }), s({ vote: vote({ phase: "review", counts: [1, 2, 0] }) }));
+    expect(types(e)).not.toContain("publish.vote");
+  });
+  it("voteConfirm from spread: full ordered effects, no map-back", () => {
+    const e = diffEffects(
+      s({ mode: "spread", vote: vote({ phase: "review", counts: [1, 2, 0] }) }),
+      s({ mode: "map", focus: "마포구", vote: vote({ phase: "result", counts: [1, 2, 0], winner: "마포구" }) }),
+    );
+    expect(e).toEqual([
+      { type: "scene.layout", mode: "map" },
+      { type: "scene.focus", gu: "마포구" },
       { type: "narrate", id: "vote-result-마포구-2", interrupt: true, protect: false },
       { type: "narrate", id: "gu-202611-마포구", interrupt: false, protect: false },
+      { type: "publish.state" },
+      { type: "publish.stage" },
       { type: "publish.vote" },
     ]);
   });
-  it("result with vote confirm from spread omits map-back", () => {
+  it("voteConfirm from map with lifted gu: lift cleared, full order", () => {
     const e = diffEffects(
-      s({ mode: "spread", vote: vote({ phase: "review", counts: [1, 2, 0] }) }),
-      s({ mode: "map", vote: vote({ phase: "result", counts: [1, 2, 0], winner: "마포구" }) }),
+      s({ lifted: "강남구", vote: vote({ phase: "review", counts: [1, 2, 0] }) }),
+      s({ lifted: null, focus: "마포구", vote: vote({ phase: "result", counts: [1, 2, 0], winner: "마포구" }) }),
     );
-    expect(e.some((x) => x.type === "narrate" && x.id === "map-back")).toBe(false);
+    expect(e).toEqual([
+      { type: "scene.lift", gu: null },
+      { type: "scene.focus", gu: "마포구" },
+      { type: "narrate", id: "vote-result-마포구-2", interrupt: true, protect: false },
+      { type: "narrate", id: "gu-202611-마포구", interrupt: false, protect: false },
+      { type: "publish.state" },
+      { type: "publish.stage" },
+      { type: "publish.vote" },
+    ]);
   });
   it("all zero emits vote-none", () => {
-    const e = diffEffects(s({ vote: vote({ phase: "review", counts: [0, 0, 0] }) }),
-      s({ vote: vote({ phase: "result", counts: [0, 0, 0], winner: "노원구", allZero: true }) }));
-    expect(e[0]).toEqual({ type: "narrate", id: "vote-none-노원구", interrupt: true, protect: false });
+    const e = diffEffects(
+      s({ mode: "spread", vote: vote({ phase: "review", counts: [0, 0, 0] }) }),
+      s({ mode: "map", focus: "노원구", vote: vote({ phase: "result", counts: [0, 0, 0], winner: "노원구", allZero: true }) }),
+    );
+    expect(e).toEqual([
+      { type: "scene.layout", mode: "map" },
+      { type: "scene.focus", gu: "노원구" },
+      { type: "narrate", id: "vote-none-노원구", interrupt: true, protect: false },
+      { type: "narrate", id: "gu-202611-노원구", interrupt: false, protect: false },
+      { type: "publish.state" },
+      { type: "publish.stage" },
+      { type: "publish.vote" },
+    ]);
   });
   it("order is fixed", () => {
     const e = diffEffects(
