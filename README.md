@@ -14,7 +14,7 @@
 
 ## 무대 모델 받기
 
-`#/stage`의 손 인식은 MediaPipe GestureRecognizer 모델 파일 하나가 필요합니다. 용량 때문에 git에는 없고(`frontend/public/models/`는 제외), 직접 한 번 받습니다. 없으면 무대는 마우스 모드로만 동작합니다.
+`#/stage`의 손 인식은 MediaPipe GestureRecognizer 모델 파일 하나가 필요합니다. 2026-11-17부터 `frontend/public/models/gesture_recognizer.task`(약 8MB)가 저장소에 포함되어 있어 clone 뒤 따로 받을 필요가 없습니다. 파일이 없거나 손상됐을 때만 아래 명령으로 다시 받습니다. 없으면 무대는 마우스 모드로만 동작합니다.
 
 무대 사용법(손짓·키·투표)은 `docs/GUIDE.md` 7절. 빈 곳 주먹 끌기나 두 주먹으로 지도를 지구본처럼 돌리고(빠르게 놓으면 관성, 다시 쥐면 멈춤) 두 주먹 벌리기·휠로 확대하며, 이 회전·확대는 큰 화면(`#/3d?stage=1`)만 따라옵니다.
 

@@ -6,5 +6,4 @@ cdk-outputs.json
 tools/data/raw/
 *.log
 .DS_Store
-frontend/public/models/
 frontend/public/mediapipe/

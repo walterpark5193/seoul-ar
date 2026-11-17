@@ -29,7 +29,7 @@ cd seoul-ar
 ```
 
 - `frontend`와 `tools`의 `package.json`에는 네이티브 `canvas` 패키지를 미리 빌드된 `@napi-rs/canvas`로 바꾸는 overrides가 들어 있어 arm64·x64 모두 그대로 설치됩니다.
-- 무대 화면의 손 인식 모델은 용량 때문에 git에 없습니다. 루트 `README.md`의 "무대 모델 받기" 명령으로 `frontend/public/models/gesture_recognizer.task`(약 8MB)를 한 번 받습니다. 받지 않아도 배포는 되고, 무대는 마우스 모드로만 동작합니다.
+- 무대 화면의 손 인식 모델(`frontend/public/models/gesture_recognizer.task`, 약 8MB)은 저장소에 포함되어 있어 따로 받지 않습니다. MediaPipe WASM은 `npm install`로 들어온 패키지에서 빌드 때 자동 복사됩니다. 즉 clone과 `npm install` 뒤에 추가로 내려받을 파일은 없습니다.
 
 ## 2. AWS 자격 증명 확인
 
