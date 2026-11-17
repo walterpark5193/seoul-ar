@@ -183,6 +183,32 @@ export function arSupported(): boolean;    // navigator.mediaDevices?.getUserMed
 
 좌표계 주의(2026-11-17 보강): MindAR의 `anchor.group`은 타깃 그림을 자기 XY 평면에 놓고 z가 카메라 쪽이다. 씬(4절)은 XZ 평면에 y 위다. 따라서 `ArSession.anchor`는 MindAR `anchor.group`에 직접 넣은 **내부 Group**이고, `inner.rotation.x = Math.PI / 2`로 돌려 둔다(씬의 y가 그림에서 솟아오르고, 씬의 z(남)가 그림의 아래가 된다). 뷰는 이 `anchor`에 `seoulScene.group`을 그대로 add 한다.
 
+안정화와 고정(2026-11-17 추가, 사용자 폰 시험 피드백 "너무 흔들려서 값을 읽기 힘듦"):
+
+```ts
+export interface ArSmoothing { positionAlpha?: number; /* 0.18 */ rotationAlpha?: number; /* 0.18 */ deadbandPos?: number; /* 0.004 (타깃 폭 단위) */ deadbandRotRad?: number; /* 0.01 */ holdMs?: number; /* 800: 타깃 유실 뒤 마지막 포즈 유지 시간 */ }
+export interface ArSessionOptions {
+  container: HTMLElement; targetSrc: string;
+  smoothing?: ArSmoothing;                 // 기본값 위 주석
+  filterMinCF?: number;                    // MindAR One-Euro 필터, 기본 0.0001 (작을수록 덜 흔들리고 더 느림)
+  filterBeta?: number;                     // MindAR One-Euro 필터, 기본 0.01 (작을수록 덜 흔들림)
+  warmupTolerance?: number;                // 기본 5
+  missTolerance?: number;                  // 기본 10 (잠깐 놓쳐도 lost 로 깜빡이지 않게)
+}
+export interface ArSession {
+  // ...기존 멤버...
+  freeze(): void;                          // 카메라 영상(video.pause())과 포즈 갱신을 멈추고 마지막 포즈를 유지. 렌더 루프는 계속 돈다
+  unfreeze(): void;                        // 영상·포즈 갱신 재개
+  readonly frozen: boolean;
+  onFreeze(cb: (frozen: boolean) => void): () => void;
+}
+```
+
+- `anchor`는 이제 MindAR `anchor.group`의 직계 자식이 아니라 `scene` 바로 아래의 **추종 그룹**이다. 매 프레임 MindAR `anchor.group`의 월드 변환을 읽어 위치는 `positionAlpha`로 lerp, 회전은 `rotationAlpha`로 slerp 하되, 변화량이 `deadbandPos`/`deadbandRotRad` 미만이면 무시한다(정지 상태에서 미세 떨림 제거). 타깃을 잃으면 `holdMs` 동안 마지막 포즈로 보이게 두고 그 뒤 숨긴다. 추종 그룹 안에 `rotation.x = +π/2` 내부 그룹이 있고 뷰는 그 내부 그룹(=`anchor`)에 씬을 add 한다(좌표계 규칙 동일).
+- `freeze()` 동안 `onFound/onLost`는 발화하지 않는다.
+
+바텀시트(8절 보강): `renderSheet`는 현재 지표 기준 법정동 상위 5개(이름, 값, 건수)를 목록으로 포함한다. 3D 라벨이 흔들려도 숫자는 2D에서 읽을 수 있어야 한다. AR 뷰에는 "화면 고정" 토글 버튼(44px 이상)이 있고 고정 중에는 "고정됨" 상태와 "다시 추적" 버튼을 보여 준다.
+
 마커 파일: `frontend/public/marker/target.png`(정사각 1024), `frontend/public/marker/target.mind`.
 도구: `node tools/marker/make-slide.mjs` (target.png와 `frontend/public/marker/slide.png` 1920×1080 생성), `node tools/marker/compile-target.mjs` (target.mind 생성).
 
