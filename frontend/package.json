@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
     "aws-amplify": "^6.22.2",
     "mind-ar": "^1.2.5",
     "qrcode": "^1.5.4",

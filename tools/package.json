@@ -7,6 +7,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1170.0",
+    "@aws-sdk/client-polly": "^3.1170.0",
     "@tensorflow/tfjs": "^4.22.0",
     "mind-ar": "^1.2.5",
     "qrcode": "^1.5.4",
