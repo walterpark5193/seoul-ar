@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { speechHash, buildManifest, synthAll } from "./synth.mjs";
+import { unlinkSync } from "node:fs";
+import { speechHash, buildManifest, synthAll, mergeManifest } from "./synth.mjs";
 
 const lines = [
   { id: "stage-hello", caption: "안녕", speech: "안녕하세요" },
@@ -93,5 +94,84 @@ describe("synth", () => {
     expect(client.calls.length).toBe(1);
     expect(r.synthesized).toEqual(["stage-hello"]);
     expect(r.skipped).toEqual(["map-back"]);
+  });
+
+  it("retries twice then succeeds; three failures per engine -> failed", async () => {
+    const mk = (failTimes) => {
+      let n = 0; const calls = [];
+      return { calls, async send(cmd) {
+        calls.push(cmd.input);
+        if (n++ < failTimes) throw new Error("boom");
+        return { AudioStream: { transformToByteArray: async () => BYTES } };
+      } };
+    };
+    const one = [lines[0]];
+    const c2 = mk(2);
+    const r2 = await synthAll(one, opts({ client: c2, outDir: tmp() }));
+    expect(r2.synthesized).toEqual(["stage-hello"]);
+    expect(r2.fallbacks).toEqual([]);
+    expect(c2.calls.length).toBe(3);
+    const c6 = mk(6);
+    const r6 = await synthAll(one, opts({ client: c6, outDir: tmp() }));
+    expect(r6.failed).toEqual(["stage-hello"]);
+    expect(c6.calls.length).toBe(6);
+  });
+
+  it("limits concurrency to 4", async () => {
+    let inflight = 0, max = 0;
+    const client = { async send() {
+      inflight++; max = Math.max(max, inflight);
+      await new Promise((r) => setTimeout(r, 5));
+      inflight--;
+      return { AudioStream: { transformToByteArray: async () => BYTES } };
+    } };
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: `x${i}`, caption: "c", speech: `s${i}` }));
+    const r = await synthAll(many, opts({ client, outDir: tmp() }));
+    expect(r.synthesized.length).toBe(20);
+    expect(max).toBeGreaterThan(1);
+    expect(max).toBeLessThanOrEqual(4);
+  });
+
+  it("resynth when hash equal but file missing", async () => {
+    const outDir = tmp();
+    const first = await synthAll(lines, opts({ client: fakeClient(), outDir }));
+    unlinkSync(join(outDir, "map-back.mp3"));
+    const client = fakeClient();
+    const r = await synthAll(lines, opts({ client, outDir, previous: first.manifest }));
+    expect(r.synthesized).toEqual(["map-back"]);
+    expect(r.skipped).toEqual(["stage-hello"]);
+    expect(client.calls.length).toBe(1);
+  });
+
+  it("fallback item stores neural hash and is retried with generative next run", async () => {
+    const outDir = tmp();
+    const first = await synthAll([lines[0]], opts({ client: fakeClient({ failEngines: ["generative"] }), outDir }));
+    expect(first.manifest.items["stage-hello"].hash).toBe(speechHash("안녕하세요", "Seoyeon", "neural"));
+    const client = fakeClient();
+    const r = await synthAll([lines[0]], opts({ client, outDir, previous: first.manifest }));
+    expect(r.synthesized).toEqual(["stage-hello"]);
+    expect(client.calls[0].Engine).toBe("generative");
+    expect(r.fallbacks).toEqual([]);
+  });
+
+  it("mergeManifest keeps previous item for failed id when file exists", async () => {
+    const outDir = tmp();
+    const first = await synthAll(lines, opts({ client: fakeClient(), outDir }));
+    const r = await synthAll(lines, opts({ client: fakeClient({ failEngines: ["generative", "neural"] }), outDir, previous: { ...first.manifest, items: { ...first.manifest.items, "stage-hello": { ...first.manifest.items["stage-hello"], hash: "old" } } } }));
+    expect(r.failed).toEqual(["stage-hello"]);
+    const merged = mergeManifest(r, first.manifest, outDir);
+    expect(merged.items["stage-hello"]).toEqual(first.manifest.items["stage-hello"]);
+    unlinkSync(join(outDir, "stage-hello.mp3"));
+    expect(mergeManifest(r, first.manifest, outDir).items["stage-hello"]).toBeUndefined();
+  });
+
+  it("write error marks only that item failed", async () => {
+    const r = await synthAll(lines, opts({ client: fakeClient(), outDir: join(tmp(), "a") , log: () => {} }));
+    expect(r.failed).toEqual([]);
+    const outDir = tmp();
+    const bad = [{ id: "no/such/dir", caption: "c", speech: "s" }, lines[0]];
+    const r2 = await synthAll(bad, opts({ client: fakeClient(), outDir }));
+    expect(r2.failed).toEqual(["no/such/dir"]);
+    expect(r2.synthesized).toEqual(["stage-hello"]);
   });
 });

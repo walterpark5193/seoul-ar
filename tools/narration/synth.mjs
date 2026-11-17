@@ -33,7 +33,7 @@ async function callPolly(client, SynthesizeSpeechCommand, text, voice, engine, r
       return await res.AudioStream.transformToByteArray();
     } catch (e) {
       lastErr = e;
-      await sleep(retryDelayMs * (attempt + 1));
+      if (attempt < RETRIES) await sleep(retryDelayMs * (attempt + 1));
     }
   }
   throw lastErr;
@@ -56,22 +56,28 @@ export async function synthAll(lines, {
       hashes[line.id] = hash; ok.add(line.id); skipped.push(line.id);
       return;
     }
-    let bytes, usedFallback = false;
+    let bytes, usedFallback = false, usedEngine = engine;
     try {
       bytes = await callPolly(client, SynthesizeSpeechCommand, line.speech, voice, engine, retryDelayMs);
     } catch (e) {
       log(`[synth] ${line.id}: ${engine} 실패(${e?.message ?? e}), ${fallbackEngine}로 대체`);
       try {
         bytes = await callPolly(client, SynthesizeSpeechCommand, line.speech, voice, fallbackEngine, retryDelayMs);
-        usedFallback = true;
+        usedFallback = true; usedEngine = fallbackEngine;
       } catch (e2) {
         log(`[synth] ${line.id}: 실패(${e2?.message ?? e2})`);
         failed.push(line.id);
         return;
       }
     }
-    writeFileSync(file, bytes);
-    hashes[line.id] = hash; ok.add(line.id); synthesized.push(line.id);
+    try {
+      writeFileSync(file, bytes);
+    } catch (e) {
+      log(`[synth] ${line.id}: 파일 쓰기 실패(${e?.message ?? e})`);
+      failed.push(line.id);
+      return;
+    }
+    hashes[line.id] = usedFallback ? speechHash(line.speech, voice, usedEngine) : hash; ok.add(line.id); synthesized.push(line.id);
     if (usedFallback) fallbacks.push(line.id);
   };
 
@@ -85,6 +91,16 @@ export async function synthAll(lines, {
 
   const manifest = buildManifest(lines.filter((l) => ok.has(l.id)), { voice, engine, hashes });
   return { manifest, synthesized, skipped, failed, fallbacks };
+}
+
+// 이번 실행이 실패한 항목은 이전 manifest의 항목(파일이 남아 있을 때)을 유지한다.
+export function mergeManifest(result, previous, outDir) {
+  const items = { ...result.manifest.items };
+  for (const id of result.failed) {
+    const prev = previous?.items?.[id];
+    if (prev && existsSync(join(outDir, prev.file))) items[id] = prev;
+  }
+  return { ...result.manifest, items };
 }
 
 function arg(argv, name, def) {
@@ -101,12 +117,14 @@ async function main(argv) {
   const { templateLines } = await import("./templates.mjs");
   const index = JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8"));
   const lines = templateLines(index.gus, month);
-  if (existsSync(scriptsPath)) {
-    const scripts = JSON.parse(readFileSync(scriptsPath, "utf8"));
-    for (const [id, s] of Object.entries(scripts.items ?? {})) lines.push({ id, caption: s.caption, speech: s.speech });
-  } else {
-    console.warn(`[synth] ${scriptsPath} 없음: 구 해설 없이 템플릿만 합성`);
+  let scripts;
+  try {
+    scripts = JSON.parse(readFileSync(scriptsPath, "utf8"));
+  } catch (e) {
+    console.error(`[synth] --scripts ${scriptsPath}를 읽을 수 없습니다(${e.message}). 구 해설 없이 manifest를 쓰지 않으므로 중단합니다. 먼저 write.mjs를 실행하세요.`);
+    process.exit(1);
   }
+  for (const [id, s] of Object.entries(scripts.items ?? {})) lines.push({ id, caption: s.caption, speech: s.speech });
 
   const manifestPath = join(outDir, "manifest.json");
   let previous;
@@ -117,7 +135,7 @@ async function main(argv) {
   const client = new PollyClient({ region: "us-east-1" });
   const r = await synthAll(lines, { client, outDir, previous });
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(manifestPath, JSON.stringify(r.manifest, null, 2));
+  writeFileSync(manifestPath, JSON.stringify(mergeManifest(r, previous, outDir), null, 2));
   console.log(`합성 ${r.synthesized.length}, 건너뜀 ${r.skipped.length}, neural 대체 ${r.fallbacks.length}, 실패 ${r.failed.length}`);
   if (r.failed.length) { console.error("실패:", r.failed.join(", ")); process.exitCode = 1; }
 }
