@@ -1,0 +1,29 @@
+/* #/stage 배치. 조각(상단·안내·자막·시작: hud.css, 투표: vote.css, 미리보기·커서·진단: overlay.css)을 한 화면에 놓는다.
+   토큰은 app.css. 카드·반복 그림자·페이드인 없음. 본체 .stage(뷰어 캔버스)와 겹치지 않게 stage-view 아래 이름만 쓴다. */
+body[data-route="stage"] { overflow: hidden; overscroll-behavior: none; }
+
+.stage-view { position: fixed; inset: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--font); }
+
+.stage-3d { position: absolute; inset: 0; }
+.stage-3d canvas { display: block; }
+
+/* 3D 위의 글자 층. 포인터는 3D(커서·hover)로 통과시키고 버튼만 받는다. */
+.stage-ui { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; pointer-events: none; }
+.stage-ui button { pointer-events: auto; }
+.stage-top { background: linear-gradient(rgb(11 16 32 / 0.9), rgb(11 16 32 / 0)); }
+
+/* 투표: 상단 줄 아래 가로 띠(카드 아님). */
+.stage-vote-host { background: rgb(11 16 32 / 0.82); border-block: 1px solid var(--line); }
+.stage-live-host { padding: 6px 48px 0; }
+.vote-live { margin: 0; font-size: 24px; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; text-shadow: 0 2px 8px var(--night); }
+
+.stage-bottom { margin-top: auto; padding-bottom: 6px; background: linear-gradient(rgb(11 16 32 / 0), rgb(11 16 32 / 0.85) 45%); }
+.stage-bottom .stage-hints { padding-right: 360px; } /* 오른쪽 아래 미리보기와 겹치지 않게 */
+
+/* 카메라는 1280×720이라 미리보기도 16:9로 둔다(골격 canvas 좌표가 잘린 영상과 어긋나지 않게). */
+.stage-view .stage-preview { width: 320px; aspect-ratio: 16 / 9; bottom: 64px; z-index: 20; }
+.stage-view .stage-diag { bottom: 64px; z-index: 20; }
+.stage-view .stage-fail { inset: 0; font-size: 22px; }
+
+/* 시작 화면은 3D 지도를 어둡게 덮는다. */
+.stage-start-host { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; background: rgb(11 16 32 / 0.86); }

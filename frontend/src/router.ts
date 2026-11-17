@@ -1,8 +1,8 @@
-// 해시 라우터 (CONTRACTS 8절): #/ 랜딩, #/ar, #/3d, #/host. 알 수 없으면 랜딩.
+// 해시 라우터 (CONTRACTS 8절, CONTRACTS-stage 9절): #/ 랜딩, #/ar, #/3d, #/host, #/stage. 알 수 없으면 랜딩.
 
-export type Route = "landing" | "ar" | "3d" | "host";
+export type Route = "landing" | "ar" | "3d" | "host" | "stage";
 
-const ROUTES: Record<string, Route> = { "": "landing", ar: "ar", "3d": "3d", host: "host" };
+const ROUTES: Record<string, Route> = { "": "landing", ar: "ar", "3d": "3d", host: "host", stage: "stage" };
 
 export function parseRoute(hash: string): Route {
   if (hash === "" || hash === "#") return "landing";

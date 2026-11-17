@@ -1,4 +1,4 @@
-// 앱 셸: 설정 → 실시간(없으면 모의) → 연결(기다리지 않음) → 데이터 인덱스 → 라우터.
+// 앱 셸: 설정 → 실시간(없으면 모의)·무대 채널 → 연결(기다리지 않음) → 데이터 인덱스 → 라우터.
 import "./app.css";
 import { loadConfig } from "./config";
 import { loadGu, loadIndex } from "./data/loader";
@@ -9,6 +9,7 @@ import { createMockRealtime } from "./realtime/mock";
 import type { RealtimeClient } from "./realtime/types";
 import { redirect, startRouter, type Route } from "./router";
 import { createSeoulScene } from "./scene/seoulScene";
+import { makeStageChannel } from "./stage/net/stageChannel";
 import { bindRemote } from "./state/remote";
 import { createStore, initialStateFor } from "./state/store";
 import { toast } from "./ui/toast";
@@ -35,11 +36,32 @@ function loadAr(): Promise<ArDeps> {
   return arModule;
 }
 
+/** 무대(#/stage)는 발표자 노트북에서만 쓴다. 무대 조립·손 인식 코드가 관객 번들에 섞이지 않게 들어갈 때 읽는다. */
+let stageModule: Promise<MountView | null> | null = null;
+function loadStage(): Promise<MountView | null> {
+  stageModule ??= import("./views/stageView")
+    .then((m): MountView | null => m.mountStageView)
+    .catch((err: unknown) => {
+      console.warn("[stage] 무대 화면 모듈을 읽지 못함", err);
+      stageModule = null;
+      return null;
+    });
+  return stageModule;
+}
+
+function renderStageError(root: HTMLElement): void {
+  root.innerHTML = `<main class="boot boot--fail"><h1>무대 화면을 불러오지 못했습니다</h1>` +
+    `<p>네트워크를 확인한 뒤 다시 시도해 주세요.</p>` +
+    `<button type="button" class="btn btn-primary" data-retry>다시 시도</button></main>`;
+  root.querySelector("[data-retry]")?.addEventListener("click", () => location.reload());
+}
+
 const TITLES: Record<Route, string> = {
   landing: "서울이 선다",
   ar: "카메라로 보기 | 서울이 선다",
   "3d": "3D로 보기 | 서울이 선다",
   host: "발표자 화면 | 서울이 선다",
+  stage: "무대 | 서울이 선다",
 };
 
 function makeRealtime(events: Parameters<typeof createAppSyncRealtime>[0] | null): RealtimeClient {
@@ -69,6 +91,8 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const realtime = makeRealtime(config.events);
   const connecting = realtime.connect().catch((err) => console.warn("[realtime] 연결 실패", err));
+  const stageChannel = makeStageChannel(config.events);
+  void stageChannel.connect().catch((err) => console.warn("[stage] 무대 채널 연결 실패", err));
 
   let index;
   try {
@@ -84,7 +108,8 @@ async function main(): Promise<void> {
   void connecting.then(() => store.dispatch({ type: "conn", status: realtime.status }));
 
   let route: Route = "landing";
-  bindRemote({ realtime, store, index, isHost: () => route === "host" });
+  // 발표자 화면(호스트·무대)은 원본이라 원격 상태를 따라가지 않는다.
+  bindRemote({ realtime, store, index, isHost: () => route === "host" || route === "stage" });
 
   const geo = loadGeo();
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -93,6 +118,7 @@ async function main(): Promise<void> {
     index,
     config,
     realtime,
+    stageChannel,
     loadGu: (month, gu) => loadGu(month, gu),
     navigate: redirect,
     toast,
@@ -101,7 +127,7 @@ async function main(): Promise<void> {
     ar: AR_UNAVAILABLE, // #/ar 진입 직전에 실제 모듈로 바뀐다
   };
 
-  const views: Record<Route, MountView> = {
+  const views: Record<Exclude<Route, "stage">, MountView> = {
     landing: createLandingView(westToEast(geo)),
     ar: mountArView,
     "3d": mountOrbitView,
@@ -123,6 +149,15 @@ async function main(): Promise<void> {
       ctx.ar = await loadAr();
       if (mine !== seq) return; // 기다리는 사이 다른 화면으로 이동했다
       root.innerHTML = "";
+    }
+    if (next === "stage") {
+      root.innerHTML = `<p class="boot" role="status">무대 화면을 준비하는 중</p>`;
+      const mountStage = await loadStage();
+      if (mine !== seq) return;
+      root.innerHTML = "";
+      if (!mountStage) { renderStageError(root); return; }
+      unmount = mountStage(root, ctx);
+      return;
     }
     unmount = views[next](root, ctx);
   });

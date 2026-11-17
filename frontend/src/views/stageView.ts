@@ -1,0 +1,716 @@
+// #/stage: 발표 화면의 3D 서울을 손짓·마우스·키로 움직이고 미리 만든 해설을 튼다 (CONTRACTS-stage 9절, 설계 5.1~5.4).
+// 조립 규칙은 createStageController(DOM 없음, 테스트 대상)에 있고, mountStageView는 DOM을 잇는 얇은 껍데기다.
+// 이 파일은 main.ts가 #/stage에 들어갈 때만 동적으로 읽는다(관객 번들에 무대·MediaPipe 코드가 들어가지 않게).
+import "../stage/ui/vote.css";
+import "../stage/ui/hud.css";
+import "../stage/ui/overlay.css";
+import "../stage/stage.css";
+import { WebGLRenderer, type Camera } from "three";
+import { GU_ORDER } from "../data/gu";
+import type { DataIndex, GuData, Metric, Stat } from "../data/types";
+import type { ConnStatus, RealtimeClient, StateMessage } from "../realtime/types";
+import type { SeoulScene } from "../scene/seoulScene";
+import { NARRATION_IDS, diffEffects } from "../stage/effects";
+import { createCursorMapper, toNdc, type CursorMapper } from "../stage/hands/cursor";
+import { DEFAULT_GESTURE_CONFIG, createGestureMachine, type GestureMachine } from "../stage/hands/gestureMachine";
+import { MODEL_PATH, startHandSource, type HandSource, type HandSourceError } from "../stage/hands/recognizer";
+import { createVoteCounter, type VoteCounter } from "../stage/hands/voteCounter";
+import { attachPointer, keyToAction, type PointerHandlers, type UiAction } from "../stage/keys";
+import { createNarrator, loadManifest, type AudioLike, type NarrationManifest, type Narrator } from "../stage/narrator";
+import { toStageMessage, toVoteMessage } from "../stage/net/messages";
+import type { StageChannel } from "../stage/net/stageChannel";
+import { createStageRenderer } from "../stage/stageRenderer";
+import { defaultCandidates, initialStageState, parseVoteParam, reduceStage } from "../stage/stageState";
+import { VOTE_MAX, type Effect, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState } from "../stage/types";
+import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
+import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
+import { renderVotePanel } from "../stage/ui/votePanel";
+import { fmtMonth } from "../ui/format";
+import type { MountView, ViewContext } from "./types";
+
+/** 투표 진행(voteTick)·패널 초 표시·진단·인식 실패 감시 간격 */
+export const VOTE_TICK_MS = 250;
+/** 늦게 들어온 관객을 위해 state·stage를 다시 보내는 간격(본체 호스트와 같다) */
+export const HEARTBEAT_MS = 10_000;
+/** HandSource.errors(연속 인식 실패)가 이 값을 넘으면(30fps로 약 2초) 마우스로 바꾼다. */
+export const HAND_ERROR_LIMIT = 60;
+/** 주 손이 이 시간 이상 안 보여야 진짜로 놓친 것. gestureMachine이 추적 손을 기억하는 시간과 같다. */
+const CURSOR_GAP_MS = DEFAULT_GESTURE_CONFIG.releaseAfterMs;
+
+const HAND_FAIL: Record<HandSourceError, string> = {
+  denied: "카메라 권한이 거부되어 마우스로 진행합니다",
+  "no-camera": "카메라를 찾지 못해 마우스로 진행합니다",
+  "model-missing": "동작 인식 모델이 없어 마우스로 진행합니다",
+  "wasm-failed": "동작 인식을 시작하지 못해 마우스로 진행합니다",
+  unsupported: "이 브라우저는 동작 인식을 지원하지 않아 마우스로 진행합니다",
+};
+const HAND_ERRORS_TOAST = "손 인식이 계속 실패해 마우스로 바꿨습니다. G로 다시 시도할 수 있어요";
+const STARTING_HTML = `<section class="stage-start"><p class="start-note" role="status">카메라와 동작 인식을 준비하는 중</p></section>`;
+
+// ---------- 순수 도우미 ----------
+
+/** URL 후보(유효 이름, 앞 세 개)를 먼저, 모자라면 기본 후보(1위·13위·25위)로, 그래도 모자라면 GU_ORDER로 채운다. */
+export function voteCandidates(hash: string, summary: Record<string, Stat>, metric: Metric): [string, string, string] {
+  const picked = (parseVoteParam(hash, GU_ORDER) ?? []).slice(0, 3);
+  for (const g of [...defaultCandidates(summary, metric, GU_ORDER), ...GU_ORDER]) {
+    if (picked.length >= 3) break;
+    if (!picked.includes(g)) picked.push(g);
+  }
+  return [picked[0]!, picked[1]!, picked[2]!];
+}
+
+/** 한글 입력 상태에서는 V가 "ㅍ"로 들어온다. 물리 키(code)가 글자 키면 그 영문 소문자로 바꾼다. */
+export function normalizeKey(key: string, code: string | undefined): string {
+  if (!code || !/^[ㄱ-ㅣ]$/.test(key)) return key;
+  const m = /^Key([A-Z])$/.exec(code);
+  return m ? m[1]!.toLowerCase() : key;
+}
+
+/** 상단 연결 표시: 두 채널(본체 state, 무대 stage)이 모두 열려야 "실시간 연결". */
+export function combineConn(a: ConnStatus, b: ConnStatus): ConnStatus {
+  if (a === "open" && b === "open") return "open";
+  if ([a, b].some((s) => s === "error" || s === "closed")) return "error";
+  return "connecting";
+}
+
+// ---------- 컨트롤러 ----------
+
+export type UiPart = "top" | "hints" | "caption" | "vote" | "live" | "diag" | "start";
+
+/** 컨트롤러가 화면에 내보내는 것. html이 null이면 그 부분을 숨긴다. */
+export interface StageUi {
+  set(part: UiPart, html: string | null): void;
+  cursor(p: Point | null, cls: string): void;                     // p: 화면 정규 좌표
+  preview(mode: PreviewMode, video: HTMLVideoElement | null): void;
+  skeleton(frame: HandFrame | null): void;                          // null이면 지움
+}
+
+export type StageScene = Pick<SeoulScene, "setOverview" | "focus" | "setHover" | "lift" | "setLayout" | "pick">;
+export interface StageCamera { camera: Camera; setMode(mode: StageMode, instant?: boolean): void; }
+export type StartResult = { ok: true; source: HandSource } | { ok: false; reason: HandSourceError };
+export interface StageClock { now(): number; every(ms: number, fn: () => void): () => void; }
+
+export interface StageControllerDeps {
+  index: DataIndex;
+  month: string;
+  loadGu(month: string, gu: string): Promise<GuData>;
+  realtime: Pick<RealtimeClient, "publish" | "status" | "onStatus">;
+  stageChannel: Pick<StageChannel, "publish" | "status" | "onStatus">;
+  scene: StageScene;
+  renderer: StageCamera | null;                                     // WebGL이 없으면 null(pick 없음)
+  narrator: Narrator;
+  ui: StageUi;
+  toast(message: string): void;
+  startHands(): Promise<StartResult>;
+  hash(): string;
+  modelReady?(): Promise<boolean>;
+  /** 본체 state를 발행할 때마다(호스트 화면과 store를 맞추는 용도) */
+  onState?(msg: StateMessage): void;
+  clock?: StageClock;
+  gestures?: GestureMachine;
+  cursor?: CursorMapper;
+  counter?: VoteCounter;
+}
+
+export interface KeyLike { key: string; code?: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; }
+/** 투표 패널 버튼의 data 속성(이벤트 위임) */
+export interface PanelTarget { set?: string | null; confirm?: boolean; method?: string | null; }
+
+export interface StageController {
+  readonly state: StageState;
+  readonly publishFailed: boolean;
+  readonly started: boolean;
+  /** "무대 시작"/"마우스로 시작" 클릭 안에서 부른다(오디오 잠금 해제가 동기로 먼저 일어난다). */
+  start(mode: InputMode): Promise<void>;
+  /** 처리했으면 true(호출자가 preventDefault). */
+  key(e: KeyLike): boolean;
+  readonly pointer: PointerHandlers;
+  panel(t: PanelTarget): void;
+  dispose(): void;
+}
+
+const systemClock: StageClock = {
+  now: () => Date.now(),
+  every(ms, fn) {
+    const h = setInterval(fn, ms);
+    return () => clearInterval(h);
+  },
+};
+
+export function createStageController(deps: StageControllerDeps): StageController {
+  const clock = deps.clock ?? systemClock;
+  const gestures = deps.gestures ?? createGestureMachine();
+  const cursor = deps.cursor ?? createCursorMapper();
+  const counter = deps.counter ?? createVoteCounter();
+  const { scene, renderer, narrator, ui, index } = deps;
+
+  let state = initialStageState(deps.month, "mouse");
+  let phase: "idle" | "starting" | "running" | "disposed" = "idle";
+  let modelReady = true;
+  const failed = { state: false, stage: false };
+  let reviewRow = 0;
+  let hintsOn = true;
+  let diagOn = false;
+  let preview: PreviewMode = "video";
+  let source: HandSource | null = null;
+  let offFrame: (() => void) | null = null;
+  let acquiring = false;
+  let liveHands = 0;
+  let gesture = { name: "None", score: 0 };
+  let handPoint: Point | null = null;
+  let handSeenAt: number | null = null;
+  let handLost = true;
+  let mousePoint: Point | null = null;
+  let mouseDown = false;
+  let focusToken = 0;
+  let focusCache: { key: string; data: GuData } | null = null;
+  const shown = new Map<UiPart, string | null>();
+  const stops: (() => void)[] = [];
+
+  const summary = () => index.summary[state.month] ?? {};
+  const publishFailed = () => failed.state || failed.stage;
+
+  // ----- 그리기: 바뀐 부분만 내보낸다(투표 패널은 상태가 바뀌거나 남은 초가 바뀔 때만 다시 그려진다).
+  const setPart = (part: UiPart, html: string | null) => {
+    if (shown.has(part) && shown.get(part) === html) return;
+    shown.set(part, html);
+    ui.set(part, html);
+  };
+  const renderTop = () => setPart("top", renderTopBar(state, {
+    conn: combineConn(deps.realtime.status, deps.stageChannel.status), publishFailed: publishFailed(), monthLabel: fmtMonth(state.month),
+  }));
+  const renderHintsPart = () => setPart("hints", hintsOn ? renderHints(state) : null);
+  const renderVote = () => {
+    const v = state.vote;
+    setPart("vote", v ? renderVotePanel(v, { reviewRow, now: clock.now() }) : null);
+    // 패널에는 실시간 손 개수 칸이 없다. 카메라로 세는 동안만 따로 한 줄(집계값 counts는 리듀서 상태 그대로).
+    const live = v !== null && v.phase === "counting" && v.method === "camera";
+    setPart("live", live ? `<p class="vote-live">카메라: 지금 ${liveHands}손</p>` : null);
+  };
+  const renderDiagPart = () => setPart("diag", diagOn ? renderDiag({
+    fps: source?.fps ?? 0, hands: liveHands, gesture: gesture.name, score: gesture.score,
+    cursor: state.input === "hands" ? (handLost ? null : handPoint) : mousePoint,
+    loadMs: source?.loadMs ?? null, delegate: source?.delegate ?? null, input: state.input,
+  }) : null);
+  const renderStartPart = () => setPart("start",
+    phase === "idle" ? renderStart({ modelReady, reason: null }) : phase === "starting" ? STARTING_HTML : null);
+  const renderCursor = () => {
+    const visible = state.input === "hands" && source !== null && handPoint !== null && !handLost;
+    ui.cursor(handPoint, cursorClass({ visible, fist: gestures.fist, hovering: state.hover !== null }));
+  };
+  const renderAll = () => { renderTop(); renderHintsPart(); renderVote(); renderDiagPart(); renderStartPart(); renderCursor(); };
+
+  // ----- 발행: 채널마다 실패를 따로 기억한다(한쪽 성공이 다른 쪽 실패를 지우지 않게).
+  const setFailed = (ch: keyof typeof failed, v: boolean) => {
+    if (phase === "disposed" || failed[ch] === v) return;
+    failed[ch] = v;
+    renderTop();
+  };
+  const track = (ch: keyof typeof failed, send: () => Promise<void>) => {
+    let p: Promise<void>;
+    try { p = send(); } catch (err) { p = Promise.reject(err); }
+    p.then(() => setFailed(ch, false), (err: unknown) => {
+      if (!failed[ch]) console.warn(`[stage] ${ch} 발행 실패`, err);
+      setFailed(ch, true);
+    });
+  };
+  const publishState = () => {
+    const msg: StateMessage = { v: 1, type: "state", month: state.month, gu: state.focus, metric: state.metric, ts: clock.now() };
+    deps.onState?.(msg);
+    track("state", () => deps.realtime.publish(msg));
+  };
+  const publishStage = () => {
+    const msg = toStageMessage(state, clock.now());
+    track("stage", () => deps.stageChannel.publish(msg));
+  };
+  const publishVote = () => {
+    if (!state.vote) return;
+    const msg = toVoteMessage(state.vote, clock.now());
+    track("stage", () => deps.stageChannel.publish(msg));
+  };
+
+  // ----- 씬
+  function drawFocus(): void {
+    const { focus: gu, month } = state;
+    const mine = ++focusToken;
+    if (gu === null) { scene.focus(null, null, state.metric); return; }
+    const key = `${month}|${gu}`;
+    if (focusCache?.key === key) { scene.focus(gu, focusCache.data, state.metric); return; }
+    deps.loadGu(month, gu)
+      .then((d): GuData | null => d, (err: unknown) => { console.warn("[stage] 구 자료를 읽지 못함", err); return null; })
+      .then((d) => {
+        if (phase === "disposed" || mine !== focusToken) return;
+        if (d) focusCache = { key, data: d };
+        scene.focus(gu, d, state.metric);
+      });
+  }
+
+  function run(fx: Effect): void {
+    switch (fx.type) {
+      case "scene.layout":
+        scene.setLayout(fx.mode, summary(), state.metric);
+        renderer?.setMode(fx.mode);
+        return;
+      case "scene.lift": scene.lift(fx.gu); return;
+      case "scene.focus": drawFocus(); return;
+      case "scene.hover": scene.setHover(fx.gu); return;
+      case "scene.data":
+        scene.setOverview(summary(), state.metric);
+        if (state.mode === "spread") scene.setLayout("spread", summary(), state.metric); // 새 지표·월로 다시 줄 세움
+        if (state.focus !== null) drawFocus();
+        return;
+      case "narrate": narrator.say(fx.id, { interrupt: fx.interrupt, protect: fx.protect }); return;
+      case "counter.reset": counter.reset(); return;
+      case "publish.state": publishState(); return;
+      case "publish.stage": publishStage(); return;
+      case "publish.vote": publishVote(); return;
+    }
+  }
+
+  function dispatch(e: StageEvent): void {
+    if (phase === "disposed") return;
+    const prev = state;
+    const next = reduceStage(prev, e);
+    if (next === prev) return;
+    state = next;
+    const pv = prev.vote;
+    const nv = next.vote;
+    if (nv && (!pv || pv.round !== nv.round)) reviewRow = 0;
+    // effects는 counting에 들어갈 때만 counter.reset을 낸다. counting 중 카메라 방식으로 바뀌면(N·토글·setInput)
+    // 그 전에 쌓인 프레임을 버리고 지금부터 센다.
+    if (pv && nv && pv.round === nv.round && pv.phase === "counting" && nv.phase === "counting" && pv.method !== "camera" && nv.method === "camera") {
+      counter.reset();
+    }
+    for (const fx of diffEffects(prev, next)) run(fx);
+    renderTop();
+    renderHintsPart();
+    renderVote();
+    if (prev.hover !== next.hover || prev.input !== next.input) renderCursor();
+  }
+
+  // ----- 입력
+  const pickAt = (p: Point): string | null => {
+    if (!renderer) return null;
+    const n = toNdc(p);
+    return scene.pick(n.x, n.y, renderer.camera);
+  };
+  const hoverTo = (gu: string | null) => { if (gu !== state.hover) dispatch({ type: "hover", gu }); };
+
+  function onFrame(f: HandFrame): void {
+    if (phase !== "running") return;
+    const v = state.vote;
+    const hands = state.input === "hands";
+    const out = hands ? gestures.push(f, { voting: v !== null && v.phase !== "result" }) : null;
+    liveHands = out ? out.handCount : Math.min(f.hands.length, VOTE_MAX);
+    // 카메라로 세는 동안은 손이 0개인 프레임까지 모두 넣는다(0이 500ms 이어지면 0표).
+    if (v && v.phase === "counting" && v.method === "camera") counter.push(f.t, liveHands);
+    if (preview !== "hidden") ui.skeleton(f);
+    if (!out) return;
+
+    const p = out.primary === null ? undefined : f.hands[out.primary];
+    gesture = p ? { name: p.gesture, score: p.score } : { name: "None", score: 0 };
+    if (p) {
+      if (handLost) { cursor.reset(); handLost = false; } // 진짜로 놓쳤다가 다시 잡으면 필터를 새로 시작
+      handPoint = cursor.map(p.landmarks, f.t);
+      handSeenAt = f.t;
+      hoverTo(pickAt(handPoint));
+    } else if (!handLost && (handSeenAt === null || f.t - handSeenAt >= CURSOR_GAP_MS)) {
+      // 추적 손이 잠깐(releaseAfterMs 미만) 안 보이는 동안에는 커서와 hover를 그대로 둔다.
+      handLost = true;
+      hoverTo(null);
+    }
+    renderCursor();
+    for (const e of out.events) dispatch({ type: e.type });
+  }
+
+  function attach(src: HandSource): void {
+    source = src;
+    offFrame = src.onFrame(onFrame);
+    ui.preview(preview, src.video);
+  }
+  function detach(): void {
+    offFrame?.();
+    offFrame = null;
+    if (source) {
+      try { source.stop(); } catch (err) { console.warn("[stage] 인식기 정지 실패", err); }
+    }
+    source = null;
+    liveHands = 0;
+    handLost = true;
+    ui.preview(preview, null);
+    ui.skeleton(null);
+  }
+  function useHands(): void {
+    gestures.reset();
+    cursor.reset();
+    handLost = true;
+    dispatch({ type: "setInput", input: "hands", now: clock.now() });
+  }
+  async function acquireHands(): Promise<void> {
+    if (acquiring) return;
+    acquiring = true;
+    let r: StartResult;
+    try { r = await deps.startHands(); } catch (err) {
+      console.warn("[stage] 손 인식 시작 실패", err);
+      r = { ok: false, reason: "wasm-failed" };
+    }
+    acquiring = false;
+    if (phase === "disposed") { if (r.ok) r.source.stop(); return; }
+    if (!r.ok) { deps.toast(HAND_FAIL[r.reason]); return; }
+    attach(r.source);
+    useHands();
+  }
+  function toggleInput(): void {
+    if (state.input === "hands") { dispatch({ type: "setInput", input: "mouse", now: clock.now() }); return; }
+    if (source) useHands();
+    else void acquireHands();
+  }
+
+  function uiAction(a: UiAction): void {
+    switch (a) {
+      case "toggleInput": toggleInput(); return;
+      case "mute":
+        narrator.setMuted(!narrator.muted);
+        deps.toast(narrator.muted ? "해설 소리를 껐습니다" : "해설 소리를 켰습니다");
+        return;
+      case "preview":
+        preview = nextPreviewMode(preview);
+        ui.preview(preview, source?.video ?? null);
+        if (preview === "hidden") ui.skeleton(null);
+        return;
+      case "diag": diagOn = !diagOn; renderDiagPart(); return;
+      case "hints": hintsOn = !hintsOn; renderHintsPart(); return;
+      case "monthPrev":
+      case "monthNext": {
+        const i = index.months.indexOf(state.month);
+        const j = a === "monthPrev" ? i - 1 : i + 1;
+        if (i >= 0 && j >= 0 && j < index.months.length) dispatch({ type: "month", month: index.months[j]! });
+        return;
+      }
+      case "voteToggle": {
+        const v = state.vote;
+        if (v && v.phase !== "result") dispatch({ type: "voteCancel" });
+        else dispatch({ type: "voteStart", candidates: voteCandidates(deps.hash(), summary(), state.metric), now: clock.now() });
+        return;
+      }
+      case "rowUp":
+      case "rowDown":
+        reviewRow = Math.max(0, Math.min(2, reviewRow + (a === "rowUp" ? -1 : 1)));
+        renderVote();
+        return;
+    }
+  }
+
+  function tick(): void {
+    const now = clock.now();
+    if (source && source.errors > HAND_ERROR_LIMIT) {
+      detach();
+      if (state.input === "hands") dispatch({ type: "setInput", input: "mouse", now });
+      renderCursor();
+      deps.toast(HAND_ERRORS_TOAST);
+    }
+    if (state.vote) dispatch({ type: "voteTick", now, cameraCount: counter.result() });
+    renderVote();
+    renderDiagPart();
+  }
+  const heartbeat = () => { publishState(); publishStage(); };
+
+  const pointer: PointerHandlers = {
+    move(p) {
+      if (phase !== "running") return;
+      mousePoint = p;
+      hoverTo(pickAt(p));
+    },
+    down() {
+      if (phase !== "running") return;
+      mouseDown = true;
+      dispatch({ type: "grab" });
+    },
+    up() {
+      if (phase !== "running" || !mouseDown) return;
+      mouseDown = false;
+      dispatch({ type: "release" });
+    },
+    leave() {
+      if (phase !== "running") return;
+      mousePoint = null;
+      pointer.up();
+      if (state.input === "mouse") hoverTo(null);
+    },
+  };
+
+  // ----- 처음 그림: 시작 화면 뒤로 전체 지도가 보인다.
+  scene.setOverview(summary(), state.metric);
+  renderer?.setMode("map", true);
+  stops.push(narrator.onCaption((t) => setPart("caption", renderCaption(t))));
+  stops.push(deps.realtime.onStatus(() => renderTop()), deps.stageChannel.onStatus(() => renderTop()));
+  setPart("caption", renderCaption(null));
+  renderAll();
+  deps.modelReady?.().then(
+    (ok) => { modelReady = ok; renderStartPart(); },
+    () => { modelReady = false; renderStartPart(); },
+  );
+
+  return {
+    get state() { return state; },
+    get publishFailed() { return publishFailed(); },
+    get started() { return phase === "running"; },
+    async start(mode) {
+      if (phase !== "idle") return;
+      // 오토플레이 정책: 사용자 클릭 처리 안에서 await보다 먼저 불러야 한다.
+      void narrator.unlock().catch(() => {});
+      phase = "starting";
+      renderStartPart();
+      if (mode === "hands") await acquireHands();
+      if (phase !== "starting") return; // 기다리는 사이 화면을 떠났다
+      phase = "running";
+      renderAll();
+      stops.push(clock.every(VOTE_TICK_MS, tick), clock.every(HEARTBEAT_MS, heartbeat));
+      narrator.say(NARRATION_IDS.hello, { interrupt: true });
+      publishState();
+      publishStage();
+    },
+    key(e) {
+      if (phase !== "running") return false;
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      const r = keyToAction(normalizeKey(e.key, e.code), state, { reviewRow, now: clock.now() });
+      if (!r) return false;
+      // 누르고 있어 반복되는 키는 줄 이동만 받는다(투표 토글·펼치기가 연달아 일어나지 않게). 반복도 기본 동작은 막는다.
+      if (e.repeat && !(r.kind === "ui" && (r.action === "rowUp" || r.action === "rowDown"))) return true;
+      if (r.kind === "event") dispatch(r.event);
+      else uiAction(r.action);
+      return true;
+    },
+    pointer,
+    panel(t) {
+      if (phase !== "running" || !state.vote) return;
+      const now = clock.now();
+      if (t.set) {
+        const m = /^([0-2]):(\d)$/.exec(t.set);
+        if (!m) return;
+        const i = Number(m[1]);
+        if (state.vote.phase === "review") reviewRow = i;
+        dispatch({ type: "voteSet", index: i, n: Number(m[2]), now });
+        renderVote();
+      } else if (t.confirm) {
+        dispatch({ type: "voteConfirm", now });
+      } else if (t.method === "camera" || t.method === "manual") {
+        dispatch({ type: "voteMethod", method: t.method, now });
+      }
+    },
+    dispose() {
+      if (phase === "disposed") return;
+      phase = "disposed";
+      for (const stop of stops.splice(0)) stop();
+      detach();
+      narrator.stop();
+    },
+  };
+}
+
+// ---------- DOM 껍데기 ----------
+
+const PARTS: readonly UiPart[] = ["top", "hints", "caption", "vote", "live", "diag", "start"];
+
+const LAYOUT = `<div class="stage-view">` +
+  `<div class="stage-3d" data-3d></div>` +
+  `<div class="stage-ui">` +
+  `<div data-part="top"></div>` +
+  `<div class="stage-vote-host" data-part="vote" hidden></div>` +
+  `<div class="stage-live-host" data-part="live" hidden></div>` +
+  `<div class="stage-bottom"><div data-part="caption"></div><div data-part="hints"></div></div>` +
+  `</div>` +
+  // 거울 규칙(overlay.css): .is-mirror는 video만 뒤집는다. 골격 canvas는 뒤집지 않고 drawSkeleton(mirror=true)이 x를 뒤집는다.
+  `<div class="stage-preview is-mirror is-hidden" data-preview><canvas data-skeleton aria-hidden="true"></canvas></div>` +
+  `<div class="stage-cursor is-hidden" data-cursor aria-hidden="true"></div>` +
+  `<div data-part="diag" hidden></div>` +
+  `<div class="stage-start-host" data-part="start"></div>` +
+  `</div>`;
+
+/** 다시 그려도 키보드 포커스가 같은 투표 버튼에 남게 한다. */
+function voteFocusKey(el: Element | null): string | null {
+  if (!(el instanceof HTMLElement)) return null;
+  if (el.dataset.voteSet && /^\d:\d$/.test(el.dataset.voteSet)) return `[data-vote-set="${el.dataset.voteSet}"]`;
+  if (el.dataset.voteMethod === "camera" || el.dataset.voteMethod === "manual") return `[data-vote-method="${el.dataset.voteMethod}"]`;
+  if (el.hasAttribute("data-vote-confirm")) return "[data-vote-confirm]";
+  return null;
+}
+
+function domUi(root: HTMLElement) {
+  const parts = Object.fromEntries(PARTS.map((p) => [p, root.querySelector<HTMLElement>(`[data-part="${p}"]`)!])) as Record<UiPart, HTMLElement>;
+  const previewEl = root.querySelector<HTMLElement>("[data-preview]")!;
+  const canvas = root.querySelector<HTMLCanvasElement>("[data-skeleton]")!;
+  const ctx2d = canvas.getContext("2d");
+  const cursorEl = root.querySelector<HTMLElement>("[data-cursor]")!;
+  const voteEl = parts.vote;
+
+  // 투표 패널 버튼을 누르는 사이(pointerdown~click)에 패널이 바뀌면 click이 사라진다. 누르는 동안에는 미뤄 둔다.
+  let held = false;
+  let pending: { html: string | null } | null = null;
+  const write = (part: UiPart, html: string | null) => {
+    const el = parts[part];
+    el.hidden = html === null;
+    if (part !== "vote") { el.innerHTML = html ?? ""; return; }
+    const active = document.activeElement;
+    const key = active && el.contains(active) ? voteFocusKey(active) : null;
+    el.innerHTML = html ?? "";
+    if (key) el.querySelector<HTMLElement>(key)?.focus({ preventScroll: true });
+  };
+  const hold = () => { held = true; };
+  const unhold = () => {
+    if (!held) return;
+    held = false;
+    setTimeout(() => {
+      if (held || !pending) return;
+      const { html } = pending;
+      pending = null;
+      write("vote", html);
+    }, 0);
+  };
+  voteEl.addEventListener("pointerdown", hold);
+  window.addEventListener("pointerup", unhold);
+  window.addEventListener("pointercancel", unhold);
+
+  const ui: StageUi = {
+    set(part, html) {
+      if (part === "vote") {
+        if (held) { pending = { html }; return; }
+        pending = null; // 클릭 처리로 새로 그린 것이 미뤄 둔 옛 내용보다 나중이다
+      }
+      write(part, html);
+    },
+    cursor(p, cls) {
+      cursorEl.className = cls;
+      if (p) {
+        cursorEl.style.left = `${(p.x * 100).toFixed(2)}%`;
+        cursorEl.style.top = `${(p.y * 100).toFixed(2)}%`;
+      }
+    },
+    preview(mode, video) {
+      const current = previewEl.querySelector("video");
+      if (current && current !== video) current.remove();
+      if (video && video.parentElement !== previewEl) {
+        video.setAttribute("aria-hidden", "true");
+        previewEl.prepend(video);
+      }
+      previewEl.classList.toggle("is-hidden", mode === "hidden" || !video);
+      previewEl.classList.toggle("is-skeleton", mode === "skeleton");
+    },
+    skeleton(frame) {
+      if (!ctx2d) return;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      if (!frame) { ctx2d.clearRect(0, 0, w, h); return; }
+      drawSkeleton(ctx2d, frame, w, h, true);
+    },
+  };
+  const dispose = () => {
+    voteEl.removeEventListener("pointerdown", hold);
+    window.removeEventListener("pointerup", unhold);
+    window.removeEventListener("pointercancel", unhold);
+  };
+  return { ui, parts, dispose };
+}
+
+async function modelOnServer(): Promise<boolean> {
+  // SPA 폴백(200 + text/html)은 모델 없음으로 본다(recognizer와 같은 규칙).
+  const res = await fetch(MODEL_PATH, { method: "HEAD" });
+  return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+}
+
+function tryWebGL(): WebGLRenderer | null {
+  try {
+    return new WebGLRenderer({ antialias: true, alpha: true });
+  } catch (err) {
+    console.warn("[stage] WebGL을 만들 수 없음", err);
+    return null;
+  }
+}
+
+function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest | null): () => void {
+  root.innerHTML = LAYOUT;
+  const layer = root.querySelector<HTMLElement>("[data-3d]")!;
+  const dom = domUi(root);
+
+  // WebGLRenderer를 여기서 만들어 넘긴다: 떠날 때 forceContextLoss로 컨텍스트를 바로 반납하려고.
+  const gl = tryWebGL();
+  const renderer = gl ? createStageRenderer(layer, { reducedMotion: ctx.reducedMotion, makeRenderer: () => gl }) : null;
+  const city = ctx.createScene();
+  let offRender = () => {};
+  if (renderer) {
+    renderer.world.add(city.group); // 씬 group이 조명을 들고 있다
+    offRender = renderer.onFrame((dt) => city.update(dt, renderer.camera));
+  } else {
+    layer.innerHTML = `<p class="stage-fail">이 기기에서는 3D를 그릴 수 없습니다. 투표와 해설은 그대로 진행할 수 있습니다.</p>`;
+  }
+
+  const narrator = createNarrator(manifest, { createAudio: () => new Audio() as unknown as AudioLike });
+  const controller = createStageController({
+    index: ctx.index,
+    month: ctx.store.getState().month || (ctx.index.months.at(-1) ?? ""),
+    loadGu: ctx.loadGu,
+    realtime: ctx.realtime,
+    stageChannel: ctx.stageChannel,
+    scene: city,
+    renderer,
+    narrator,
+    ui: dom.ui,
+    toast: ctx.toast,
+    startHands: () => startHandSource(),
+    hash: () => location.hash,
+    modelReady: modelOnServer,
+    onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
+  });
+
+  const onStart = (ev: Event) => {
+    const btn = (ev.target as Element).closest<HTMLElement>("[data-start]");
+    if (btn) void controller.start(btn.dataset.start === "hands" ? "hands" : "mouse");
+  };
+  const onVote = (ev: Event) => {
+    const btn = (ev.target as Element).closest<HTMLButtonElement>("button");
+    if (!btn || btn.disabled) return;
+    controller.panel({ set: btn.dataset.voteSet ?? null, confirm: btn.hasAttribute("data-vote-confirm"), method: btn.dataset.voteMethod ?? null });
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if (controller.key(ev)) ev.preventDefault();
+  };
+  dom.parts.start.addEventListener("click", onStart);
+  dom.parts.vote.addEventListener("click", onVote);
+  document.addEventListener("keydown", onKey);
+  const offPointer = attachPointer(layer, controller.pointer);
+
+  return () => {
+    controller.dispose();
+    offPointer();
+    document.removeEventListener("keydown", onKey);
+    dom.parts.start.removeEventListener("click", onStart);
+    dom.parts.vote.removeEventListener("click", onVote);
+    dom.dispose();
+    offRender();
+    city.dispose();
+    renderer?.dispose();
+    // 화면을 여러 번 오가도 WebGL 컨텍스트 상한에 걸리지 않게 즉시 반납한다(orbitView와 같다).
+    gl?.forceContextLoss();
+  };
+}
+
+export const mountStageView: MountView = (root, ctx) => {
+  // 무대는 원본이다: 다른 화면의 원격 상태를 따라가지 않는다(main.ts도 #/stage에서 원격을 무시한다).
+  ctx.store.dispatch({ type: "local" });
+  root.innerHTML = `<p class="boot" role="status">무대를 준비하는 중</p>`;
+  let alive = true;
+  let teardown: (() => void) | null = null;
+  // 해설 manifest가 있어야 narrator를 만들 수 있다. 없거나 깨졌으면 null(자막·음성 없이 진행).
+  void loadManifest().then((manifest) => {
+    if (!alive) return;
+    teardown = build(root, ctx, manifest);
+  });
+  return () => {
+    alive = false;
+    teardown?.();
+    root.innerHTML = "";
+  };
+};

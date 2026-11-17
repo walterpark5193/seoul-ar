@@ -68,6 +68,7 @@ function renderHost(url: string): string {
     `</section>` +
     `<section class="host-panel" aria-label="발표자 조정"><div data-controls></div>` +
     `<div class="host-tools"><button type="button" class="btn btn-secondary" data-action="slide">슬라이드 모드 <kbd>S</kbd></button>` +
+    `<a class="host-exit" href="#/stage">무대 열기</a>` +
     `<a class="host-exit" href="#/">처음으로</a></div></section>` +
     `<button type="button" class="slide-exit" data-action="slide">슬라이드 모드 끝내기 <kbd>Esc</kbd></button>` +
     `</div>`;
