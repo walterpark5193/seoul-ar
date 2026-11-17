@@ -27,3 +27,27 @@
 .vote-method[aria-pressed="true"] { color: var(--night); background: var(--ink); border-color: var(--ink); }
 .vote-key { font-size: 18px; }
 .vote-n:focus-visible, .vote-method:focus-visible, .vote-confirm:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+
+/* 1280 폭 미만: 투표 패널 글자도 화면 폭에 맞춘다(숫자 버튼은 44px 터치 크기 유지). 1280 이상은 위 크기 그대로. */
+@media (max-width: 1279px) {
+  .vote-panel { padding: 10px 20px; }
+  .vote-top { gap: 12px; min-height: 40px; }
+  .vote-head { font-size: clamp(14px, 2.4vw, 30px); }
+  .vote-timer { font-size: clamp(14px, 2.2vw, 28px); }
+  .vote-warn, .vote-confirm { font-size: clamp(12px, 1.8vw, 22px); }
+  .vote-row { grid-template-columns: minmax(56px, 140px) minmax(80px, 1fr) auto auto auto; gap: 12px; padding: 6px 0; }
+  .vote-gu { font-size: clamp(14px, 2.4vw, 30px); }
+  .vote-count { font-size: clamp(16px, 2.8vw, 34px); }
+  .vote-src, .vote-key { font-size: clamp(11px, 1.6vw, 18px); }
+  .vote-n { font-size: clamp(14px, 1.8vw, 22px); }
+  .vote-foot, .vote-method { font-size: clamp(12px, 1.6vw, 20px); }
+}
+
+/* 700 폭 미만(폰): 후보 줄을 두 줄로(이름·막대·표 / 숫자 버튼), 버튼은 감싸 넘긴다. */
+@media (max-width: 699px) {
+  .vote-panel { padding: 8px 12px; }
+  .vote-row { grid-template-columns: auto 1fr auto auto; row-gap: 6px; }
+  .vote-btns { grid-column: 1 / -1; flex-wrap: wrap; gap: 4px; }
+  .vote-foot { flex-wrap: wrap; justify-content: flex-start; }
+}
+

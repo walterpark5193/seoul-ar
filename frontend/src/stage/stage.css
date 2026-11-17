@@ -3,7 +3,9 @@
 body[data-route="stage"] { overflow: hidden; overscroll-behavior: none; }
 
 .stage-view {
-  --preview-w: clamp(200px, 18vw, 320px);   /* 1280 폭 프로젝터에서 230px, 1920 폭에서 320px */
+  /* 미리보기 폭. 높이(폭 ÷ 카메라 비율)가 화면의 25%를 넘지 않게 --preview-ar(stageView가 실제 영상 비율로 넣음)로 줄인다.
+     1280 폭 이상(프로젝터)은 예전 그대로 1280 폭에서 230px, 1920 폭에서 320px. */
+  --preview-w: min(clamp(200px, 18vw, 320px), calc(25vh * var(--preview-ar, 1.7778)));
   --diag-w: 220px;
   --edge: 16px;
   position: fixed; inset: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--font);
@@ -38,3 +40,31 @@ body[data-route="stage"] { overflow: hidden; overscroll-behavior: none; }
 
 /* 시작 화면은 3D 지도를 어둡게 덮는다. */
 .stage-start-host { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; background: rgb(11 16 32 / 0.86); }
+
+/* ---------- 폰 (Task 14) ----------
+   길게 누르기("누르고 있기: 들어올리기")가 브라우저의 글자 선택·복사 메뉴나 스크롤로 새지 않게 한다.
+   포인터 층(.stage-3d)과 그 위 글자(상단·안내·자막)가 선택되지 않게 하고, 기본 터치 동작을 끈다.
+   버튼 누르기(투표·시작)는 그대로 된다. */
+.stage-view, .stage-3d, .stage-top, .stage-hints, .stage-caption, .stage-bottom {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 1280 폭 미만: 프로젝터용 크기를 화면 폭에 맞춰 줄인다(글자 크기는 hud.css·vote.css). 미리보기는 폭의 30%, 최대 200px. */
+@media (max-width: 1279px) {
+  .stage-view { --preview-w: min(30vw, 200px, calc(25vh * var(--preview-ar, 1.7778))); --diag-w: 180px; --edge: 10px; }
+  .stage-live-host { padding: 6px 20px 8px; }
+  .vote-live { font-size: clamp(14px, 2vw, 24px); }
+  .stage-view .stage-caption { padding-inline: 16px; }
+  .stage-view .stage-fail { font-size: clamp(15px, 2.2vw, 22px); }
+}
+
+/* 700 폭 미만(폰): 미리보기는 가장 작게, 자막은 세 줄까지, 여백을 줄인다. 안내 줄은 처음에 숨긴다(stageView, H로 켬). */
+@media (max-width: 699px) {
+  .stage-view { --preview-w: min(26vw, 120px, calc(25vh * var(--preview-ar, 1.7778))); --diag-w: 150px; --edge: 8px; }
+  .stage-view .stage-caption { padding-inline: 10px; }
+  .stage-live-host { padding: 4px 12px 6px; }
+}
+

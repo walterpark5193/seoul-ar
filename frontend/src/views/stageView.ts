@@ -26,7 +26,7 @@ import {
   VOTE_MAX, VOTE_TIMING, type Effect, type GestureEvent, type GestureOutput, type HandFrame, type HandObs, type InputMode, type Point, type StageEvent, type StageMode, type StageState,
 } from "../stage/types";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
-import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
+import { cursorClass, drawSkeleton, nextPreviewMode, previewVisible, renderDiag, type PreviewMode } from "../stage/ui/overlay";
 import { renderVotePanel } from "../stage/ui/votePanel";
 import { fmtMonth } from "../ui/format";
 import type { MountView, ViewContext } from "./types";
@@ -199,6 +199,8 @@ export interface StageControllerDeps {
   rotator?: Rotator;
   /** 움직임 줄이기: 정면 복귀(rotate.reset)를 보간 없이 즉시. */
   reducedMotion?: boolean;
+  /** 안내 줄을 처음에 보일지(기본 true). 좁은 화면(폰)은 false로 시작하고 H로 켠다(Task 14). */
+  hintsDefault?: boolean;
 }
 
 export interface KeyLike { key: string; code?: string; repeat?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; }
@@ -252,7 +254,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let modelReady = true;
   const failed = { state: false, stage: false };
   let reviewRow = 0;
-  let hintsOn = true;
+  let hintsOn = deps.hintsDefault ?? true;
   let diagOn = false;
   let preview: PreviewMode = "video";
   let source: HandSource | null = null;
@@ -780,8 +782,10 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       else rotator.move(p, clock.now());
     },
     // 누르기는 지금의 grab 길: 구 위면 들기, 빈 지도면 돌리기, 관성 중이면 잡기(리듀서 13.4).
-    down() {
+    // p: 누른 자리. 터치는 누르기 전에 pointermove가 없을 수 있어, 그 자리로 먼저 옮긴 뒤 잡는다(손가락 아래 구를 들게).
+    down(p) {
       if (phase !== "running") return;
+      if (p) pointer.move(p);
       retryUnlock();
       mouseDown = true;
       dispatch({ type: "grab" }, "mouse");
@@ -889,6 +893,18 @@ export function createStageController(deps: StageControllerDeps): StageControlle
 
 // ---------- DOM 껍데기 ----------
 
+/** 폰처럼 좁은 화면(Task 14): 안내 줄은 숨긴 채 시작한다(H로 켬). */
+function narrowScreen(): boolean {
+  try { return window.matchMedia("(max-width: 699px)").matches; } catch { return false; }
+}
+
+/** 미리보기 video에 살아 있는 카메라 영상이 붙어 있나. */
+function streamLive(video: HTMLVideoElement | null): boolean {
+  const s = video?.srcObject;
+  if (!s || typeof (s as MediaStream).getVideoTracks !== "function") return false;
+  return (s as MediaStream).getVideoTracks().some((t) => t.readyState === "live");
+}
+
 const PARTS: readonly UiPart[] = ["top", "hints", "caption", "vote", "live", "diag", "start"];
 
 const LAYOUT = `<div class="stage-view">` +
@@ -926,7 +942,11 @@ function domUi(root: HTMLElement) {
   // 미리보기 상자를 실제 카메라 비율에 맞춘다(1280×720 요청을 못 지킨 4:3 웹캠에서도 골격이 영상과 맞게).
   let fitted: HTMLVideoElement | null = null;
   const fit = () => {
-    if (fitted && fitted.videoWidth > 0 && fitted.videoHeight > 0) previewEl.style.aspectRatio = `${fitted.videoWidth} / ${fitted.videoHeight}`;
+    if (fitted && fitted.videoWidth > 0 && fitted.videoHeight > 0) {
+      previewEl.style.aspectRatio = `${fitted.videoWidth} / ${fitted.videoHeight}`;
+      // 높이가 화면의 25%를 넘지 않게 stage.css가 폭을 이 비율로 줄인다(세로 영상인 폰 전면 카메라 대비).
+      viewEl.style.setProperty("--preview-ar", (fitted.videoWidth / fitted.videoHeight).toFixed(4));
+    }
   };
 
   // 투표 패널 버튼을 누르는 사이(pointerdown~click)에 패널이 바뀌면 click이 사라진다. 누르는 동안에는 미뤄 둔다.
@@ -985,7 +1005,7 @@ function domUi(root: HTMLElement) {
         video?.addEventListener("loadedmetadata", fit);
         fit();
       }
-      const visible = mode !== "hidden" && video !== null;
+      const visible = previewVisible({ mode, hasVideo: video !== null, streamLive: streamLive(video) });
       previewEl.classList.toggle("is-hidden", !visible);
       previewEl.classList.toggle("is-skeleton", mode === "skeleton");
       viewEl.classList.toggle("has-preview", visible); // 아래 띠(자막·안내)가 오른쪽 미리보기 칸을 비운다
@@ -1085,6 +1105,7 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
       },
       onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
       reducedMotion: ctx.reducedMotion,
+      hintsDefault: !narrowScreen(),
     });
     undo.push(() => controller.dispose());
 

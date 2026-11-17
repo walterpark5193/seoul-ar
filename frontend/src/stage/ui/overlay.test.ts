@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextPreviewMode, HAND_CONNECTIONS, drawSkeleton, cursorClass, renderDiag, type Ctx2DLike } from "./overlay";
+import { nextPreviewMode, HAND_CONNECTIONS, drawSkeleton, cursorClass, renderDiag, previewVisible, type Ctx2DLike } from "./overlay";
 import type { HandFrame, HandObs } from "../types";
 import { readFileSync } from "node:fs";
 
@@ -117,3 +117,15 @@ describe("preview css keeps the camera video rendered", () => {
     expect(skel.map((r) => r.body).join(";")).toMatch(/opacity\s*:\s*0\s*(;|$)/);
   });
 });
+
+describe("previewVisible (Task 14)", () => {
+  it("shows only a live camera stream that is not hidden", () => {
+    expect(previewVisible({ mode: "video", hasVideo: true, streamLive: true })).toBe(true);
+    expect(previewVisible({ mode: "skeleton", hasVideo: true, streamLive: true })).toBe(true);
+    expect(previewVisible({ mode: "hidden", hasVideo: true, streamLive: true })).toBe(false);
+    // 마우스 모드에서 카메라가 꺼져 있으면 보여 줄 것이 없다
+    expect(previewVisible({ mode: "video", hasVideo: true, streamLive: false })).toBe(false);
+    expect(previewVisible({ mode: "video", hasVideo: false, streamLive: false })).toBe(false);
+  });
+});
+

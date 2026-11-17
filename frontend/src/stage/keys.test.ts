@@ -73,14 +73,64 @@ describe("attachPointer", () => {
     const calls: string[] = [];
     const pts: any[] = [];
     const off = attachPointer(el, { move: (p) => pts.push(p), down: () => calls.push("down"), up: () => calls.push("up"), leave: () => calls.push("leave") });
-    expect([...l.keys()].sort()).toEqual(["pointerdown", "pointerleave", "pointermove", "pointerup"]);
+    expect([...l.keys()].sort()).toEqual(["contextmenu", "pointercancel", "pointerdown", "pointerleave", "pointermove", "pointerup"]);
     l.get("pointermove")!({ clientX: 200, clientY: 100 });
     expect(pts).toEqual([{ x: 0.5, y: 0.5 }]);
     l.get("pointerdown")!({}); l.get("pointerup")!({}); l.get("pointerleave")!({});
     expect(calls).toEqual(["down", "up", "leave"]);
     off();
     expect(l.size).toBe(0);
-    expect(removed.length).toBe(4);
+    expect(removed.length).toBe(6);
+  });
+});
+
+describe("attachPointer on a phone (Task 14)", () => {
+  const mk = () => {
+    const l = new Map<string, (e: any) => void>();
+    const captured: number[] = [];
+    const el: any = {
+      addEventListener: (t: string, f: any) => l.set(t, f),
+      removeEventListener: () => {},
+      getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 100 }),
+      setPointerCapture: (id: number) => captured.push(id),
+    };
+    return { l, el, captured };
+  };
+  const ev = (o: Record<string, unknown>) => {
+    const e = { prevented: false, preventDefault() { e.prevented = true; }, ...o };
+    return e;
+  };
+
+  it("down receives the pointerdown point itself (a touch has no pointermove before it)", () => {
+    const { l, el } = mk();
+    const downs: unknown[] = [];
+    attachPointer(el, { move() {}, down: (p) => downs.push(p), up() {}, leave() {} });
+    l.get("pointerdown")!(ev({ clientX: 250, clientY: 75, pointerType: "touch", pointerId: 3 }));
+    expect(downs).toEqual([{ x: 0.75, y: 0.25 }]);
+  });
+
+  it("touch pointerdown prevents the browser default (selection, callout, scroll) and captures the pointer; mouse does not prevent", () => {
+    const { l, el, captured } = mk();
+    attachPointer(el, { move() {}, down() {}, up() {}, leave() {} });
+    const touch = ev({ clientX: 150, clientY: 60, pointerType: "touch", pointerId: 7 });
+    l.get("pointerdown")!(touch);
+    expect(touch.prevented).toBe(true);
+    expect(captured).toEqual([7]);
+    const mouse = ev({ clientX: 150, clientY: 60, pointerType: "mouse", pointerId: 1 });
+    l.get("pointerdown")!(mouse);
+    expect(mouse.prevented).toBe(false);
+    expect(captured).toEqual([7, 1]);
+  });
+
+  it("blocks the long-press context menu and treats pointercancel as up", () => {
+    const { l, el } = mk();
+    const calls: string[] = [];
+    attachPointer(el, { move() {}, down() {}, up: () => calls.push("up"), leave() {} });
+    const menu = ev({});
+    l.get("contextmenu")!(menu);
+    expect(menu.prevented).toBe(true);
+    l.get("pointercancel")!(ev({}));
+    expect(calls).toEqual(["up"]);
   });
 });
 

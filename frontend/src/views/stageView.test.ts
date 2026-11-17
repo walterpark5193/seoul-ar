@@ -1019,6 +1019,24 @@ describe("stage controller", () => {
     expect(s.c.state.vote?.round).toBe(2);
   });
 
+  it("a touch press with no pointermove before it lifts the gu under the finger (Task 14)", async () => {
+    const s = setup({ pick: (x) => (x > 0 ? "강남구" : null) });
+    await s.c.start("mouse");
+    s.c.pointer.down({ x: 0.75, y: 0.25 });
+    expect(s.scene.pick).toHaveBeenLastCalledWith(0.5, 0.5, s.renderer.camera);
+    expect(s.c.state.lifted).toBe("강남구");
+    s.c.pointer.up();
+    expect(s.c.state.focus).toBe("강남구");
+  });
+
+  it("a narrow screen starts with the hints line hidden; H still shows it (Task 14)", async () => {
+    const s = setup({ extra: { hintsDefault: false } });
+    await s.c.start("mouse");
+    expect(s.view.parts.hints ?? null).toBeNull();
+    s.key("h");
+    expect(s.view.parts.hints).toContain("누르고 있기");
+  });
+
   it("ui keys toggle hints, diag, preview and mute", async () => {
     const s = setup();
     await s.c.start("hands");
