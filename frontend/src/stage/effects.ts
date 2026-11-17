@@ -62,6 +62,9 @@ export function diffEffects(prev: StageState, next: StageState): Effect[] {
     pubState = true;
   }
 
+  // 투표를 취소하면(결과 화면이 아닌 투표가 사라짐) 보호된 소개·안내 클립까지 멈추고 대기열을 비운다.
+  if (pv && pv.phase !== "result" && !nv) narr.push({ type: "narrate.stop" });
+
   if (nv) {
     if (newRound(pv, nv)) narr.push(narrate(NARRATION_IDS.voteIntro, true, true));
     if (nv.phase === "prompt" && (newRound(pv, nv) || pv!.phase !== "prompt" || pv!.index !== nv.index)) {
@@ -70,6 +73,7 @@ export function diffEffects(prev: StageState, next: StageState): Effect[] {
     if (entered(pv, nv, "counting")) counter.push({ type: "counter.reset" });
     if (resultEntered && nv.winner) {
       const n = nv.counts[nv.candidates.indexOf(nv.winner)] ?? 0;
+      narr.push({ type: "narrate.stop" }); // 남은 투표 안내(보호 클립)가 결과 해설을 밀어내지 않게
       narr.push(narrate(nv.allZero ? NARRATION_IDS.voteNone(nv.winner) : NARRATION_IDS.voteResult(nv.winner, n), true));
       narr.push(narrate(NARRATION_IDS.gu(next.month, nv.winner), false));
       pubVote.push({ type: "publish.vote" });

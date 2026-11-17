@@ -8,11 +8,11 @@ import { createCursorMapper } from "../stage/hands/cursor";
 import { createVoteCounter } from "../stage/hands/voteCounter";
 import { ALLOWED_KEYS, type StageChannelMessage } from "../stage/net/messages";
 import { createMockStageChannel } from "../stage/net/stageChannel";
-import { createNarrator, type AudioLike, type Narrator } from "../stage/narrator";
+import { createNarrator, type AudioLike, type NarrationItem, type Narrator } from "../stage/narrator";
 import type { GestureName, HandFrame, HandObs, Point, Vec3 } from "../stage/types";
 import {
   HAND_ERROR_LIMIT, HEARTBEAT_MS, VOTE_TICK_MS,
-  createStageController, normalizeKey, voteCandidates,
+  createStageController, normalizeKey, voteCandidates, voteTiming,
   type StageControllerDeps, type StartResult, type UiPart,
 } from "./stageView";
 
@@ -92,8 +92,10 @@ function fakeScene(pick: (x: number, y: number) => string | null = () => "강남
 function fakeNarrator() {
   const said: { id: string; interrupt: boolean; protect: boolean }[] = [];
   const captions = new Set<(t: string | null) => void>();
+  const blockedSubs = new Set<() => void>();
   let muted = false;
   let unlocks = 0;
+  let blocked = false;
   const narrator: Narrator = {
     say(id, opts) { said.push({ id, interrupt: !!opts?.interrupt, protect: !!opts?.protect }); },
     stop: vi.fn(),
@@ -101,9 +103,70 @@ function fakeNarrator() {
     get muted() { return muted; },
     onCaption(cb) { captions.add(cb); return () => { captions.delete(cb); }; },
     async unlock() { unlocks++; },
+    clipMs: () => null,
+    onBlocked(cb) { blockedSubs.add(cb); return () => { blockedSubs.delete(cb); }; },
+    get blocked() { return blocked; },
   };
-  return { narrator, said, caption: (t: string | null) => { for (const cb of captions) cb(t); }, get unlocks() { return unlocks; } };
+  return {
+    narrator, said,
+    caption: (t: string | null) => { for (const cb of captions) cb(t); },
+    block: () => { blocked = true; for (const cb of blockedSubs) cb(); },
+    unblock: () => { blocked = false; },
+    get unlocks() { return unlocks; },
+    get blockedSubs() { return blockedSubs.size; },
+  };
 }
+
+type FakeClock = ReturnType<typeof fakeClock>;
+
+/** 가짜 시계 위 한 번짜리 타이머(fakeClock.every로 만든다). */
+function once(clock: FakeClock, ms: number, fn: () => void): () => void {
+  const stop = clock.every(ms, () => { stop(); fn(); });
+  return stop;
+}
+
+/** 실제 narrator + 가짜 오디오: 재생하면 manifest ms 뒤에 ended(가짜 시계). 클립마다 시작·끝 시각을 기록한다. */
+function timedNarrator(clock: FakeClock, items: Record<string, NarrationItem>) {
+  const log: { id: string; start: number; end: number | null }[] = [];
+  const byFile = new Map(Object.entries(items).map(([id, it]) => [`/narration/${it.file}`, { id, ms: it.ms ?? 1000 }]));
+  let playing: { entry: (typeof log)[number]; stop: () => void } | null = null;
+  const halt = () => {
+    if (!playing) return;
+    playing.entry.end ??= clock.now();
+    playing.stop();
+    playing = null;
+  };
+  const audio: AudioLike = {
+    src: "", muted: false, onended: null, onerror: null,
+    async play() {
+      halt();
+      const clip = byFile.get(audio.src);
+      if (!clip) return; // 잠금 해제용 무음 클립
+      const entry = { id: clip.id, start: clock.now(), end: null as number | null };
+      log.push(entry);
+      const stop = once(clock, clip.ms, () => { entry.end = clock.now(); playing = null; audio.onended?.(); });
+      playing = { entry, stop };
+    },
+    pause: () => halt(),
+  };
+  const narrator = createNarrator({ v: 1, voice: "Seoyeon", engine: "generative", items }, {
+    createAudio: () => audio,
+    timers: { set: (fn, ms) => once(clock, ms, fn), clear: (h) => (h as () => void)() },
+  });
+  const nowPlaying = () => log.filter((e) => e.end === null).map((e) => e.id);
+  return { narrator, log, nowPlaying };
+}
+
+/** 리뷰 실측 길이(MP3 프레임 계산)에 가까운 투표 해설. 후보는 가격 기본 후보(종로구·서대문구·강동구). */
+const VOTE_ITEMS: Record<string, NarrationItem> = {
+  "stage-hello": { file: "stage-hello.mp3", caption: "무대를 시작합니다.", ms: 3840 },
+  "vote-intro": { file: "vote-intro.mp3", caption: "투표를 시작합니다.", ms: 3770 },
+  "vote-prompt-종로구": { file: "vp-1.mp3", caption: "종로구 보고 싶은 분, 손 들어 주세요.", ms: 2690 },
+  "vote-prompt-서대문구": { file: "vp-2.mp3", caption: "서대문구 보고 싶은 분, 손 들어 주세요.", ms: 2930 },
+  "vote-prompt-강동구": { file: "vp-3.mp3", caption: "강동구 보고 싶은 분, 손 들어 주세요.", ms: 2520 },
+  "vote-result-종로구-2": { file: "vr.mp3", caption: "종로구가 2표로 선정됐습니다.", ms: 2400 },
+  "gu-202611-종로구": { file: "gu.mp3", caption: "종로구 해설", ms: 13_000 },
+};
 
 function fakeUi() {
   const parts: Partial<Record<UiPart, string | null>> = {};
@@ -137,7 +200,10 @@ function hand(gesture: GestureName, cx = 0.5, cy = 0.5, score = 0.9): HandObs {
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function setup(o: { months?: string[]; hash?: string; start?: () => Promise<StartResult>; narrator?: Narrator; pick?: (x: number, y: number) => string | null; extra?: Partial<StageControllerDeps> } = {}) {
+function setup(o: {
+  months?: string[]; hash?: string; start?: () => Promise<StartResult>; narrator?: Narrator; makeNarrator?: (clock: FakeClock) => Narrator;
+  pick?: (x: number, y: number) => string | null; extra?: Partial<StageControllerDeps>;
+} = {}) {
   const clock = fakeClock();
   const ch = channels();
   const scene = fakeScene(o.pick);
@@ -153,7 +219,7 @@ function setup(o: { months?: string[]; hash?: string; start?: () => Promise<Star
   const deps: StageControllerDeps = {
     index, month: index.months.at(-1)!, loadGu,
     realtime: ch.realtime, stageChannel: ch.stageChannel,
-    scene, renderer, narrator: o.narrator ?? narr.narrator, ui: view.ui, toast,
+    scene, renderer, narrator: o.makeNarrator?.(clock) ?? o.narrator ?? narr.narrator, ui: view.ui, toast,
     startHands, hash: () => o.hash ?? "#/stage", clock, ...o.extra,
   };
   const c = createStageController(deps);
@@ -161,7 +227,15 @@ function setup(o: { months?: string[]; hash?: string; start?: () => Promise<Star
   const frame = (hands: HandObs[], dt = 33) => { t += dt; src.emit({ t, hands }); };
   const frames = (n: number, hands: HandObs[], dt = 33) => { for (let i = 0; i < n; i++) frame(hands, dt); };
   const key = (k: string, extra: Partial<{ code: string; repeat: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => c.key({ key: k, ...extra });
-  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, deps };
+  /** 카메라가 살아 있는 동안의 시간 흐름: 33ms마다 프레임을 내고 시계를 민다(프레임 먼저). */
+  const live = (ms: number, hands: HandObs[] = []) => {
+    for (let left = ms; left > 0; left -= 33) {
+      const step = Math.min(33, left);
+      frame(hands, step);
+      clock.advance(step);
+    }
+  };
+  return { c, clock, ...ch, scene, renderer, narr, view, toast, index, loadGu, src, startHands, frame, frames, key, live, deps };
 }
 
 describe("voteCandidates", () => {
@@ -645,6 +719,31 @@ describe("stage controller", () => {
     expect(s.narr.narrator.muted).toBe(true);
   });
 
+  it("audio blocked by the browser: toast once, the next key, click or panel press retries unlock (F2)", async () => {
+    const s = setup();
+    await s.c.start("mouse");
+    const base = s.narr.unlocks;
+    s.narr.block();
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    expect(s.toast).toHaveBeenLastCalledWith("소리가 막혔습니다 · 화면을 한 번 눌러 주세요");
+    s.key("h");
+    expect(s.narr.unlocks).toBe(base + 1);
+    s.c.pointer.down();
+    s.c.pointer.up();
+    expect(s.narr.unlocks).toBe(base + 2); // 아직 막혀 있으면 다음 입력에서 또 시도
+    s.key("v");
+    s.c.panel({ set: "0:1" });
+    expect(s.narr.unlocks).toBe(base + 4);
+    s.narr.unblock();
+    s.key("h");
+    s.c.pointer.down();
+    s.c.panel({ set: "0:2" });
+    expect(s.narr.unlocks).toBe(base + 4); // 풀린 뒤에는 다시 시도하지 않는다
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    s.c.dispose();
+    expect(s.narr.blockedSubs).toBe(0);
+  });
+
   it("captions from the narrator reach the caption part", async () => {
     const s = setup();
     await s.c.start("mouse");
@@ -665,5 +764,78 @@ describe("stage controller", () => {
     expect(s.narr.narrator.stop).toHaveBeenCalled();
     s.clock.advance(HEARTBEAT_MS);
     expect(s.wire).toHaveLength(2);
+  });
+});
+
+describe("vote narration timing (F1)", () => {
+  it("voteTiming: prompt clip + 300ms (at least 1500ms), intro clip length for the first prompt", () => {
+    const ms: Record<string, number> = { "vote-intro": 3770, "vote-prompt-종로구": 2690, "vote-prompt-서대문구": 900 };
+    const clipMs = (id: string) => ms[id] ?? null;
+    expect(voteTiming(["종로구", "서대문구", "강동구"], clipMs)).toEqual({ promptMs: [2990, 1500, 1500], introMs: 3770 });
+    expect(voteTiming(["종로구", "서대문구", "강동구"], () => null)).toEqual({ promptMs: [1500, 1500, 1500] });
+  });
+
+  it("manual vote: each prompt clip plays while its own candidate is on screen and is never pushed back", async () => {
+    let tn!: ReturnType<typeof timedNarrator>;
+    const s = setup({ makeNarrator: (clock) => (tn = timedNarrator(clock, VOTE_ITEMS)).narrator });
+    await s.c.start("mouse");
+    s.key("v");
+    const mismatches: string[] = [];
+    const check = () => {
+      const v = s.c.state.vote;
+      for (const id of tn.nowPlaying()) {
+        if (!id.startsWith("vote-prompt-")) continue;
+        const shown = v && v.phase !== "review" && v.phase !== "result" ? `vote-prompt-${v.candidates[v.index]}` : `(${v?.phase ?? "none"})`;
+        if (id !== shown) mismatches.push(`${s.clock.now()}: 음성 ${id} / 화면 ${shown}`);
+      }
+    };
+    // 발표자가 할 수 있는 가장 빠른 진행: 후보가 바뀌자마자 숫자를 누른다.
+    for (const n of ["2", "1", "0"]) {
+      const i = s.c.state.vote!.index;
+      s.key(n);
+      for (let k = 0; k < 200 && s.c.state.vote?.phase !== "review" && s.c.state.vote!.index === i; k++) {
+        s.clock.advance(VOTE_TICK_MS);
+        check();
+      }
+    }
+    expect(s.c.state.vote?.phase).toBe("review");
+    expect(mismatches).toEqual([]);
+    const prompts = tn.log.filter((e) => e.id.startsWith("vote-prompt-"));
+    expect(prompts.map((e) => e.id)).toEqual(["vote-prompt-종로구", "vote-prompt-서대문구", "vote-prompt-강동구"]);
+    for (const e of prompts) expect(e.end! - e.start).toBe(VOTE_ITEMS[e.id]!.ms); // 끝까지 들렸다(끊기지 않음)
+  });
+
+  it("camera vote: the first counting window opens after the intro and the first prompt were heard, and stays 5s", async () => {
+    let tn!: ReturnType<typeof timedNarrator>;
+    const s = setup({ makeNarrator: (clock) => (tn = timedNarrator(clock, VOTE_ITEMS)).narrator });
+    await s.c.start("hands");
+    s.key("v");
+    let countingAt: number | null = null;
+    for (let k = 0; k < 400 && countingAt === null; k++) {
+      s.live(33);
+      if (s.c.state.vote?.phase === "counting") countingAt = s.clock.now();
+    }
+    expect(s.c.state.input).toBe("hands");
+    const intro = tn.log.find((e) => e.id === "vote-intro")!;
+    const prompt = tn.log.find((e) => e.id === "vote-prompt-종로구")!;
+    expect(intro.end! - intro.start).toBe(3770);
+    expect(prompt.end).not.toBeNull();
+    expect(countingAt!).toBeGreaterThanOrEqual(prompt.end!);
+    expect(s.c.state.vote!.endsAt! - countingAt!).toBeGreaterThanOrEqual(5000 - VOTE_TICK_MS);
+  });
+
+  it("cancelling a vote stops its narration, starting again does not repeat old prompts", async () => {
+    let tn!: ReturnType<typeof timedNarrator>;
+    const s = setup({ makeNarrator: (clock) => (tn = timedNarrator(clock, VOTE_ITEMS)).narrator });
+    await s.c.start("mouse");
+    s.key("v");
+    s.clock.advance(500);
+    expect(tn.nowPlaying()).toEqual(["vote-intro"]);
+    s.key("v"); // 취소
+    expect(s.c.state.vote).toBeNull();
+    expect(tn.nowPlaying()).toEqual([]);
+    s.key("v");
+    s.clock.advance(3770 + 2690 + 2000);
+    expect(tn.log.map((e) => e.id).filter((id) => id.startsWith("vote-"))).toEqual(["vote-intro", "vote-intro", "vote-prompt-종로구"]);
   });
 });

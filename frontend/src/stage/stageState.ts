@@ -34,9 +34,18 @@ function manualWait(v: VoteState, now: number): number | null {
   return v.sources[v.index] === "manual" ? now + VOTE_TIMING.manualAdvanceMs : null;
 }
 
+/** 후보 i의 안내 단계 길이: voteStart가 준 값(최소 VOTE_TIMING.promptMs), 없거나 숫자가 아니면 기본값. */
+function promptFor(v: VoteState, i: Index): number {
+  const ms = v.promptMs?.[i];
+  return ms !== undefined && Number.isFinite(ms) ? Math.max(VOTE_TIMING.promptMs, ms) : VOTE_TIMING.promptMs;
+}
+
 /** 다음 후보로, 세 번째 뒤에는 집계 확인으로. */
 function advance(v: VoteState, now: number): VoteState {
-  if (v.index < 2) return { ...v, index: (v.index + 1) as Index, phase: "prompt", endsAt: now + VOTE_TIMING.promptMs };
+  if (v.index < 2) {
+    const index = (v.index + 1) as Index;
+    return { ...v, index, phase: "prompt", endsAt: now + promptFor(v, index) };
+  }
   return { ...v, phase: "review", endsAt: now + VOTE_TIMING.reviewMs, reviewEdited: false };
 }
 
@@ -135,14 +144,16 @@ export function reduceStage(s: StageState, e: StageEvent): StageState {
       if (voting(s)) return s;
       const round = s.round + 1;
       const [a, b, c] = e.candidates;
-      return {
-        ...s, round, lifted: null,
-        vote: {
-          round, candidates: [a, b, c], index: 0, phase: "prompt", method: s.input === "mouse" ? "manual" : "camera",
-          counts: [null, null, null], sources: [null, null, null], reviewEdited: false, winner: null, allZero: false,
-          endsAt: e.now + VOTE_TIMING.promptMs,
-        },
+      const vote: VoteState = {
+        round, candidates: [a, b, c], index: 0, phase: "prompt", method: s.input === "mouse" ? "manual" : "camera",
+        counts: [null, null, null], sources: [null, null, null], reviewEdited: false, winner: null, allZero: false,
+        endsAt: null,
       };
+      if (e.promptMs) vote.promptMs = [e.promptMs[0], e.promptMs[1], e.promptMs[2]];
+      // 첫 후보 안내는 소개 클립 뒤에 나온다: 소개 길이만큼 더 기다린다.
+      const intro = e.introMs !== undefined && Number.isFinite(e.introMs) && e.introMs > 0 ? e.introMs : 0;
+      vote.endsAt = e.now + intro + promptFor(vote, 0);
+      return { ...s, round, lifted: null, vote };
     }
 
     case "voteTick":

@@ -54,6 +54,14 @@ describe("diffEffects", () => {
     const e2 = diffEffects(s({ vote: vote({ phase: "prompt", index: 0 }) }), s({ vote: vote({ phase: "prompt", index: 0 }) }));
     expect(e2).toEqual([]);
   });
+  it("voteCancel stops the vote narration (queued and protected prompts)", () => {
+    for (const phase of ["prompt", "counting", "awaitManual", "review"] as const) {
+      expect(diffEffects(s({ vote: vote({ phase }) }), s({ vote: null }))).toEqual([{ type: "narrate.stop" }]);
+    }
+  });
+  it("the vote clearing after the result does not stop the result narration", () => {
+    expect(diffEffects(s({ vote: vote({ phase: "result", winner: "강남구" }) }), s({ vote: null }))).toEqual([]);
+  });
   it("counting entry resets counter", () => {
     expect(diffEffects(s({ vote: vote() }), s({ vote: vote({ phase: "counting" }) }))).toEqual([{ type: "counter.reset" }]);
   });
@@ -78,6 +86,7 @@ describe("diffEffects", () => {
     expect(e).toEqual([
       { type: "scene.layout", mode: "map" },
       { type: "scene.focus", gu: "마포구" },
+      { type: "narrate.stop" },
       { type: "narrate", id: "vote-result-마포구-2", interrupt: true, protect: false },
       { type: "narrate", id: "gu-202611-마포구", interrupt: false, protect: false },
       { type: "publish.state" },
@@ -93,6 +102,7 @@ describe("diffEffects", () => {
     expect(e).toEqual([
       { type: "scene.lift", gu: null },
       { type: "scene.focus", gu: "마포구" },
+      { type: "narrate.stop" },
       { type: "narrate", id: "vote-result-마포구-2", interrupt: true, protect: false },
       { type: "narrate", id: "gu-202611-마포구", interrupt: false, protect: false },
       { type: "publish.state" },
@@ -108,6 +118,7 @@ describe("diffEffects", () => {
     expect(e).toEqual([
       { type: "scene.layout", mode: "map" },
       { type: "scene.focus", gu: "노원구" },
+      { type: "narrate.stop" },
       { type: "narrate", id: "vote-none-노원구", interrupt: true, protect: false },
       { type: "narrate", id: "gu-202611-노원구", interrupt: false, protect: false },
       { type: "publish.state" },

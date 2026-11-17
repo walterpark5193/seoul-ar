@@ -102,6 +102,61 @@ describe("hand controls", () => {
   });
 });
 
+describe("vote prompt timing follows the narration (F1)", () => {
+  const timed = (now = 0): StageEvent => ({ type: "voteStart", candidates: C3, now, promptMs: [3000, 2800, 3200], introMs: 4000 });
+
+  it("first prompt waits for the intro clip plus its own prompt", () => {
+    const s = run(hands(), timed(0));
+    expect(vote(s).endsAt).toBe(7000);
+    expect(vote(run(s, tick(6999))).phase).toBe("prompt");
+    expect(vote(run(s, tick(7000))).phase).toBe("counting");
+  });
+
+  it("later prompts use their own clip length, without the intro (camera)", () => {
+    let s = run(hands(), timed(0), tick(7000));
+    expect(vote(s).endsAt).toBe(12_000);
+    s = run(s, tick(12_000, 2));
+    expect(vote(s).index).toBe(1);
+    expect(vote(s).endsAt).toBe(14_800);
+    s = run(s, tick(14_800));
+    expect(vote(s).endsAt).toBe(19_800);
+    s = run(s, tick(19_800, 1));
+    expect(vote(s).index).toBe(2);
+    expect(vote(s).endsAt).toBe(23_000);
+  });
+
+  it("manual: picking during the prompt does not shorten it, and the next prompt gets its own length", () => {
+    let s = run(mouse(), timed(0), set(0, 2, 100));
+    expect(vote(s).endsAt).toBe(7000);
+    s = run(s, tick(7000));
+    expect(vote(s).endsAt).toBe(7000 + VOTE_TIMING.manualAdvanceMs);
+    s = run(s, tick(8000));
+    expect(vote(s).index).toBe(1);
+    expect(vote(s).endsAt).toBe(10_800);
+  });
+
+  it("invalid or short values fall back to the minimum, missing intro adds nothing", () => {
+    const bad = run(hands(), { type: "voteStart", candidates: C3, now: 0, promptMs: [100, Number.NaN, -5], introMs: Number.NaN });
+    expect(vote(bad).endsAt).toBe(VOTE_TIMING.promptMs);
+    let s = run(bad, tick(1500), tick(6500, 1));
+    expect(vote(s).endsAt).toBe(6500 + VOTE_TIMING.promptMs);
+    s = run(s, tick(8000), tick(13_000, 1));
+    expect(vote(s).endsAt).toBe(13_000 + VOTE_TIMING.promptMs);
+    const noIntro = run(hands(), { type: "voteStart", candidates: C3, now: 0, promptMs: [2000, 2000, 2000] });
+    expect(vote(noIntro).endsAt).toBe(2000);
+    const negIntro = run(hands(), { type: "voteStart", candidates: C3, now: 0, introMs: -100 });
+    expect(vote(negIntro).endsAt).toBe(VOTE_TIMING.promptMs);
+  });
+
+  it("the caller's array is copied, not kept", () => {
+    const promptMs: [number, number, number] = [3000, 3000, 3000];
+    const s = run(hands(), { type: "voteStart", candidates: C3, now: 0, promptMs });
+    promptMs[1] = 9000;
+    const next = run(s, tick(3000), tick(8000, 1));
+    expect(vote(next).endsAt).toBe(11_000);
+  });
+});
+
 describe("vote flow (camera)", () => {
   it("prompt → counting → next candidate × 3 → review → result → cleared", () => {
     let s = run(hands(), { type: "hover", gu: "송파구" }, { type: "grab" }, start(0));

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createNarrator, loadManifest, type AudioLike, type NarrationManifest } from "./narrator";
+import { SILENT_WAV, createNarrator, loadManifest, type AudioLike, type NarrationManifest } from "./narrator";
 
 class FakeAudio implements AudioLike {
   src = ""; muted = false; onended: (() => void) | null = null; onerror: (() => void) | null = null;
@@ -97,9 +97,90 @@ describe("narrator", () => {
     expect(caps).toEqual(["에이", null]); expect(audio.onended).toBeNull(); end?.();
     expect(audio.played).toEqual(["/narration/a.mp3"]);
   });
-  it("unlock plays muted and restores", async () => {
-    const { audio, n } = setup(); await n.unlock();
-    expect(audio.played.length).toBe(1); expect(audio.pauses).toBe(1); expect(audio.muted).toBe(false);
+  it("unlock plays a silent clip, pauses and restores src and muted", async () => {
+    const { audio, n } = setup(); n.setMuted(true);
+    let mutedAtPlay: boolean | null = null;
+    audio.play = async function (this: FakeAudio) { mutedAtPlay = this.muted; this.played.push(this.src); };
+    await n.unlock();
+    expect(audio.played).toEqual([SILENT_WAV]);
+    expect(SILENT_WAV).toMatch(/^data:audio\/wav;base64,/);
+    expect(mutedAtPlay).toBe(false); // 무음 파일이라 음소거 없이 재생한다(음소거 재생은 잠금 해제로 치지 않는 브라우저가 있다)
+    expect(audio.pauses).toBe(1); expect(audio.muted).toBe(true); expect(audio.src).toBe("");
+  });
+  it("unlock does not pause a clip that started while it was waiting", async () => {
+    const { audio, n } = setup();
+    const p = n.unlock(); n.say("a", { interrupt: true });
+    await p;
+    expect(audio.src).toBe("/narration/a.mp3"); expect(audio.pauses).toBe(0);
+  });
+  it("unlock does not touch a clip that is playing", async () => {
+    const { audio, n } = setup(); n.say("a"); await Promise.resolve();
+    await n.unlock();
+    expect(audio.played).toEqual(["/narration/a.mp3"]); expect(audio.src).toBe("/narration/a.mp3");
+  });
+  it("failed clip shows its caption for max(ms, chars × 150, 2500)", () => {
+    const long = "가".repeat(30); // 30자 × 150 = 4500ms
+    const mf: NarrationManifest = { ...manifest, items: { ...manifest.items, l: { file: "l.mp3", caption: long }, s: { file: "s.mp3", caption: long, ms: 6000 } } };
+    const { audio, timers, n } = setup(mf); n.say("l"); n.say("s"); n.say("b");
+    audio.onerror!(); timers.advance(4499); expect(audio.src).toBe("/narration/l.mp3");
+    timers.advance(1); expect(audio.src).toBe("/narration/s.mp3");
+    audio.onerror!(); timers.advance(5999); expect(audio.src).toBe("/narration/s.mp3");
+    timers.advance(1); expect(audio.src).toBe("/narration/b.mp3");
+  });
+  it("clipMs: manifest ms, else caption length × 150, unknown id null", () => {
+    const { n } = setup();
+    expect(n.clipMs("m")).toBe(4000);
+    expect(n.clipMs("a")).toBe(300); // "에이" 2자
+    expect(n.clipMs("zzz")).toBeNull();
+    expect(setup(null).n.clipMs("a")).toBeNull();
+  });
+});
+
+describe("narrator autoplay block", () => {
+  const notAllowed = () => Object.assign(new Error("play() not allowed"), { name: "NotAllowedError" });
+  it("NotAllowedError notifies once, keeps captions and moves on", async () => {
+    const { audio, timers, n, caps } = setup();
+    audio.play = async function (this: FakeAudio) { this.played.push(this.src); throw notAllowed(); };
+    const blocked = vi.fn(); n.onBlocked(blocked);
+    n.say("a"); n.say("b");
+    await Promise.resolve(); await Promise.resolve();
+    expect(blocked).toHaveBeenCalledTimes(1); expect(n.blocked).toBe(true);
+    timers.advance(2500); await Promise.resolve(); await Promise.resolve();
+    expect(caps).toEqual(["에이", "비"]);
+    expect(blocked).toHaveBeenCalledTimes(1); // 막힌 동안에는 다시 알리지 않는다
+  });
+  it("other play errors are not reported as blocked", async () => {
+    const { audio, n } = setup();
+    audio.play = async () => { throw Object.assign(new Error("decode"), { name: "NotSupportedError" }); };
+    const blocked = vi.fn(); n.onBlocked(blocked);
+    n.say("a"); await Promise.resolve(); await Promise.resolve();
+    expect(blocked).not.toHaveBeenCalled(); expect(n.blocked).toBe(false);
+  });
+  it("a successful unlock clears blocked, and a later block notifies again", async () => {
+    const { audio, timers, n } = setup();
+    let allow = false;
+    audio.play = async function (this: FakeAudio) { this.played.push(this.src); if (!allow) throw notAllowed(); };
+    const blocked = vi.fn(); n.onBlocked(blocked);
+    n.say("a"); await Promise.resolve(); await Promise.resolve();
+    expect(n.blocked).toBe(true);
+    await n.unlock(); // 아직 막힘: 상태 유지, 다시 알리지 않음
+    expect(n.blocked).toBe(true); expect(blocked).toHaveBeenCalledTimes(1);
+    allow = true;
+    await n.unlock(); // 실패한 클립의 자막을 보이는 중에도 잠금 해제를 시도한다
+    expect(audio.played.at(-1)).toBe(SILENT_WAV);
+    expect(audio.src).toBe("/narration/a.mp3");
+    expect(n.blocked).toBe(false);
+    timers.advance(2500);
+    allow = false;
+    n.say("b"); await Promise.resolve(); await Promise.resolve();
+    expect(blocked).toHaveBeenCalledTimes(2);
+  });
+  it("unsubscribe stops notifications", async () => {
+    const { audio, n } = setup();
+    audio.play = async () => { throw notAllowed(); };
+    const blocked = vi.fn(); const off = n.onBlocked(blocked); off();
+    n.say("a"); await Promise.resolve(); await Promise.resolve();
+    expect(blocked).not.toHaveBeenCalled();
   });
 });
 

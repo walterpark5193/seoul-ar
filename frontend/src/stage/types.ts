@@ -20,6 +20,8 @@ export interface VoteState {
   round: number; candidates: [string, string, string]; index: 0 | 1 | 2; phase: VotePhase; method: VoteMethod;
   counts: [number | null, number | null, number | null]; sources: [VoteSource, VoteSource, VoteSource];
   reviewEdited: boolean; winner: string | null; allZero: boolean; endsAt: number | null;
+  /** 후보별 안내 단계 길이(ms). voteStart가 준 값의 사본. 없으면 VOTE_TIMING.promptMs. */
+  promptMs?: [number, number, number];
 }
 export interface StageState {
   mode: StageMode; hover: string | null; lifted: string | null; focus: string | null;
@@ -28,7 +30,8 @@ export interface StageState {
 export type StageEvent =
   | { type: "hover"; gu: string | null }
   | { type: "grab" } | { type: "release" } | { type: "spread" } | { type: "victory" }
-  | { type: "voteStart"; candidates: [string, string, string]; now: number }
+  /** promptMs: 후보별 안내 단계 길이(안내 클립 + 300ms, 최소 1500ms). introMs: 소개 클립 길이(첫 후보 안내에만 더함). */
+  | { type: "voteStart"; candidates: [string, string, string]; now: number; promptMs?: [number, number, number]; introMs?: number }
   | { type: "voteTick"; now: number; cameraCount: number | null }
   | { type: "voteSet"; index: number; n: number; now: number }
   | { type: "voteMethod"; method: VoteMethod; now: number }
@@ -44,6 +47,7 @@ export type Effect =
   | { type: "scene.hover"; gu: string | null }
   | { type: "scene.data" }
   | { type: "narrate"; id: string; interrupt: boolean; protect: boolean }
+  | { type: "narrate.stop" }                       // 재생 중(보호 클립 포함)·대기 중 해설을 모두 비운다
   | { type: "counter.reset" }
   | { type: "publish.state" }
   | { type: "publish.stage" }

@@ -6,13 +6,28 @@ export interface Narrator {
   say(id: string, opts?: { interrupt?: boolean; protect?: boolean }): void; stop(): void;
   setMuted(m: boolean): void; readonly muted: boolean;
   onCaption(cb: (text: string | null) => void): () => void;
+  /** 사용자 입력 처리 안에서 부른다. 무음 클립을 한 번 재생해 브라우저 자동 재생 잠금을 푼다. */
   unlock(): Promise<void>;
+  /** 클립 길이(ms): manifest의 ms, 없으면 자막 글자 수 × 150ms. 모르는 id나 manifest가 없으면 null. */
+  clipMs(id: string): number | null;
+  /** 브라우저가 재생을 막았다(NotAllowedError). 막힌 동안 한 번만 알린다. */
+  onBlocked(cb: () => void): () => void;
+  /** 막힌 상태. 잠금 해제나 재생이 성공하면 풀린다. */
+  readonly blocked: boolean;
 }
 type Timers = { set(fn: () => void, ms: number): unknown; clear(h: unknown): void };
 interface Entry { id: string; item: NarrationItem; protect: boolean; }
 
 const CAPTION_LINGER_MS = 1500;
 const MISSING_MIN_MS = 2500;
+/** 클립 길이를 모를 때 자막 한 글자당 읽는 시간 */
+export const CHAR_MS = 150;
+/** 잠금 해제용 무음 WAV(8kHz 8비트 모노 10ms) */
+export const SILENT_WAV = "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
+
+const captionMs = (item: NarrationItem): number => [...item.caption].length * CHAR_MS;
+const isNotAllowed = (err: unknown): boolean =>
+  typeof err === "object" && err !== null && (err as { name?: unknown }).name === "NotAllowedError";
 
 export function createNarrator(
   manifest: NarrationManifest | null,
@@ -24,7 +39,9 @@ export function createNarrator(
     clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   };
   const listeners = new Set<(t: string | null) => void>();
+  const blockedListeners = new Set<() => void>();
   const warned = new Set<string>();
+  let blocked = false;
   let audio: AudioLike | null = null;
   let muted = false;
   let current: Entry | null = null;
@@ -35,6 +52,11 @@ export function createNarrator(
 
   const getAudio = (): AudioLike => (audio ??= deps.createAudio());
   const emit = (t: string | null) => { for (const cb of [...listeners]) cb(t); };
+  const markBlocked = () => {
+    if (blocked) return;
+    blocked = true;
+    for (const cb of [...blockedListeners]) cb();
+  };
   const cancel = (h: unknown) => { if (h !== null) timers.clear(h); };
 
   function detach() {
@@ -62,17 +84,22 @@ export function createNarrator(
     const a = getAudio();
     a.muted = muted;
     a.src = base + entry.item.file;
+    // 소리가 안 나면 자막만 읽을 만큼 보여 주고 넘어간다.
     const fail = () => {
       if (my !== token) return;
       a.onended = null; a.onerror = null;
       stepTimer = timers.set(() => { stepTimer = null; if (my === token) finish(false); },
-        Math.max(entry.item.ms ?? 0, MISSING_MIN_MS));
+        Math.max(entry.item.ms ?? 0, captionMs(entry.item), MISSING_MIN_MS));
+    };
+    const rejected = (err: unknown) => {
+      if (my === token && isNotAllowed(err)) markBlocked();
+      fail();
     };
     a.onended = () => { if (my !== token) return; a.onended = null; a.onerror = null; finish(true); };
     a.onerror = fail;
     let p: Promise<void> | undefined;
-    try { p = a.play(); } catch { fail(); return; }
-    p?.catch(() => fail());
+    try { p = a.play(); } catch (err) { rejected(err); return; }
+    p?.then(() => { if (my === token) blocked = false; }, rejected);
   }
 
   return {
@@ -102,12 +129,28 @@ export function createNarrator(
     onCaption(cb) { listeners.add(cb); return () => { listeners.delete(cb); }; },
     async unlock() {
       const a = getAudio();
-      if (current) return;
-      a.muted = true;
-      try { await a.play(); } catch { /* 무시 */ }
-      if (!current) a.pause();
+      // 지금 클립을 재생하는 중이면(재생 시도 중 포함) 건드리지 않는다. 실패해 자막만 보이는 중(stepTimer)이면 시도한다.
+      if (current && stepTimer === null) return;
+      const my = token;
+      const prevSrc = a.src;
+      // 무음 파일이라 음소거 없이 재생한다(음소거 재생은 사용자 허락으로 치지 않는 브라우저가 있다).
+      a.muted = false;
+      a.src = SILENT_WAV;
+      let ok = false;
+      try { await a.play(); ok = true; } catch { /* 아직 막힘: 다음 사용자 입력에서 다시 */ }
+      if (ok) blocked = false;
+      if (my !== token) return; // 기다리는 사이 새 클립이 시작됐다
+      a.pause();
+      a.src = prevSrc;
       a.muted = muted;
     },
+    clipMs(id) {
+      const item = manifest?.items[id];
+      if (!item) return null;
+      return item.ms ?? captionMs(item);
+    },
+    onBlocked(cb) { blockedListeners.add(cb); return () => { blockedListeners.delete(cb); }; },
+    get blocked() { return blocked; },
   };
 }
 

@@ -21,7 +21,7 @@ import { toStageMessage, toVoteMessage } from "../stage/net/messages";
 import type { StageChannel } from "../stage/net/stageChannel";
 import { createStageRenderer } from "../stage/stageRenderer";
 import { defaultCandidates, initialStageState, parseVoteParam, reduceStage } from "../stage/stageState";
-import { VOTE_MAX, type Effect, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState } from "../stage/types";
+import { VOTE_MAX, VOTE_TIMING, type Effect, type HandFrame, type InputMode, type Point, type StageEvent, type StageMode, type StageState } from "../stage/types";
 import { renderCaption, renderHints, renderStart, renderTopBar } from "../stage/ui/hud";
 import { cursorClass, drawSkeleton, nextPreviewMode, renderDiag, type PreviewMode } from "../stage/ui/overlay";
 import { renderVotePanel } from "../stage/ui/votePanel";
@@ -45,6 +45,7 @@ const HAND_FAIL: Record<HandSourceError, string> = {
   unsupported: "이 브라우저는 동작 인식을 지원하지 않아 마우스로 진행합니다",
 };
 const HAND_ERRORS_TOAST = "손 인식이 계속 실패해 마우스로 바꿨습니다. G로 다시 시도할 수 있어요";
+const AUDIO_BLOCKED_TOAST = "소리가 막혔습니다 · 화면을 한 번 눌러 주세요";
 const STARTING_HTML = `<section class="stage-start"><p class="start-note" role="status">카메라와 동작 인식을 준비하는 중</p></section>`;
 
 // ---------- 순수 도우미 ----------
@@ -57,6 +58,23 @@ export function voteCandidates(hash: string, summary: Record<string, Stat>, metr
     if (!picked.includes(g)) picked.push(g);
   }
   return [picked[0]!, picked[1]!, picked[2]!];
+}
+
+/** 투표 안내 단계는 안내 클립이 끝나고 이만큼 더 기다린다(마지막 말을 듣고 손을 들 틈). */
+export const VOTE_PROMPT_PAD_MS = 300;
+
+/**
+ * 투표 안내 단계 길이(voteStart의 promptMs·introMs). 후보마다 안내 클립 길이 + 300ms(최소 VOTE_TIMING.promptMs),
+ * 첫 후보에는 소개 클립 길이를 더한다(소개 뒤에 첫 안내가 나오므로). 클립을 모르면 기본값, 소개를 모르면 더하지 않는다.
+ * clipMs는 narrator.clipMs(manifest의 ms, 없으면 자막 글자 수 × 150ms).
+ */
+export function voteTiming(candidates: readonly [string, string, string], clipMs: (id: string) => number | null): { promptMs: [number, number, number]; introMs?: number } {
+  const prompt = (gu: string): number => {
+    const ms = clipMs(NARRATION_IDS.votePrompt(gu));
+    return ms === null ? VOTE_TIMING.promptMs : Math.max(VOTE_TIMING.promptMs, ms + VOTE_PROMPT_PAD_MS);
+  };
+  const intro = clipMs(NARRATION_IDS.voteIntro);
+  return { promptMs: [prompt(candidates[0]), prompt(candidates[1]), prompt(candidates[2])], ...(intro !== null ? { introMs: intro } : {}) };
 }
 
 /**
@@ -269,6 +287,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
         if (state.focus !== null) drawFocus();
         return;
       case "narrate": narrator.say(fx.id, { interrupt: fx.interrupt, protect: fx.protect }); return;
+      case "narrate.stop": narrator.stop(); return;
       case "counter.reset": counter.reset(); return;
       case "publish.state": publishState(); return;
       case "publish.stage": publishStage(); return;
@@ -298,6 +317,10 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   }
 
   // ----- 입력
+  /** 브라우저가 해설 재생을 막았으면 사용자 입력(키·클릭) 처리 안에서 잠금 해제를 다시 시도한다. */
+  const retryUnlock = () => {
+    if (narrator.blocked) void narrator.unlock().catch(() => {});
+  };
   const pickAt = (p: Point): string | null => {
     if (!renderer) return null;
     const n = toNdc(p);
@@ -401,7 +424,12 @@ export function createStageController(deps: StageControllerDeps): StageControlle
       case "voteToggle": {
         const v = state.vote;
         if (v && v.phase !== "result") dispatch({ type: "voteCancel" });
-        else dispatch({ type: "voteStart", candidates: voteCandidates(deps.hash(), summary(), state.metric), now: clock.now() });
+        else {
+          const candidates = voteCandidates(deps.hash(), summary(), state.metric);
+          // 안내 단계 길이를 실제 해설 길이에 맞춘다(첫 후보 카메라 창이 소개·안내 음성과 겹치지 않게).
+          const timing = voteTiming(candidates, (id) => narrator.clipMs(id));
+          dispatch({ type: "voteStart", candidates, now: clock.now(), ...timing });
+        }
         return;
       }
       case "rowUp":
@@ -434,6 +462,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     },
     down() {
       if (phase !== "running") return;
+      retryUnlock();
       mouseDown = true;
       dispatch({ type: "grab" });
     },
@@ -454,6 +483,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   scene.setOverview(summary(), state.metric);
   renderer?.setMode("map", true);
   stops.push(narrator.onCaption((t) => setPart("caption", renderCaption(t))));
+  stops.push(narrator.onBlocked(() => { if (phase !== "disposed") deps.toast(AUDIO_BLOCKED_TOAST); }));
   stops.push(deps.realtime.onStatus(() => renderTop()), deps.stageChannel.onStatus(() => renderTop()));
   setPart("caption", renderCaption(null));
   renderAll();
@@ -483,6 +513,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     },
     key(e) {
       if (phase !== "running") return false;
+      retryUnlock();
       if (e.ctrlKey || e.metaKey || e.altKey) return false;
       const r = keyToAction(normalizeKey(e.key, e.code), state, { reviewRow, now: clock.now() });
       if (!r) return false;
@@ -494,7 +525,9 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     },
     pointer,
     panel(t) {
-      if (phase !== "running" || !state.vote) return;
+      if (phase !== "running") return;
+      retryUnlock();
+      if (!state.vote) return;
       const now = clock.now();
       if (t.set) {
         const m = /^([0-2]):(\d)$/.exec(t.set);
