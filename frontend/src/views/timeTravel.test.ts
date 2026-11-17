@@ -132,11 +132,12 @@ describe("createTimeTravel publishes the normal state sequence", () => {
     expect(published).toHaveLength(0);
   });
 
-  it("does nothing with fewer than two months", () => {
-    const store = createStore({ ...INITIAL_STATE, month: "202611" });
-    const travel = createTimeTravel({ months: () => ["202611"], month: () => "202611", setMonth: vi.fn(), onChange: vi.fn() });
+  it("does nothing with fewer than two months: the month stays unchanged", async () => {
+    const setMonth = vi.fn();
+    const travel = createTimeTravel({ months: () => ["202611"], month: () => "202611", setMonth, onChange: vi.fn() });
     travel.play();
+    await vi.advanceTimersByTimeAsync(20000);
     expect(travel.view.playing).toBe(false);
-    expect(store.getState().month).toBe("202611");
+    expect(setMonth).not.toHaveBeenCalled();
   });
 });

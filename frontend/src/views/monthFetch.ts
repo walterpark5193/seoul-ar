@@ -65,6 +65,14 @@ export function defaultFetchMonth(index: Pick<DataIndex, "months">, now: number)
   return prev < MIN_MONTH ? MIN_MONTH : prev;
 }
 
+/**
+ * 구역을 다시 그릴지. 작업 상태(view)가 바뀌면 언제나, 바깥 사정(월·index·해설 유무)이 바뀌면
+ * 암호 입력 중이 아닐 때만 다시 그린다(입력 중인 암호가 지워지지 않게).
+ */
+export function needsFetchRender(phase: FetchView["phase"], cause: "view" | "context"): boolean {
+  return cause === "view" || phase !== "key";
+}
+
 export function isBusy(v: FetchView): boolean {
   return v.phase === "sending" || v.phase === "running" || v.phase === "loading";
 }
@@ -226,7 +234,25 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     }
   };
 
-  const onJob = (msg: JobMessage) => {
+  /** 작업 기록 파일(data/jobs/{jobId}.json, no-store). 없거나(SPA 폴백 HTML 포함) 모양이 틀리면 null. */
+  const readRecord = async (jobId: string): Promise<JobMessage | null> => {
+    try {
+      const res = await doFetch(`/data/jobs/${encodeURIComponent(jobId)}.json`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const body: unknown = await res.json();
+      return isJobMessage(body) && body.jobId === jobId ? body : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * /seoul/jobs는 공개 API 키로 누구나 발행할 수 있다. 완료·실패 이벤트는 그대로 믿지 않고
+   * 작업 기록이 같은 상태일 때만 따른다. 기록이 없거나 아직 running이면 무시한다(폴링이 따라잡는다).
+   * running(진행 숫자)은 확인 없이 반영한다.
+   * verified: 기록 파일에서 읽은 것(폴링 또는 확인을 거친 것)이면 true.
+   */
+  const onJob = (msg: JobMessage, verified = false) => {
     if (!alive) return;
     const msgKind: JobKind = msg.kind ?? "fetch";
     // 202 응답보다 진행 이벤트가 먼저 오면 그 작업을 받아들인다.
@@ -236,12 +262,15 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
       return;
     }
     if (view.phase !== "running" || msg.jobId !== view.jobId) return;
+    // 기록 파일은 우리 202 응답의 jobId로 읽은 것이라 kind가 비어 있어도 우리 작업이다. 이벤트만 kind를 맞춰 본다.
+    if (!verified && msgKind !== view.kind) return;
     if (msg.state === "running") {
       if (msg.done <= view.done) return; // 폴링과 이벤트가 겹치거나 순서가 바뀐 경우
       lastProgress = now();
       set({ ...view, done: msg.done, total: msg.total || view.total, gu: msg.gu });
       return;
     }
+    if (!verified) { void confirm(msg); return; }
     stopPoll();
     const { kind, month } = view;
     if (msg.state === "error") {
@@ -251,6 +280,12 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
     void (kind === "narration" ? finishNarration(month) : finishFetch(month));
   };
 
+  const confirm = async (event: JobMessage) => {
+    const record = await readRecord(event.jobId);
+    if (!record || record.state !== event.state) return;
+    onJob(record, true);
+  };
+
   const poll = async (jobId: string) => {
     if (view.phase !== "running" || view.jobId !== jobId) return;
     if (now() - lastProgress > staleMs) {
@@ -258,12 +293,8 @@ export function createMonthFetch(d: MonthFetchDeps): MonthFetch {
       set({ phase: "idle", error: MSG.stale });
       return;
     }
-    try {
-      const res = await doFetch(`/data/jobs/${encodeURIComponent(jobId)}.json`, { cache: "no-store" });
-      if (!res.ok) return;
-      const body: unknown = await res.json();
-      if (isJobMessage(body)) onJob(body);
-    } catch { /* 다음 차례에 다시(없는 파일은 SPA 폴백 HTML이라 JSON이 아니다) */ }
+    const record = await readRecord(jobId); // 없으면 다음 차례에 다시
+    if (record) onJob(record, true);
   };
 
   const startPoll = (jobId: string) => {

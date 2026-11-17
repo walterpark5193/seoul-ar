@@ -2,7 +2,7 @@
 import "./app.css";
 import { loadConfig } from "./config";
 import { createIndexSource } from "./data/indexSource";
-import { forgetNarrations, loadGu, loadIndex, loadNarration, reloadIndex } from "./data/loader";
+import { forgetNarration, forgetNarrations, loadGu, loadIndex, loadNarration, reloadIndex } from "./data/loader";
 import { loadGeo, westToEast } from "./geoSource";
 import { createAppSyncRealtime } from "./realtime/appsync";
 import { withFallback } from "./realtime/fallback";
@@ -109,6 +109,7 @@ async function main(): Promise<void> {
     realtime,
     loadGu: (month, gu) => loadGu(month, gu),
     loadNarration: (month) => loadNarration(month),
+    forgetNarration: (month) => forgetNarration(month),
     navigate: redirect,
     toast,
     createScene: () => createSeoulScene(geo, { reducedMotion }),

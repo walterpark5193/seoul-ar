@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  PRESENTER_KEY, createMonthFetch, defaultFetchMonth, isBusy, parseMonthInput, renderMonthFetch, statusLine,
+  PRESENTER_KEY, createMonthFetch, defaultFetchMonth, isBusy, needsFetchRender, parseMonthInput, renderMonthFetch, statusLine,
   type FetchView,
 } from "./monthFetch";
 import type { DataIndex } from "../data/types";
@@ -28,8 +28,15 @@ function setup(opts: { stored?: string; fetch?: (url: string, init?: RequestInit
   const subscribeJobs = vi.fn((h: (m: JobMessage) => void) => { handlers.add(h); return () => { handlers.delete(h); }; });
   const emit = (m: JobMessage) => { for (const h of [...handlers]) h(m); };
   const storage = memoryStorage(opts.stored ? { [PRESENTER_KEY]: opts.stored } : {});
-  const fetch = vi.fn(opts.fetch ?? (async (url: string) =>
-    (url === "/api/fetch-month" ? res(202, { jobId: "j-1", month: "202610" }) : res(404))));
+  // 작업 기록 파일(data/jobs/{jobId}.json): done/error 이벤트는 이 기록과 맞을 때만 받아들인다.
+  const records = new Map<string, unknown>();
+  const inner = opts.fetch ?? (async (url: string) =>
+    (url === "/api/fetch-month" ? res(202, { jobId: "j-1", month: "202610" }) : res(404)));
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const id = /^\/data\/jobs\/(.+)\.json$/.exec(url)?.[1];
+    if (id && records.has(decodeURIComponent(id))) return res(200, records.get(decodeURIComponent(id)));
+    return inner(url, init);
+  });
   const refreshIndex = vi.fn(opts.refresh ?? (async () => index(["202610", "202611"])));
   const toast = vi.fn();
   const reloadNarration = vi.fn(opts.reloadNarration ?? (async () => null));
@@ -40,7 +47,7 @@ function setup(opts: { stored?: string; fetch?: (url: string, init?: RequestInit
     onChange: (v) => views.push(v),
     now: () => Date.now(), pollMs: 4000, staleMs: 660_000,
   });
-  return { mf, emit, storage, fetch, refreshIndex, toast, views, subscribeJobs, handlers, reloadNarration };
+  return { mf, emit, storage, fetch, refreshIndex, toast, views, subscribeJobs, handlers, reloadNarration, records };
 }
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); });
@@ -97,7 +104,7 @@ describe("createMonthFetch", () => {
   });
 
   it("shows progress, ignores other jobs, and on done reloads the index and toasts", async () => {
-    const { mf, emit, refreshIndex, toast } = setup({ stored: "pw" });
+    const { mf, emit, refreshIndex, toast, records } = setup({ stored: "pw" });
     await mf.submit("202610");
     emit(job({ done: 12, gu: "강서구" }));
     expect(statusLine(mf.view)).toBe("2026년 10월 수집 중 12/25 · 강서구");
@@ -105,6 +112,7 @@ describe("createMonthFetch", () => {
     expect(statusLine(mf.view)).toBe("2026년 10월 수집 중 12/25 · 강서구");
     emit(job({ done: 11, gu: "양천구" }));
     expect(mf.view).toMatchObject({ done: 12 });
+    records.set("j-1", job({ state: "done", done: 25, gu: undefined }));
     emit(job({ state: "done", done: 25, gu: undefined }));
     await vi.advanceTimersByTimeAsync(0);
     expect(refreshIndex).toHaveBeenCalledTimes(1);
@@ -146,9 +154,11 @@ describe("createMonthFetch", () => {
   });
 
   it("shows the job's own error message", async () => {
-    const { mf, emit } = setup({ stored: "pw" });
+    const { mf, emit, records } = setup({ stored: "pw" });
     await mf.submit("202610");
+    records.set("j-1", job({ state: "error", message: "서울 API가 응답하지 않습니다." }));
     emit(job({ state: "error", message: "서울 API가 응답하지 않습니다." }));
+    await vi.advanceTimersByTimeAsync(0);
     expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 수집 실패: 서울 API가 응답하지 않습니다." });
   });
 
@@ -182,8 +192,9 @@ describe("createMonthFetch", () => {
   });
 
   it("tells the presenter to reload when the index cannot be re-read", async () => {
-    const { mf, emit, toast } = setup({ stored: "pw", refresh: async () => { throw new Error("offline"); } });
+    const { mf, emit, toast, records } = setup({ stored: "pw", refresh: async () => { throw new Error("offline"); } });
     await mf.submit("202610");
+    records.set("j-1", job({ state: "done", done: 25 }));
     emit(job({ state: "done", done: 25 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(toast.mock.calls.at(-1)?.[0]).toContain("새로고침");
@@ -197,6 +208,41 @@ describe("createMonthFetch", () => {
     emit(job({ state: "done" }));
     await vi.advanceTimersByTimeAsync(20_000);
     expect(refreshIndex).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a done or error event that the job record does not confirm (spoofed on the public channel)", async () => {
+    const { mf, emit, refreshIndex, records, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledWith("/data/jobs/j-1.json", { cache: "no-store" });
+    expect(mf.view.phase).toBe("running");
+    expect(refreshIndex).not.toHaveBeenCalled();
+    records.set("j-1", job({ state: "running", done: 3 }));
+    emit(job({ state: "error", message: "가짜 실패" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view.phase).toBe("running");
+    records.set("j-1", job({ state: "done", done: 25 }));
+    emit(job({ state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refreshIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the verified record's error message, not the event's", async () => {
+    const { mf, emit, records } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    records.set("j-1", job({ state: "error", message: "서울 API 오류입니다." }));
+    emit(job({ state: "error", message: "<b>가짜</b> 문구" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view).toEqual({ phase: "idle", error: "2026년 10월 수집 실패: 서울 API 오류입니다." });
+  });
+
+  it("progress events still count up without verification", async () => {
+    const { mf, emit, fetch } = setup({ stored: "pw" });
+    await mf.submit("202610");
+    emit(job({ done: 4, gu: "성동구" }));
+    expect(mf.view).toMatchObject({ done: 4, gu: "성동구" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -267,10 +313,11 @@ describe("해설 생성", () => {
   });
 
   it("on done reloads the narration and toasts 해설이 준비됐습니다", async () => {
-    const { mf, emit, toast, reloadNarration, refreshIndex } = setup({ stored: "pw", fetch: narrateFetch });
+    const { mf, emit, toast, reloadNarration, refreshIndex, records } = setup({ stored: "pw", fetch: narrateFetch });
     await mf.narrate("202611");
     emit(narrJob({ done: 13 }));
     expect(statusLine(mf.view)).toBe("2026년 11월 해설 생성 중 13/26");
+    records.set("n-1", narrJob({ state: "done", done: 26 }));
     emit(narrJob({ state: "done", done: 26 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(reloadNarration).toHaveBeenCalledWith("202611");
@@ -280,9 +327,11 @@ describe("해설 생성", () => {
   });
 
   it("shows the narration error message", async () => {
-    const { mf, emit } = setup({ stored: "pw", fetch: narrateFetch });
+    const { mf, emit, records } = setup({ stored: "pw", fetch: narrateFetch });
     await mf.narrate("202611");
+    records.set("n-1", narrJob({ state: "error", message: "모델을 호출하지 못했습니다." }));
     emit(narrJob({ state: "error", message: "모델을 호출하지 못했습니다." }));
+    await vi.advanceTimersByTimeAsync(0);
     expect(mf.view).toEqual({ phase: "idle", error: "2026년 11월 해설 생성 실패: 모델을 호출하지 못했습니다." });
   });
 
@@ -304,5 +353,25 @@ describe("해설 생성", () => {
     expect(text(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "present" } }))).toContain("2026년 11월 해설이 있습니다");
     expect(text(renderMonthFetch({ phase: "idle" }, { ...base, narration: { month: "202611", state: "absent" } }))).toContain("2026년 11월 해설이 아직 없습니다");
   });
+
+  it("ignores events of the other kind for the same jobId while running", async () => {
+    const { mf, emit, records, reloadNarration } = setup({ stored: "pw", fetch: narrateFetch });
+    await mf.narrate("202611");
+    emit(job({ jobId: "n-1", month: "202611", done: 5, gu: "중구" }));
+    expect(mf.view).toMatchObject({ phase: "running", kind: "narration", done: 0 });
+    records.set("n-1", job({ jobId: "n-1", month: "202611", state: "done", done: 25 }));
+    emit(job({ jobId: "n-1", month: "202611", kind: "fetch", state: "done", done: 25 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mf.view.phase).toBe("running");
+    expect(reloadNarration).not.toHaveBeenCalled();
+  });
 });
 
+describe("needsFetchRender", () => {
+  it("re-renders for view changes always, and for context changes only outside the passcode form", () => {
+    expect(needsFetchRender("key", "view")).toBe(true);
+    expect(needsFetchRender("key", "context")).toBe(false);
+    expect(needsFetchRender("idle", "context")).toBe(true);
+    expect(needsFetchRender("running", "context")).toBe(true);
+  });
+});

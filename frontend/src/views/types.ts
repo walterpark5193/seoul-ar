@@ -24,6 +24,8 @@ export interface ViewContext {
   loadGu(month: string, gu: string): Promise<GuData>;
   /** 그 달의 AI 해설(없으면 null). 테스트 가짜 문맥에서는 생략할 수 있다. */
   loadNarration?(month: string): Promise<Narration | null>;
+  /** 그 달 해설 캐시를 비운다(다시 확인하기 전에). */
+  forgetNarration?(month: string): void;
   /** 뷰가 스스로 다른 화면으로 보낼 때(폴백). 기록을 바꿔치기한다. 일반 이동은 링크 href로 한다. */
   navigate(hash: string): void;
   toast(message: string): void;
@@ -31,7 +33,7 @@ export interface ViewContext {
   createScene(): SeoulScene;
   reducedMotion: boolean;
   ar: ArDeps;
-  /** 해시의 "?" 뒤. main이 AR 뷰에만 넘긴다(조정 파라미터, views/arTuning.ts). */
+  /** 해시의 "?" 뒤. main이 AR(조정 파라미터, views/arTuning.ts)과 3D(stage=1 큰 화면 모드) 뷰에만 넘긴다. */
   query?: string;
 }
 

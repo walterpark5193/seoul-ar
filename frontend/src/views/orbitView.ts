@@ -8,7 +8,7 @@ import type { GuData } from "../data/types";
 import type { AppState } from "../state/store";
 import { drawQr } from "../ui/qr";
 import { mountSheet } from "../ui/sheetDom";
-import { STAGE_QR_HINT, isStageQuery, renderStage } from "./stage";
+import { STAGE_QR_HINT, isStageQuery, renderStage, stageAnnouncement } from "./stage";
 import type { MountView, ViewContext } from "./types";
 import { viewerUrl } from "./urls";
 import { bindViewer, drawCity } from "./viewerSync";
@@ -58,10 +58,13 @@ function sheetSurface(root: HTMLElement, ctx: ViewContext): InfoSurface {
 function stageSurface(root: HTMLElement, ctx: ViewContext): InfoSurface {
   const url = viewerUrl(ctx.config.appUrl, location);
   root.insertAdjacentHTML("beforeend",
-    `<section class="stage-info" data-stage-info aria-live="polite"></section>` +
+    `<section class="stage-info" data-stage-info></section>` +
+    // 화면 읽기 프로그램에는 패널 전체가 아니라 "구, 월"이 바뀔 때만 알린다.
+    `<p class="vh" aria-live="polite" data-stage-announce></p>` +
     `<figure class="stage-qr"><canvas data-qr role="img" aria-label="관객용 주소 QR 코드"></canvas>` +
     `<figcaption>${STAGE_QR_HINT}</figcaption></figure>`);
   const info = root.querySelector<HTMLElement>("[data-stage-info]")!;
+  const announce = root.querySelector<HTMLElement>("[data-stage-announce]")!;
   drawQr(root.querySelector<HTMLCanvasElement>("[data-qr]")!, url, 220).catch((err) => console.warn("[stage] QR을 그리지 못함", err));
 
   // 따라가기 고정: 큰 화면은 언제나 발표자를 따라간다.
@@ -80,7 +83,11 @@ function stageSurface(root: HTMLElement, ctx: ViewContext): InfoSurface {
   wake();
 
   return {
-    render: (s, d, n) => { info.innerHTML = renderStage(s, d, ctx.index, n); },
+    render: (s, d, n) => {
+      info.innerHTML = renderStage(s, d, ctx.index, n);
+      const text = stageAnnouncement(s);
+      if (announce.textContent !== text) announce.textContent = text;
+    },
     offset: (w) => ({ x: -w * 0.14, y: 0 }), // 왼쪽 위 큰 글씨를 피해 도시를 조금 오른쪽에
     observe: () => {},
     destroy: () => {
@@ -101,6 +108,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     store: ctx.store,
     loadGu: ctx.loadGu,
     loadNarration: ctx.loadNarration,
+    forgetNarration: ctx.forgetNarration,
     onScene,
     onSheet: (s, d, n) => surface.render(s, d, n),
   });

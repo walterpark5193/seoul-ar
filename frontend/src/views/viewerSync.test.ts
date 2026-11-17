@@ -100,6 +100,22 @@ describe("bindViewer", () => {
       expect(seq).toEqual(["중구:null", "중구:202610", "중구:202611"]);
     });
 
+    it("keeps the held data in the sheet (new month label) until the new month arrives", async () => {
+      const store = createStore({ ...INITIAL_STATE, month: "202610", gu: "중구" });
+      const next = deferred<GuData>();
+      const loadGu = vi.fn((m: string, g: string) => (m === "202610" ? Promise.resolve(guMonth(g, m)) : next.promise));
+      const onSheet = vi.fn();
+      bindViewer({ store, loadGu, onScene: vi.fn(), onSheet });
+      await flush();
+      store.dispatch({ type: "local", month: "202611" });
+      const [s, d] = onSheet.mock.calls.at(-1)!;
+      expect(s.month).toBe("202611");
+      expect(d?.month).toBe("202610");
+      next.resolve(guMonth("중구", "202611"));
+      await flush();
+      expect(onSheet.mock.calls.at(-1)?.[1]?.month).toBe("202611");
+    });
+
     it("applies a metric change made during the load together with the new data", async () => {
       const store = createStore({ ...INITIAL_STATE, month: "202610", gu: "중구" });
       const next = deferred<GuData>();
@@ -168,15 +184,23 @@ describe("bindViewer", () => {
       try {
         const store = createStore({ ...INITIAL_STATE, month: "202611" });
         const onSheet = vi.fn();
-        const loadNarration = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(narr("202611"));
-        const off = bindViewer({ store, loadGu: vi.fn(), loadNarration, onScene: vi.fn(), onSheet, narrationRetryMs: 60_000 });
+        const loadNarration = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(narr("202611"));
+        const forgetNarration = vi.fn();
+        const off = bindViewer({ store, loadGu: vi.fn(), loadNarration, forgetNarration, onScene: vi.fn(), onSheet, narrationRetryMs: 60_000 });
         await vi.advanceTimersByTimeAsync(0);
         expect(loadNarration).toHaveBeenCalledTimes(1);
+        const sheetsAfterFirst = onSheet.mock.calls.length;
         await vi.advanceTimersByTimeAsync(60_000);
+        // 재시도 전에 음수 캐시를 비워 60초 + 60초로 늘어나지 않게 하고, 여전히 없으면 시트를 다시 그리지 않는다.
+        expect(forgetNarration).toHaveBeenCalledWith("202611");
+        expect(forgetNarration.mock.invocationCallOrder[0]!).toBeLessThan(loadNarration.mock.invocationCallOrder[1]!);
         expect(loadNarration).toHaveBeenCalledTimes(2);
+        expect(onSheet.mock.calls.length).toBe(sheetsAfterFirst);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(loadNarration).toHaveBeenCalledTimes(3);
         expect(onSheet.mock.calls.at(-1)?.[2]).toMatchObject({ month: "202611" });
         await vi.advanceTimersByTimeAsync(300_000);
-        expect(loadNarration).toHaveBeenCalledTimes(2);
+        expect(loadNarration).toHaveBeenCalledTimes(3);
         off();
       } finally {
         vi.useRealTimers();

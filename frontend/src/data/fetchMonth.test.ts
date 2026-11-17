@@ -27,7 +27,7 @@ describe("requestFetchMonth", () => {
   it("treats network errors, 5xx and a 202 without jobId as failures", async () => {
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => { throw new TypeError("Failed to fetch"); }))).toEqual({ kind: "network" });
     expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(502)))).toEqual({ kind: "failed", status: 502 });
-    expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(202, { month: "202610" })))).toEqual({ kind: "failed", status: 202 });
+    expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(202, { month: "202610" })))).toEqual({ kind: "network" });
   });
 
   it("requestNarrateMonth posts the same way to /api/narrate-month", async () => {
@@ -40,5 +40,12 @@ describe("requestFetchMonth", () => {
       body: JSON.stringify({ month: "202611" }),
     }));
     expect(await requestNarrateMonth("202611", "k", vi.fn(async () => res(401)))).toEqual({ kind: "unauthorized" });
+  });
+
+  it("treats the CloudFront SPA fallback (200 HTML for /api/*) as a network error", async () => {
+    const html = { ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token <"); } } as unknown as Response;
+    expect(await requestFetchMonth("202610", "k", vi.fn(async () => html))).toEqual({ kind: "network" });
+    expect(await requestNarrateMonth("202611", "k", vi.fn(async () => html))).toEqual({ kind: "network" });
+    expect(await requestFetchMonth("202610", "k", vi.fn(async () => res(200, { jobId: "j-2", month: "202610" })))).toEqual({ kind: "started", jobId: "j-2", month: "202610" });
   });
 });

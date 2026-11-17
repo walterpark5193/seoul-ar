@@ -135,8 +135,13 @@ export interface Summary {
   title: string;
   figures: Figure[];
   notes: string[];
-  /** 고른 구의 데이터가 이 상태(월·구)와 맞을 때만 */
+  /** 고른 구의 데이터가 이 상태(월·구)와 맞을 때만. 위 수치는 이것(없으면 index 요약)으로 그린다. */
   fresh: GuData | null;
+  /**
+   * 법정동 목록·범례용: 같은 구면 달이 달라도 쓴다. 시간 여행 중 새 달 자료가 오기 전까지 이전 달 목록을
+   * 그대로 보여 깜빡이지 않게 한다(월 표시와 위 수치는 이미 새 달).
+   */
+  listData: GuData | null;
   /** 서울 전체 보기에서 쓰는 (구, 요약) 목록 */
   entries: Array<[string, Stat]>;
 }
@@ -146,16 +151,17 @@ export function summarize(state: AppState, data: GuData | null, index: DataIndex
   const monthSummary = index?.summary[state.month] ?? {};
   if (state.gu) {
     const fresh = data && data.month === state.month && data.gu === state.gu ? data : null;
+    const listData = data && data.gu === state.gu ? data : null;
     const stat = fresh?.total ?? monthSummary[state.gu] ?? null;
     const { figures, notes } = guFigures(stat);
     if (stat && stat.n === 0) notes.unshift(`${fmtMonth(state.month)}에는 신고된 매매 거래가 없습니다.`);
-    return { title: state.gu, figures, notes, fresh, entries: [] };
+    return { title: state.gu, figures, notes, fresh, listData, entries: [] };
   }
   const entries = (index?.gus ?? Object.keys(monthSummary))
     .map((g): [string, Stat | undefined] => [g, monthSummary[g]])
     .filter((e): e is [string, Stat] => e[1] !== undefined);
   const notes = entries.length === 0 ? [`${fmtMonth(state.month)} 자료가 없습니다.`] : [];
-  return { title: "서울 전체", figures: overviewFigures(entries), notes, fresh: null, entries };
+  return { title: "서울 전체", figures: overviewFigures(entries), notes, fresh: null, listData: null, entries };
 }
 
 /** AI 해설 한 줄과 출처. 문장이 없으면 빈 문자열(영역을 숨긴다). */
@@ -169,11 +175,11 @@ export function renderAiNote(state: AppState, narration: Narration | null | unde
 }
 
 export function renderSheet(state: AppState, data: GuData | null, index: DataIndex | null, opts: SheetOptions = {}): string {
-  const { title, figures, notes, fresh, entries } = summarize(state, data, index);
+  const { title, figures, notes, listData, entries } = summarize(state, data, index);
   const legend = state.gu
-    ? (fresh ? renderLegend("동별", state.metric, fresh.dongs.map((d) => statValue(d, state.metric))) : "")
+    ? (listData ? renderLegend("동별", state.metric, listData.dongs.map((d) => statValue(d, state.metric))) : "")
     : renderLegend("구별", state.metric, entries.map(([, s]) => statValue(s, state.metric)));
-  const dongs = fresh ? renderDongs(fresh, state.metric) : "";
+  const dongs = listData ? renderDongs(listData, state.metric) : "";
 
   return `<section class="sheet" aria-label="고른 지역의 실거래 요약">` +
     `<header class="sheet-head"><div class="sheet-where"><h2 class="sheet-title">${esc(title)}</h2>` +

@@ -140,6 +140,15 @@ describe("renderSheet", () => {
       expect(r.join(" ")).not.toMatch(/NaN|undefined|null/);
     });
 
+    it("keeps the same gu's held list while the next month loads, with the new month's figures", () => {
+      const held = { ...many, month: "202610", total: stat({ medPerM2: 9999 }) };
+      const html = renderSheet(state({ month: "202611", metric: "price" }), held, index);
+      expect(rows(html)).toHaveLength(5);
+      expect(text(html)).toContain("2026년 11월");
+      expect(text(html)).toContain("2,890만원/㎡");
+      expect(text(html)).not.toContain("9,999만원/㎡");
+    });
+
     it("omits the list for Seoul overview, while loading, and for a gu with no dongs", () => {
       expect(rows(renderSheet(state({ gu: null }), null, index))).toHaveLength(0);
       expect(rows(renderSheet(state(), null, index))).toHaveLength(0);

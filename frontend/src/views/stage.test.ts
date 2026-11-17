@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STAGE_QR_HINT, isStageQuery, renderStage } from "./stage";
+import { STAGE_QR_HINT, isStageQuery, renderStage, stageAnnouncement } from "./stage";
 import type { AppState } from "../state/store";
 import type { DataIndex, GuData, Stat } from "../data/types";
 
@@ -66,5 +66,11 @@ describe("renderStage", () => {
 
   it("has the QR hint text", () => {
     expect(STAGE_QR_HINT).toBe("폰으로 QR을 찍어 그림을 비춰 보세요");
+  });
+
+  it("does not mark the whole panel live; the announcement is just the place and month", () => {
+    expect(renderStage(state(), data, index, narration)).not.toContain("aria-live");
+    expect(stageAnnouncement(state())).toBe("강남구, 2026년 11월");
+    expect(stageAnnouncement(state({ gu: null }))).toBe("서울 전체, 2026년 11월");
   });
 });

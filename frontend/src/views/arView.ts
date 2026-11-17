@@ -193,6 +193,7 @@ export const mountArView: MountView = (root, ctx) => {
     },
     onSheet: (s, d, n) => sheet.render(s, d, n),
     loadNarration: ctx.loadNarration,
+    forgetNarration: ctx.forgetNarration,
   });
 
   startBtn.addEventListener("click", async () => {

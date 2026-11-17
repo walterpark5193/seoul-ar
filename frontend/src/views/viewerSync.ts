@@ -15,6 +15,8 @@ export interface ViewerSyncOptions {
   onScene(state: AppState, data: GuData | null): void;
   onSheet(state: AppState, data: GuData | null, narration: Narration | null): void;
   loadNarration?(month: string): Promise<Narration | null>;
+  /** 다시 확인하기 전에 그 달 해설 캐시(없음 60초 기억)를 비운다. 안 비우면 재시도 간격이 두 배가 된다. */
+  forgetNarration?(month: string): void;
   /** 해설이 없을 때 다시 확인하는 간격(기본 60초). */
   narrationRetryMs?: number;
 }
@@ -34,7 +36,10 @@ export function bindViewer(o: ViewerSyncOptions): () => void {
   let narrationTimer: ReturnType<typeof setTimeout> | null = null;
   const retryMs = o.narrationRetryMs ?? 60_000;
 
-  const sheet = (s: AppState) => o.onSheet(s, data, narration && narration.month === s.month ? narration : null);
+  // 같은 구의 새 달 자료를 기다리는 동안에는 씬이 들고 있는 이전 달 자료를 시트에도 넘긴다(목록·범례가 깜빡이지 않게).
+  // 위 수치와 월 표시는 시트가 index 요약으로 이미 새 달을 보여 준다.
+  const sheet = (s: AppState) =>
+    o.onSheet(s, data ?? (holding ? sceneData : null), narration && narration.month === s.month ? narration : null);
 
   const loadNarration = (month: string) => {
     if (!o.loadNarration) return;
@@ -44,9 +49,16 @@ export function bindViewer(o: ViewerSyncOptions): () => void {
       .then((n) => n, () => null)
       .then((n) => {
         if (!alive || mine !== narrationToken) return;
-        narration = n && n.month === month ? n : null;
-        sheet(o.store.getState());
-        if (!narration) narrationTimer = setTimeout(() => loadNarration(month), retryMs);
+        const next = n && n.month === month ? n : null;
+        const changed = next !== narration;
+        narration = next;
+        if (changed) sheet(o.store.getState()); // 여전히 없으면 다시 그리지 않는다
+        if (!narration) {
+          narrationTimer = setTimeout(() => {
+            o.forgetNarration?.(month);
+            loadNarration(month);
+          }, retryMs);
+        }
       });
   };
 

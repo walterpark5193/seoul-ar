@@ -9,7 +9,7 @@ export type FetchMonthResult =
   | { kind: "unauthorized" }   // 401
   | { kind: "busy" }           // 409
   | { kind: "unavailable" }    // 404: 이 배포에 수집 기능이 없다(개발 서버 등)
-  | { kind: "network" }        // 요청 자체가 실패
+  | { kind: "network" }        // 요청 자체가 실패, 또는 2xx인데 JSON·jobId가 아님(SPA 폴백 HTML)
   | { kind: "failed"; status: number };
 
 export const NARRATE_MONTH_PATH = "/api/narrate-month";
@@ -39,8 +39,10 @@ async function requestJob(path: string, month: string, passcode: string, fetchIm
   if (res.status === 401) return { kind: "unauthorized" };
   if (res.status === 409) return { kind: "busy" };
   if (res.status === 404) return { kind: "unavailable" };
-  if (res.status !== 202) return { kind: "failed", status: res.status };
+  if (!res.ok) return { kind: "failed", status: res.status };
+  // CloudFront의 403/404 → index.html(200) 오류 응답은 /api/*에도 걸린다. Function URL 설정이 틀리면
+  // 200 HTML이 오므로, JSON이 아니거나 jobId가 없는 2xx는 수집 서버에 닿지 못한 것(네트워크 오류)으로 본다.
   const body = (await res.json().catch(() => null)) as { jobId?: unknown; month?: unknown } | null;
-  if (!body || typeof body.jobId !== "string" || body.jobId.length === 0) return { kind: "failed", status: res.status };
+  if (!body || typeof body !== "object" || typeof body.jobId !== "string" || body.jobId.length === 0) return { kind: "network" };
   return { kind: "started", jobId: body.jobId, month: typeof body.month === "string" ? body.month : month };
 }

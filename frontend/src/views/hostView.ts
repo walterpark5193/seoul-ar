@@ -12,10 +12,10 @@ import { esc } from "../ui/html";
 import { replaceKeepingFocus } from "../ui/patch";
 import { drawQr } from "../ui/qr";
 import {
-  createMonthFetch, defaultFetchMonth, monthInputValue, renderMonthFetch,
+  createMonthFetch, defaultFetchMonth, monthInputValue, needsFetchRender, renderMonthFetch,
   type FetchView, type NarrationAvailability, type StorageLike,
 } from "./monthFetch";
-import { createTimeTravel, renderTimeTravel } from "./timeTravel";
+import { createTimeTravel, renderTimeTravel, type TravelView } from "./timeTravel";
 import type { MountView } from "./types";
 import { stageUrl, viewerUrl } from "./urls";
 
@@ -109,35 +109,23 @@ export const mountHostView: MountView = (root, ctx) => {
     );
   };
 
+  // 그리는 함수들은 보여 줄 상태를 인자로 받는다. 컨트롤러보다 먼저 선언해 앞에서 쓰는 일이 없게 한다.
   const render = (s: AppState) => replaceKeepingFocus(controls, renderHostControls(s, ctx.index));
-  render(ctx.store.getState());
-  publish();
-  // 새 달을 가져와 index가 바뀌면 월 칩을 다시 그린다.
-  const offIndex = ctx.indexSource.subscribe(() => {
-    render(ctx.store.getState());
-    renderTravel();
-    void checkNarration(ctx.store.getState().month);
-  });
 
-  // 시간 여행: 월만 바꾸고(local), 발행은 아래 store 구독이 평소처럼 한다.
   const travelHost = root.querySelector<HTMLElement>("[data-travel]")!;
-  const travel = createTimeTravel({
-    months: () => ctx.index.months,
-    month: () => ctx.store.getState().month,
-    setMonth: (m) => ctx.store.dispatch({ type: "local", month: m }),
-    onChange: () => renderTravel(),
-  });
-  const renderTravel = () =>
-    replaceKeepingFocus(travelHost, renderTimeTravel(travel.view, ctx.index.months, ctx.store.getState().month));
-  renderTravel();
+  const paintTravel = (v: TravelView) =>
+    replaceKeepingFocus(travelHost, renderTimeTravel(v, ctx.index.months, ctx.store.getState().month));
 
   // 월 가져오기: 진행 표시가 바뀌어도 입력한 월이 지워지지 않게 값을 따로 들고 있는다.
   const fetchHost = root.querySelector<HTMLElement>("[data-fetch]")!;
   let fetchValue = monthInputValue(defaultFetchMonth(ctx.index, Date.now()));
+  let fetchView: FetchView = { phase: "idle" };
   let lastPhase: FetchView["phase"] = "idle";
   // 고른 달(월 칩)의 해설 유무: "해설 생성" 버튼은 없을 때만 켠다.
   let narration: NarrationAvailability = { month: ctx.store.getState().month, state: "unknown" };
-  const renderFetch = (v: FetchView = monthFetch.view) => {
+  /** cause "context"(월·index·해설 유무가 바뀜)는 암호를 입력하는 중이면 건너뛴다(입력이 지워지지 않게). */
+  const paintFetch = (v: FetchView, cause: "view" | "context") => {
+    if (!needsFetchRender(v.phase, cause)) return;
     replaceKeepingFocus(fetchHost, renderMonthFetch(v, { value: fetchValue, max: monthInputValue(currentMonth(Date.now())), narration }));
     if (v.phase === "key" && lastPhase !== "key") fetchHost.querySelector<HTMLInputElement>("#presenter-key")?.focus();
     lastPhase = v.phase;
@@ -146,12 +134,20 @@ export const mountHostView: MountView = (root, ctx) => {
   const checkNarration = async (month: string) => {
     const mine = ++narrationToken;
     narration = { month, state: "unknown" };
-    renderFetch();
+    paintFetch(fetchView, "context");
     const n = ctx.loadNarration ? await ctx.loadNarration(month).catch(() => null) : null;
     if (mine !== narrationToken) return;
     narration = { month, state: ctx.loadNarration ? (n ? "present" : "absent") : "unknown" };
-    renderFetch();
+    paintFetch(fetchView, "context");
   };
+
+  // 시간 여행: 월만 바꾸고(local), 발행은 아래 store 구독이 평소처럼 한다.
+  const travel = createTimeTravel({
+    months: () => ctx.index.months,
+    month: () => ctx.store.getState().month,
+    setMonth: (m) => ctx.store.dispatch({ type: "local", month: m }),
+    onChange: paintTravel,
+  });
   const monthFetch = createMonthFetch({
     fetch: (input, init) => window.fetch(input, init),
     storage: sessionStore(),
@@ -163,9 +159,22 @@ export const mountHostView: MountView = (root, ctx) => {
     },
     forgetMonth: (m) => forgetMonth(m),
     toast: ctx.toast,
-    onChange: (v) => renderFetch(v),
+    onChange: (v) => { fetchView = v; paintFetch(v, "view"); },
   });
+
+  render(ctx.store.getState());
+  publish();
+  paintTravel(travel.view);
+  paintFetch(fetchView, "view");
   void checkNarration(ctx.store.getState().month);
+
+  // 새 달을 가져와 index가 바뀌면 월 칩·시간 여행·해설 유무를 다시 그린다.
+  const offIndex = ctx.indexSource.subscribe(() => {
+    render(ctx.store.getState());
+    paintTravel(travel.view);
+    void checkNarration(ctx.store.getState().month);
+  });
+
   const onSubmit = (ev: Event) => {
     const form = ev.target as HTMLFormElement;
     if (form.dataset.form === "fetch") {
@@ -196,7 +205,7 @@ export const mountHostView: MountView = (root, ctx) => {
     render(s);
     if (s.month !== prev.month || s.gu !== prev.gu || s.metric !== prev.metric) publish();
     if (s.month !== prev.month) {
-      renderTravel();
+      paintTravel(travel.view);
       void checkNarration(s.month);
     }
   });

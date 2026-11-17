@@ -14,6 +14,11 @@ export function isStageQuery(query: string | undefined): boolean {
   return new URLSearchParams(query).get("stage") === "1";
 }
 
+/** 큰 화면에서 바뀔 때 알릴 말: "강남구, 2026년 11월" */
+export function stageAnnouncement(state: Pick<AppState, "gu" | "month">): string {
+  return `${state.gu ?? "서울 전체"}, ${fmtMonth(state.month)}`;
+}
+
 export function renderStage(state: AppState, data: GuData | null, index: DataIndex | null, narration: Narration | null): string {
   const { title, figures } = summarize(state, data, index);
   const down = state.conn === "error" || state.conn === "closed"
