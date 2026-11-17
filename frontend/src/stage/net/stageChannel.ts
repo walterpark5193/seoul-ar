@@ -117,7 +117,7 @@ export function createAppSyncStageChannel(cfg: EventsConfig): StageChannel {
     subscribe: core.subscribe,
     async publish(msg) {
       const wire = toWire(msg);
-      const failed = await events.post(STAGE_CHANNEL, wire);
+      const failed = await events.post(STAGE_CHANNEL, { ...wire });
       if (Array.isArray(failed) && failed.length > 0) throw new Error("AppSync가 이벤트 발행을 거부했습니다");
     },
     onStatus: core.onStatus,
