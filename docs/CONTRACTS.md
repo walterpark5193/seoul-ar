@@ -276,3 +276,47 @@ export const INITIAL_STATE: AppState; // month: index.months의 마지막, gu: n
 ## 9. 인프라 출력 (infra/)
 
 스택 이름 `SeoulArStack`, 리전 us-east-1. CfnOutput: `CloudFrontUrl`, `EventsHttpEndpoint`, `EventsRealtimeEndpoint`, `BucketName`. 배포 명령은 `infra/`에서 `npx cdk deploy --require-approval never --outputs-file cdk-outputs.json`. 프론트 빌드 결과 `frontend/dist`가 있어야 synth 된다.
+
+## 10. 월 실시간 수집 (Task 9, 2026-11-17 추가)
+
+사용자 요청: "지금은 2026.11만 있는데 월별 리포트를 실시간으로 가져올 수 있는 버튼". 발표자 화면에서 월을 고르면 Lambda가 서울 API를 호출해 그 달의 25구 집계 JSON을 S3에 쓰고, 진행 상황을 AppSync Events로 알린다. 서울 API 키는 AWS 안(SSM)에만 있고 코드·저장소·브라우저에는 없다.
+
+### 10.1 SSM 파라미터 (us-east-1, 사용자가 만든다. CDK는 이름만 참조)
+- `/seoul-ar/seoul-api-key` SecureString: 서울 열린데이터광장 인증키
+- `/seoul-ar/presenter-passcode` SecureString: 발표자 암호(수집 버튼 보호. 뒤에 AppSync publish 잠금에도 재사용)
+
+### 10.2 HTTP API
+`POST /api/fetch-month` (CloudFront 추가 동작 `/api/*` → Lambda Function URL 오리진, 캐시 없음). 요청 JSON `{ "month": "202610" }`, 헤더 `x-presenter-key: <암호>`.
+- 202 `{ "jobId": "...", "month": "202610" }` 시작됨 (비동기: 핸들러가 자기 자신을 Event 로 재호출하고 바로 응답)
+- 400 월 형식 오류(YYYYMM, 200601 ≤ month ≤ 이번 달)
+- 401 암호 불일치(sha256 다이제스트 timingSafeEqual 비교)
+- 409 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시)
+- Function URL 직접 호출도 같은 검사를 거친다(CloudFront 우회 방어는 암호).
+
+### 10.3 수집 알고리즘 (참고 구현: ~/claude-lab/capstone/seoul-realestate/server.py 의 _fetch_page/fetch_trades)
+- 구마다: 서울 API `tbLnOpendataRtmsV` 를 접수연도 `RCPT_YR = month[:4]`, 자치구 `CGG_NM = gu` 로 1000건씩 페이지 호출. 결과는 최근 계약부터 오므로, 한 페이지가 1000건 미만이거나 페이지의 가장 오래된 `CTRT_DAY` 가 해당 월 1일보다 앞서면 멈춘다(최대 12페이지). `CTRT_DAY[:6] === month` 인 행만 남긴다.
+- 집계는 `tools/data/aggregate.mjs` 의 `aggregateRows`/`buildIndex` 와 **같은 코드**를 쓴다. Lambda 디렉터리에 복사본을 두고(`infra/lambda/fetch-month/aggregate.mjs`), 두 파일이 바이트 단위로 같은지 테스트로 묶는다. 출력 스키마는 2절 그대로(금지 필드 없음).
+- 쓰기: `data/{month}/{gu}.json` 25개, 그 뒤 `data/index.json` 갱신(기존 index 를 읽어 `months` 에 월 추가·정렬, `summary[month]` 교체, `generatedAt` 갱신). 모두 `Cache-Control: no-cache`. 끝나면 CloudFront 무효화 `/data/*`.
+- 오류 응답 코드 `INFO-200`(데이터 없음)은 빈 결과로 처리. 그 외 오류는 작업 실패.
+- 예외 메시지에 URL(키 포함)을 절대 넣지 않는다.
+
+### 10.4 진행 이벤트
+채널 `/seoul/jobs`. Lambda 가 AppSync Events HTTP 엔드포인트에 `x-api-key` 로 POST 한다(`{"channel":"/seoul/jobs","events":[<JSON 문자열>]}`).
+
+```ts
+export interface JobMessage { v: 1; type: "job"; jobId: string; month: string; state: "running" | "done" | "error"; done: number; total: number; gu?: string; message?: string; ts: number; }
+export function isJobMessage(x: unknown): x is JobMessage;
+```
+- 구 하나 끝날 때마다 `running`(done 증가, gu 이름), 마지막에 `done` 또는 `error`(message 는 사용자용 한 문장, 키·URL 없음).
+- 폴링 폴백: `data/jobs/{jobId}.json` 에 마지막 상태를 쓴다.
+
+### 10.5 프론트
+- `RealtimeClient` 에 `subscribeJobs(handler: (msg: JobMessage) => void): () => void` 추가(AppSync 구현은 `/seoul/jobs` 채널 연결, mock 은 메모리/BroadcastChannel).
+- 호스트 화면 "월 가져오기" 구역: 월 입력(YYYYMM 또는 `<input type="month">`), "가져오기" 버튼, 처음 누를 때 발표자 암호 입력(세션 저장소 `seoul-ar.presenter`), 진행 표시 "2026년 10월 수집 중 12/25 · 강서구", 완료 시 index 를 다시 읽어(`no-store`) 월 토글에 새 달이 나타나고 토스트 "2026년 10월 데이터가 준비됐습니다". 401/409/400/네트워크 오류는 사용자용 문장으로 표시.
+- 뷰어: 원격 상태의 `month` 가 자기 index 에 없으면 index 를 한 번 다시 읽은 뒤 적용한다(새 달이 생겼을 때 폰이 따라오게).
+
+### 10.6 CDK
+- `lambda.Function` Node.js 22, `Code.fromAsset("lambda/fetch-month")`(의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch 만), memory 512, timeout 600s, env: `BUCKET`, `DISTRIBUTION_ID`, `EVENTS_HTTP_ENDPOINT`, `EVENTS_API_KEY`, `SSM_API_KEY_NAME`, `SSM_PASSCODE_NAME`, `SELF_FUNCTION_NAME`.
+- IAM 최소 권한: 버킷의 `data/*` Get/Put, 해당 배포의 `cloudfront:CreateInvalidation`, 두 파라미터의 `ssm:GetParameter` + `kms:Decrypt`(aws/ssm 키), 자기 자신 `lambda:InvokeFunction`.
+- Function URL(AuthType NONE) + CloudFront 추가 동작 `/api/*`: `FunctionUrlOrigin`, 캐시 비활성(`CACHING_DISABLED`), 오리진 요청 정책 `ALL_VIEWER_EXCEPT_HOST_HEADER`, 메서드 ALL, HTTPS 리다이렉트.
+- 출력 `FetchMonthUrl`. 테스트: Lambda 핸들러 단위 테스트(`node --test`, fetch/S3/publish 주입), CDK assertions(동작·권한·env).
