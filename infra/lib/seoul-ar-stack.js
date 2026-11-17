@@ -96,6 +96,7 @@ class SeoulArStack extends cdk.Stack {
       distribution,
       distributionPaths: ["/*"],
       prune: true,
+      memoryLimit: 1024, // dist 가 50MB(MediaPipe wasm·모델·음성)라 기본 128MB 로는 OOM 위험
       exclude: ["data/*"],
       cacheControl: [s3deploy.CacheControl.fromString("no-cache")],
     });
@@ -110,6 +111,7 @@ class SeoulArStack extends cdk.Stack {
         destinationBucket: bucket,
         destinationKeyPrefix: "data/",
         prune: false,
+        memoryLimit: 512,
         cacheControl: [s3deploy.CacheControl.fromString("no-cache")],
       });
       seedDeployment.node.addDependency(siteDeployment);

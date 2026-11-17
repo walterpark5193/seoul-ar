@@ -141,7 +141,7 @@ cd ~/claude-lab/seoul-ar/infra && npx cdk destroy
 - 다시 올릴 때는 프론트를 빌드한 뒤 배포합니다.
 
 ```bash
-cd ~/claude-lab/seoul-ar/frontend && npx vite build
+cd ~/claude-lab/seoul-ar/frontend && npm run build
 cd ~/claude-lab/seoul-ar/infra && npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
 ```
 
