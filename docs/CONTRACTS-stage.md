@@ -78,7 +78,7 @@ export function palmCenter(lm: Vec3[]): Point;                       // 랜드�
 export function mapToScreen(p: Point, opts?: { mirror?: boolean; margin?: number }): Point;
 // mirror 기본 true: x → 1-x. margin 기본 0.1: v' = (v - margin)/(1 - 2*margin), [0,1]로 자름
 export interface CursorMapper { map(lm: Vec3[], tMs: number): Point; reset(): void; }
-export function createCursorMapper(opts?: { mirror?: boolean; margin?: number; minCutoff?: number; beta?: number }): CursorMapper;
+export function createCursorMapper(opts?: { mirror?: boolean; margin?: number; minCutoff?: number; beta?: number }): CursorMapper; // 기본 beta 3(정규 좌표용, Ruling)
 export function toNdc(p: Point): { x: number; y: number };          // x*2-1, -(y*2-1)
 ```
 
@@ -97,7 +97,8 @@ export function createGestureMachine(cfg?: Partial<GestureConfig>): GestureMachi
 - `spread`: fist=false, 손이 정확히 2개, 둘 다 `Open_Palm`·≥minScore로 확정, 쿨다운 지남 → 한 번. 그 뒤 "둘 다 편 손이 아님"이 한 프레임이라도 나와야 다시 발생 가능(래치).
 - `victory`: fist=false, 주 손 `Victory`·≥minScore 확정, 쿨다운 지남 → 한 번, 래치(제스처가 바뀌어야 재발생).
 - 한 손 `Open_Palm`은 이벤트 없음.
-- `ctx.voting`이 true면 이벤트를 내지 않는다. 투표 시작 시 fist가 true였다면 조용히 false로(이벤트 없음).
+- `ctx.voting`이 true면 이벤트를 내지 않는다. 투표 시작 시 fist가 true였다면 조용히 false로(이벤트 없음). 투표 중 프레임은 확정 횟수에 세지 않고, spread·victory 래치는 투표 뒤 제스처가 한 번 바뀔 때까지 잠긴다(Ruling).
+- 래치 재무장은 제스처 이름이 바뀔 때만(점수가 잠깐 minScore 아래로 내려간 것은 재무장 아님). release가 일어나면 spread 래치를 잠근다(주먹 → 두 손 펴기가 펼치기로 번지지 않게)(Ruling).
 - grab/spread/victory 발생 후 `cooldownMs` 동안 grab/spread/victory 없음.
 
 ### 2.3 `voteCounter.ts`
@@ -114,6 +115,7 @@ export const WASM_PATH = "/mediapipe/wasm";
 export type HandSourceError = "no-camera" | "denied" | "model-missing" | "wasm-failed" | "unsupported";
 export interface HandSource {
   readonly video: HTMLVideoElement; readonly fps: number; readonly loadMs: number | null; readonly delegate: "GPU" | "CPU";
+  readonly errors: number;                                            // 연속 인식 실패 수, 성공하면 0 (Ruling)
   onFrame(cb: (f: HandFrame) => void): () => void; stop(): void;
 }
 export interface RecognizerResultLike {
@@ -125,7 +127,8 @@ export function toHandFrame(result: RecognizerResultLike, t: number): HandFrame;
 export interface HandSourceDeps {
   getUserMedia?: (c: MediaStreamConstraints) => Promise<MediaStream>;
   loadVision?: () => Promise<typeof import("@mediapipe/tasks-vision")>;
-  modelExists?: () => Promise<boolean>;                              // 기본: fetch(MODEL_PATH, {method:"HEAD"}).ok
+  modelExists?: () => Promise<boolean>;                              // 기본: HEAD 응답이 ok이고 content-type에 text/html 없음(SPA 폴백 = 없음)
+  createVideo?: () => HTMLVideoElement; fetchImpl?: typeof fetch;   // 테스트 주입용(Ruling)
 }
 export async function startHandSource(deps?: HandSourceDeps): Promise<{ ok: true; source: HandSource } | { ok: false; reason: HandSourceError }>;
 ```
@@ -158,7 +161,7 @@ export function winnerOf(v: VoteState): { winner: string; allZero: boolean };   
   - "다음으로": index<2면 index+1, phase prompt, endsAt now+promptMs. index==2면 phase review, endsAt now+reviewMs, reviewEdited false.
   - review, reviewEdited false, now≥endsAt → result(아래 확정과 같음).
   - result, now≥endsAt → vote=null.
-- `voteSet(index, n, now)`: n이 0~VOTE_MAX 정수가 아니면 무시. review가 아니면 index ≤ 현재 index만, review면 0~2 모두. counts[index]=n, sources[index]="manual". review면 reviewEdited=true, endsAt=null. 현재 후보이고 phase가 awaitManual이거나 method manual이면 endsAt=now+manualAdvanceMs.
+- `voteSet(index, n, now)`: n이 0~VOTE_MAX 정수가 아니면 무시. review가 아니면 index ≤ 현재 index만, review면 0~2 모두. counts[index]=n, sources[index]="manual". review면 reviewEdited=true, endsAt=null. 현재 후보이고 phase가 awaitManual이거나 method manual이면 endsAt=now+manualAdvanceMs. result 단계의 voteSet은 무시. prompt 중 현재 후보 voteSet은 값만 기록하고 안내 타이머 유지. 직접 선택 방식 counting 진입 시 이미 직접 값이 있으면 endsAt=now+manualAdvanceMs(Ruling).
 - `voteMethod(method, now)`: method 갱신. counting 중 camera→manual이면 endsAt=null, manual→camera면 endsAt=now+countMs.
 - `voteConfirm(now)`: review에서만 → winnerOf → phase result, winner, allZero, endsAt now+resultMs, focus=winner, lifted=null, mode="map".
 - `voteCancel`: vote=null.
@@ -273,7 +276,8 @@ export function templateLines(gus, month); // → { id, caption, speech }[] : �
 export const MODEL_ID = "global.anthropic.claude-sonnet-5-5";
 export function buildPrompt(facts);                 // 한국어, 규칙 5.4, JSON {"caption","speech"}만 출력하라고 지시
 export function extractText(converseResponse);      // output.message.content 중 text 있는 첫 블록(reasoningContent 건너뜀)
-export function parseScript(text);                  // 코드펜스 허용, {caption, speech} 문자열 둘 다 있어야
+export function parseScript(text);                  // 코드펜스 허용, caption 필수. speech는 무시(Ruling: Bedrock은 caption만 쓴다)
+export function speechFromCaption(caption);         // ㎡ → 제곱미터, 나머지 그대로(Polly가 아라비아 숫자를 한국어로 읽음)
 export function allowedNumbers(facts);              // 자막에 허용되는 숫자 문자열 집합(설계 5.6)
 export function validateScript(facts, script);      // → { ok, errors: string[] }
 export function fallbackScript(facts);              // 템플릿 해설(데이터 없음 포함)
@@ -285,6 +289,7 @@ export function speechHash(text, voice, engine);    // sha1 hex 앞 16자
 export function buildManifest(lines, { voice, engine, hashes }); // → NarrationManifest (5.1), file = `${id}.mp3`
 export async function synthAll(lines, { client, outDir, voice = "Seoyeon", engine = "generative", fallbackEngine = "neural", previous, log });
 // previous manifest의 hash가 같고 파일이 있으면 건너뜀. → { manifest, synthesized, skipped, failed }
+// hash는 실제 사용 엔진 기준으로 기록, 건너뛰기 비교는 요청 엔진 기준(대체 항목은 다음 실행에 generative 재시도). CLI는 이전 manifest와 병합, --scripts를 못 읽으면 exit 1(Ruling)
 // CLI: node tools/narration/synth.mjs --scripts tools/narration/scripts.json --data frontend/public/data --month 202611 --out frontend/public/narration
 ```
 - 5.4 문장 규칙: 존댓말 두 문장, caption 90자 이내, 사실표 숫자만, 건물명·지번·본번·부번 금지, 투자 권유·과장("폭등", "대박", "꼭 사야") 금지, 데이터 없음(n 0)이면 "이번 달 거래가 없었습니다" 취지.
