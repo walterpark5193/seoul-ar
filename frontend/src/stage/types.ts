@@ -8,11 +8,13 @@ export interface HandObs { landmarks: Vec3[]; gesture: GestureName; score: numbe
 export interface HandFrame { t: number; hands: HandObs[]; }
 /** 화면 정규 좌표 [0,1], 왼쪽 위 원점. */
 export interface Point { x: number; y: number; }
-export type GestureEvent = { type: "grab" } | { type: "release" } | { type: "spread" } | { type: "victory" };
-export interface GestureOutput { primary: number | null; events: GestureEvent[]; handCount: number; }
+export type GestureEvent = { type: "grab" } | { type: "release" } | { type: "spread" } | { type: "victory" } | { type: "twoFist" } | { type: "twoFistEnd" };
+export interface GestureOutput { primary: number | null; secondary: number | null; events: GestureEvent[]; handCount: number; }
 
 export type StageMode = "map" | "spread";
 export type InputMode = "hands" | "mouse";
+/** 회전 잡기 상태(계약 13). */
+export type RotateHold = "none" | "one" | "two";
 export type VoteMethod = "camera" | "manual";
 export type VotePhase = "prompt" | "counting" | "awaitManual" | "review" | "result";
 export type VoteSource = "camera" | "manual" | null;
@@ -26,6 +28,7 @@ export interface VoteState {
 export interface StageState {
   mode: StageMode; hover: string | null; lifted: string | null; focus: string | null;
   input: InputMode; vote: VoteState | null; month: string; metric: Metric; round: number;
+  /** 회전 잡기(계약 13.4). */ rotate: RotateHold; spinning: boolean;
 }
 export type StageEvent =
   | { type: "hover"; gu: string | null }
@@ -39,7 +42,8 @@ export type StageEvent =
   | { type: "voteCancel" }
   | { type: "setInput"; input: InputMode; now: number }
   | { type: "month"; month: string }
-  | { type: "metric"; metric: Metric };
+  | { type: "metric"; metric: Metric }
+  | { type: "twoFist" } | { type: "twoFistEnd" } | { type: "spinState"; spinning: boolean };
 export type Effect =
   | { type: "scene.layout"; mode: StageMode }
   | { type: "scene.lift"; gu: string | null }
@@ -49,6 +53,7 @@ export type Effect =
   | { type: "narrate"; id: string; interrupt: boolean; protect: boolean }
   | { type: "narrate.stop" }                       // 재생 중(보호 클립 포함)·대기 중 해설을 모두 비운다
   | { type: "counter.reset" }
+  | { type: "rotate.grabOne" } | { type: "rotate.grabTwo" } | { type: "rotate.release" } | { type: "rotate.catch" } | { type: "rotate.reset" }
   | { type: "publish.state" }
   | { type: "publish.stage" }
   | { type: "publish.vote" };

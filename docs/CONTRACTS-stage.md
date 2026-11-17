@@ -412,3 +412,66 @@ export function voteLine(m: VoteMessage): string;                      // "투�
 - 큰 화면(`#/3d?stage=1`, 본체 13)과 손짓 무대(`#/stage`)는 이름만 겹친다. `queryFor("stage", …)`는 undefined, 무대는 `?vote=`를 `location.hash`에서 읽는다. `.stage-title`·`.stage-conn` 클래스가 겹쳐 큰 화면 규칙은 `.stage-info` 안, 무대 규칙은 `.stage-top` 안으로 한정했다.
 - 10 관객: 투표 결과 한 줄은 `#/3d` 바텀시트 모드와 큰 화면 모드 모두에 있다(큰 화면은 따라가기 고정이라 펼침·들어올림도 따라간다). `--sheet-h`는 바텀시트 면이 정한다.
 - 9 호스트: "큰 화면 열기"(새 창) 뒤, "처음으로" 앞에 "무대 열기"(`#/stage`, 같은 창).
+
+## 13. 회전·확대 (2026-11-17, 설계 `docs/superpowers/specs/2026-11-17-stage-rotate-design.md`)
+
+### 13.1 공유 타입 추가 (`frontend/src/stage/types.ts`, 컨트롤러가 먼저 반영)
+```ts
+export type GestureEvent = ... | { type: "twoFist" } | { type: "twoFistEnd" };
+export interface GestureOutput { primary: number | null; secondary: number | null; events: GestureEvent[]; handCount: number; }
+export type RotateHold = "none" | "one" | "two";
+// StageState에 추가: rotate: RotateHold; spinning: boolean;
+// StageEvent에 추가: { type: "twoFist" } | { type: "twoFistEnd" } | { type: "spinState"; spinning: boolean }
+// Effect에 추가: { type: "rotate.grabOne" } | { type: "rotate.grabTwo" } | { type: "rotate.release" } | { type: "rotate.catch" } | { type: "rotate.reset" }
+```
+
+### 13.2 회전기 (`frontend/src/stage/rotate.ts`, 순수)
+```ts
+export interface RotateConfig { degPerScreen: number; friction: number; maxSpeedDeg: number; flickMinDegPerSec: number; velocityWindowMs: number; zoomMin: number; zoomMax: number; wheelStep: number; resetSeconds: number; }
+export const DEFAULT_ROTATE: RotateConfig; // { 180, 2.5, 720, 60, 100, 0.7, 1.6, 0.1, 0.6 }
+export type RotateMode = "idle" | "one" | "two" | "spinning" | "resetting";
+export interface RotateState { yaw: number; zoom: number; mode: RotateMode; }   // yaw 라디안, (-π, π]로 정규화
+export interface Rotator {
+  grabOne(p: Point, t: number): void;            // 관성·리셋 중이면 즉시 멈추고 잡음
+  grabTwo(a: Point, b: Point, t: number): void;   // 잡는 순간의 중점 x·거리·zoom을 기준으로
+  move(p: Point, t: number): void;               // one: yaw += Δx × degPerScreen(라디안 환산). 손이 오른쪽(+x)이면 yaw 증가
+  moveTwo(a: Point, b: Point, t: number): void;   // 중점 Δx → yaw, zoom = zoom0 × (거리/거리0), 클램프
+  release(t: number): void;                      // 최근 velocityWindowMs 각속도 ≥ flickMinDegPerSec면 spinning(상한 maxSpeedDeg), 아니면 idle
+  catch(): void;                                 // spinning·resetting → idle, 각도 유지
+  wheel(deltaY: number): void;                   // deltaY<0 확대(zoom ×(1+wheelStep)), >0 축소(÷), 클램프
+  reset(instant?: boolean): void;                // yaw→0(최단 방향), zoom→1, resetSeconds 보간(instant면 즉시)
+  tick(dt: number): RotateState;                 // 관성: ω ← ω·exp(−friction·dt), |ω| < 5°/s면 idle. 리셋 보간
+  readonly state: RotateState;
+}
+export function createRotator(cfg?: Partial<RotateConfig>): Rotator;
+```
+
+### 13.3 두 주먹 (`gestureMachine`)
+- `secondary`: 손이 2개 이상이면 primary가 아닌 손 중 손바닥이 가장 큰 손, 아니면 null.
+- `twoFist`: 손이 정확히 2개, 둘 다 `Closed_Fist`·≥minScore가 confirmFrames 연속, 투표 중 아님 → 한 번. 래치(풀릴 때까지 재발생 없음). 단일 주먹 상태(fist)와 독립(그대로 유지).
+- `twoFistEnd`: twoFist 상태에서 어느 한 손이 주먹이 아님이 confirmFrames 연속이거나, 손이 2개 미만인 상태가 releaseAfterMs 이상 → 한 번. 투표 시작 시 조용히 해제.
+- 기존 규칙(grab/release/spread/victory, 추적 손 기억, 정지 가드)은 그대로.
+
+### 13.4 무대 상태 (`stageState`·`effects`)
+- `grab`: 투표 진행 중·lifted면 지금처럼 무시. `spinning`이면 → spinning=false, rotate="one", 효과 rotate.catch 후 rotate.grabOne(hover와 무관, 들지 않음). 아니면 hover가 있으면 지금처럼 lift, hover가 없고 mode "map"이면 rotate="one" + rotate.grabOne, spread면 무시.
+- `release`: rotate "one"이면 rotate="none" + rotate.release(lift 경로 없음). 아니면 지금처럼.
+- `twoFist`: mode "map", lifted 없음, 투표 진행 중 아님 → rotate="two" + rotate.grabTwo(one이었으면 전환). 그 외 무시.
+- `twoFistEnd`: rotate "two"면 rotate="none" + rotate.release.
+- `spinState`: spinning 갱신(stageView가 회전기 모드 변화 때 보냄).
+- spread로 들어갈 때, victory, voteStart, setInput 변경 → rotate="none", spinning=false, 효과 rotate.reset. (spread·victory는 기존 효과와 함께, 순서는 scene.layout 앞.)
+- 회전 중(rotate≠"none")에는 hover 이벤트를 상태에 반영하지 않는다(hover=null 유지).
+- 효과 순서: rotate.* → scene.layout → … (기존 순서 유지).
+
+### 13.5 렌더러·입력
+- `StageRenderer.setZoom(z: number)`: 현재 포즈(화면 비율 맞춤·모드 보간 포함)의 target에서 카메라까지 거리를 1/z배. 0.7~1.6 클램프. 포즈 보간·resize와 함께 유지.
+- `PointerHandlers.wheel?(deltaY: number)`: attachPointer가 wheel을 받으면 preventDefault 후 호출(passive: false).
+
+### 13.6 채널·큰 화면
+- `StageMessage`에 선택 필드 `yaw?: number`((-π, π], 유한수), `zoom?: number`([0.7, 1.6]). ALLOWED_KEYS.stage에 추가. `toStageMessage(s, ts, view?: { yaw: number; zoom: number })`.
+- 무대: yaw·zoom이 바뀌는 동안 최대 5Hz로 StageMessage 발행, 멈추면 1회, 하트비트에도 포함.
+- `StageFollowOptions.onView?(yaw: number, zoom: number)`: StageMessage에 값이 있으면 호출(따라가기 중일 때만). 없거나 stale 타임아웃이면 (0, 1).
+- orbitView: 큰 화면 모드(`?stage=1`)에서만 onView를 적용(도시 group 회전 + 확대, 부드럽게 따라가기). 일반 관객 폰은 무시.
+
+### 13.7 안내 줄 (`hud.ts renderHints`)
+- 손: "주먹: 들어올리기 · 빈 곳 주먹 끌기: 돌리기 · 두 주먹: 돌리기·확대 · 두 손 펴기: 가격순 펼치기 · 브이: 전체 보기 · V: 투표 · M: 음소거"
+- 마우스: "누르고 있기: 들어올리기 · 빈 곳 끌기: 돌리기 · 휠: 확대 · 스페이스: 가격순 펼치기 · Esc: 전체 보기 · V: 투표 · G: 손 모드"
