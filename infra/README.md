@@ -120,6 +120,9 @@ Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타�
 
 주의: 시드는 저장소에 있는 달(예: 202611)의 구 파일을 저장소 버전으로 되돌린다. 배포 도중에 월 가져오기를 하면 그 달이 index 에서 빠질 수 있다(배포 뒤 다시 가져오면 된다).
 
+저장소는 배포된 `data/` 의 스냅샷(달마다 구 파일 25개와 `narration.json`, 그리고 `index.json`)을 싣는다. 시드는 같은 이름의 객체를 덮어쓰기만 하고 지우지 않으므로, S3 에서 달을 다시 가져왔거나 해설을 새로 만들었으면 커밋 전에 `node tools/data/pull-deployed.mjs --stack SeoulArStack --out frontend/public/data` 로 스냅샷을 맞춘다(읽기 전용, `data/jobs/` 는 받지 않음, `--dry-run` 은 검사만). 그러지 않으면 다음 배포가 그 달을 저장소의 옛 스냅샷으로 되돌린다. 금지 필드·모르는 키·깨진 JSON·index 의 달과 폴더 불일치가 하나라도 있으면 아무것도 쓰지 않는다.
+202611 이 바뀌면 무대 해설(`tools/narration/scripts.json`, `frontend/public/narration/`)도 다시 만든다. 어긋나면 `tools/narration/shipped.test.mjs` 가 실패한다.
+
 ### 5. IAM (최소 권한)
 
 | 주체 | 허용 |

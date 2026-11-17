@@ -1,8 +1,42 @@
 {
   "v": 1,
-  "generatedAt": "2026-11-17T07:22:36.971Z",
+  "generatedAt": "2026-11-17T14:40:11.866Z",
   "source": "서울 열린데이터광장 부동산 실거래가(tbLnOpendataRtmsV)",
   "months": [
+    "202401",
+    "202402",
+    "202403",
+    "202404",
+    "202405",
+    "202406",
+    "202407",
+    "202408",
+    "202409",
+    "202410",
+    "202411",
+    "202412",
+    "202501",
+    "202502",
+    "202503",
+    "202504",
+    "202505",
+    "202506",
+    "202507",
+    "202508",
+    "202509",
+    "202510",
+    "202511",
+    "202512",
+    "202601",
+    "202602",
+    "202603",
+    "202604",
+    "202605",
+    "202606",
+    "202607",
+    "202608",
+    "202609",
+    "202610",
     "202611"
   ],
   "gus": [
@@ -33,177 +67,7045 @@
     "강동구"
   ],
   "summary": {
+    "202401": {
+      "종로구": {
+        "n": 57,
+        "cancelled": 6,
+        "medPerM2": 830,
+        "medAmt": 53000,
+        "maxAmt": 255000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 69,
+        "cancelled": 2,
+        "medPerM2": 1140,
+        "medAmt": 65000,
+        "maxAmt": 237000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 87,
+        "cancelled": 7,
+        "medPerM2": 1766,
+        "medAmt": 130000,
+        "maxAmt": 970000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 160,
+        "cancelled": 11,
+        "medPerM2": 1563,
+        "medAmt": 106250,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 210,
+        "cancelled": 12,
+        "medPerM2": 945,
+        "medAmt": 38500,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 185,
+        "cancelled": 11,
+        "medPerM2": 958,
+        "medAmt": 52000,
+        "maxAmt": 242000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 153,
+        "cancelled": 16,
+        "medPerM2": 795,
+        "medAmt": 37000,
+        "maxAmt": 277000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 201,
+        "cancelled": 9,
+        "medPerM2": 918,
+        "medAmt": 68000,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 142,
+        "cancelled": 8,
+        "medPerM2": 530,
+        "medAmt": 24500,
+        "maxAmt": 89000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 173,
+        "cancelled": 10,
+        "medPerM2": 601,
+        "medAmt": 34000,
+        "maxAmt": 214000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 223,
+        "cancelled": 6,
+        "medPerM2": 874,
+        "medAmt": 48000,
+        "maxAmt": 124000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 257,
+        "cancelled": 13,
+        "medPerM2": 797,
+        "medAmt": 34800,
+        "maxAmt": 165500,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 168,
+        "cancelled": 5,
+        "medPerM2": 945,
+        "medAmt": 57000,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 251,
+        "cancelled": 12,
+        "medPerM2": 1150,
+        "medAmt": 56000,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 227,
+        "cancelled": 12,
+        "medPerM2": 953,
+        "medAmt": 56800,
+        "maxAmt": 620000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 393,
+        "cancelled": 21,
+        "medPerM2": 768,
+        "medAmt": 29000,
+        "maxAmt": 217000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 262,
+        "cancelled": 10,
+        "medPerM2": 713,
+        "medAmt": 38000,
+        "maxAmt": 159000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 153,
+        "cancelled": 12,
+        "medPerM2": 755,
+        "medAmt": 29300,
+        "maxAmt": 125000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 209,
+        "cancelled": 10,
+        "medPerM2": 1246,
+        "medAmt": 59800,
+        "maxAmt": 1270000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 243,
+        "cancelled": 18,
+        "medPerM2": 1146,
+        "medAmt": 59000,
+        "maxAmt": 365500,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 181,
+        "cancelled": 10,
+        "medPerM2": 848,
+        "medAmt": 31500,
+        "maxAmt": 136839,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 191,
+        "cancelled": 10,
+        "medPerM2": 1553,
+        "medAmt": 77500,
+        "maxAmt": 540000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 282,
+        "cancelled": 16,
+        "medPerM2": 1986,
+        "medAmt": 120000,
+        "maxAmt": 1190000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 370,
+        "cancelled": 8,
+        "medPerM2": 1377,
+        "medAmt": 81150,
+        "maxAmt": 530000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 269,
+        "cancelled": 12,
+        "medPerM2": 1142,
+        "medAmt": 72000,
+        "maxAmt": 255254,
+        "truncated": false
+      }
+    },
+    "202402": {
+      "종로구": {
+        "n": 67,
+        "cancelled": 3,
+        "medPerM2": 809,
+        "medAmt": 41000,
+        "maxAmt": 320000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 74,
+        "cancelled": 8,
+        "medPerM2": 1111,
+        "medAmt": 52025,
+        "maxAmt": 467000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 121,
+        "cancelled": 11,
+        "medPerM2": 1844,
+        "medAmt": 93000,
+        "maxAmt": 995000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 156,
+        "cancelled": 12,
+        "medPerM2": 1551,
+        "medAmt": 123250,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 200,
+        "cancelled": 13,
+        "medPerM2": 998,
+        "medAmt": 41000,
+        "maxAmt": 271000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 175,
+        "cancelled": 11,
+        "medPerM2": 987,
+        "medAmt": 58500,
+        "maxAmt": 187930,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 152,
+        "cancelled": 7,
+        "medPerM2": 781,
+        "medAmt": 38000,
+        "maxAmt": 158000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 226,
+        "cancelled": 9,
+        "medPerM2": 942,
+        "medAmt": 65500,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 132,
+        "cancelled": 10,
+        "medPerM2": 583,
+        "medAmt": 27750,
+        "maxAmt": 102000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 162,
+        "cancelled": 10,
+        "medPerM2": 565,
+        "medAmt": 31700,
+        "maxAmt": 115000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 247,
+        "cancelled": 12,
+        "medPerM2": 893,
+        "medAmt": 49000,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 269,
+        "cancelled": 19,
+        "medPerM2": 705,
+        "medAmt": 32000,
+        "maxAmt": 279000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 138,
+        "cancelled": 6,
+        "medPerM2": 1010,
+        "medAmt": 66350,
+        "maxAmt": 278000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 199,
+        "cancelled": 5,
+        "medPerM2": 1118,
+        "medAmt": 83000,
+        "maxAmt": 560000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 229,
+        "cancelled": 11,
+        "medPerM2": 1005,
+        "medAmt": 61776,
+        "maxAmt": 320000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 333,
+        "cancelled": 19,
+        "medPerM2": 790,
+        "medAmt": 25700,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 239,
+        "cancelled": 13,
+        "medPerM2": 783,
+        "medAmt": 40000,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 497,
+        "cancelled": 10,
+        "medPerM2": 1082,
+        "medAmt": 50076,
+        "maxAmt": 113000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 197,
+        "cancelled": 11,
+        "medPerM2": 1180,
+        "medAmt": 76000,
+        "maxAmt": 386000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 195,
+        "cancelled": 18,
+        "medPerM2": 1116,
+        "medAmt": 81500,
+        "maxAmt": 193700,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 199,
+        "cancelled": 23,
+        "medPerM2": 727,
+        "medAmt": 32700,
+        "maxAmt": 250000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 198,
+        "cancelled": 11,
+        "medPerM2": 1642,
+        "medAmt": 93400,
+        "maxAmt": 785000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 249,
+        "cancelled": 15,
+        "medPerM2": 2074,
+        "medAmt": 142000,
+        "maxAmt": 1000000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 279,
+        "cancelled": 6,
+        "medPerM2": 1471,
+        "medAmt": 114000,
+        "maxAmt": 670443,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 249,
+        "cancelled": 11,
+        "medPerM2": 1171,
+        "medAmt": 79131,
+        "maxAmt": 235000,
+        "truncated": false
+      }
+    },
+    "202403": {
+      "종로구": {
+        "n": 102,
+        "cancelled": 4,
+        "medPerM2": 869,
+        "medAmt": 41900,
+        "maxAmt": 282000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 94,
+        "cancelled": 9,
+        "medPerM2": 1236,
+        "medAmt": 73000,
+        "maxAmt": 265000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 174,
+        "cancelled": 21,
+        "medPerM2": 1763,
+        "medAmt": 114608,
+        "maxAmt": 743000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 277,
+        "cancelled": 13,
+        "medPerM2": 1671,
+        "medAmt": 114000,
+        "maxAmt": 570000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 260,
+        "cancelled": 17,
+        "medPerM2": 1227,
+        "medAmt": 67250,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 275,
+        "cancelled": 13,
+        "medPerM2": 1033,
+        "medAmt": 65700,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 259,
+        "cancelled": 16,
+        "medPerM2": 832,
+        "medAmt": 38500,
+        "maxAmt": 160000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 322,
+        "cancelled": 14,
+        "medPerM2": 897,
+        "medAmt": 65000,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 216,
+        "cancelled": 11,
+        "medPerM2": 607,
+        "medAmt": 29500,
+        "maxAmt": 141000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 246,
+        "cancelled": 14,
+        "medPerM2": 612,
+        "medAmt": 34000,
+        "maxAmt": 102000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 339,
+        "cancelled": 12,
+        "medPerM2": 918,
+        "medAmt": 54000,
+        "maxAmt": 137500,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 417,
+        "cancelled": 18,
+        "medPerM2": 743,
+        "medAmt": 39000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 395,
+        "cancelled": 6,
+        "medPerM2": 1311,
+        "medAmt": 25740,
+        "maxAmt": 1592500,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 377,
+        "cancelled": 21,
+        "medPerM2": 1265,
+        "medAmt": 73500,
+        "maxAmt": 399000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 267,
+        "cancelled": 8,
+        "medPerM2": 975,
+        "medAmt": 58000,
+        "maxAmt": 275000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 562,
+        "cancelled": 21,
+        "medPerM2": 777,
+        "medAmt": 29350,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 288,
+        "cancelled": 21,
+        "medPerM2": 788,
+        "medAmt": 49900,
+        "maxAmt": 168500,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 201,
+        "cancelled": 9,
+        "medPerM2": 773,
+        "medAmt": 41000,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 361,
+        "cancelled": 14,
+        "medPerM2": 1153,
+        "medAmt": 60000,
+        "maxAmt": 320000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 296,
+        "cancelled": 21,
+        "medPerM2": 1169,
+        "medAmt": 88000,
+        "maxAmt": 260000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 256,
+        "cancelled": 12,
+        "medPerM2": 781,
+        "medAmt": 47750,
+        "maxAmt": 238447,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 334,
+        "cancelled": 17,
+        "medPerM2": 2029,
+        "medAmt": 141250,
+        "maxAmt": 650000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 326,
+        "cancelled": 24,
+        "medPerM2": 2043,
+        "medAmt": 170000,
+        "maxAmt": 2850000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 481,
+        "cancelled": 18,
+        "medPerM2": 1488,
+        "medAmt": 108000,
+        "maxAmt": 410000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 437,
+        "cancelled": 55,
+        "medPerM2": 1178,
+        "medAmt": 70000,
+        "maxAmt": 295000,
+        "truncated": false
+      }
+    },
+    "202404": {
+      "종로구": {
+        "n": 102,
+        "cancelled": 7,
+        "medPerM2": 828,
+        "medAmt": 47920,
+        "maxAmt": 910000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 89,
+        "cancelled": 6,
+        "medPerM2": 1234,
+        "medAmt": 84000,
+        "maxAmt": 504124,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 154,
+        "cancelled": 15,
+        "medPerM2": 1761,
+        "medAmt": 94500,
+        "maxAmt": 1200000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 280,
+        "cancelled": 14,
+        "medPerM2": 1700,
+        "medAmt": 119950,
+        "maxAmt": 1200000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 245,
+        "cancelled": 18,
+        "medPerM2": 1108,
+        "medAmt": 48000,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 279,
+        "cancelled": 21,
+        "medPerM2": 1059,
+        "medAmt": 72000,
+        "maxAmt": 255000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 253,
+        "cancelled": 21,
+        "medPerM2": 830,
+        "medAmt": 40700,
+        "maxAmt": 230000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 346,
+        "cancelled": 14,
+        "medPerM2": 932,
+        "medAmt": 69000,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 210,
+        "cancelled": 9,
+        "medPerM2": 595,
+        "medAmt": 26975,
+        "maxAmt": 138870,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 262,
+        "cancelled": 11,
+        "medPerM2": 631,
+        "medAmt": 33500,
+        "maxAmt": 106000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 356,
+        "cancelled": 11,
+        "medPerM2": 896,
+        "medAmt": 52000,
+        "maxAmt": 143000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 411,
+        "cancelled": 18,
+        "medPerM2": 757,
+        "medAmt": 36063,
+        "maxAmt": 410000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 300,
+        "cancelled": 12,
+        "medPerM2": 969,
+        "medAmt": 67000,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 445,
+        "cancelled": 29,
+        "medPerM2": 1326,
+        "medAmt": 79600,
+        "maxAmt": 730000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 262,
+        "cancelled": 14,
+        "medPerM2": 896,
+        "medAmt": 53000,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 493,
+        "cancelled": 16,
+        "medPerM2": 800,
+        "medAmt": 30000,
+        "maxAmt": 177000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 293,
+        "cancelled": 15,
+        "medPerM2": 818,
+        "medAmt": 49800,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 193,
+        "cancelled": 15,
+        "medPerM2": 836,
+        "medAmt": 50000,
+        "maxAmt": 179000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 334,
+        "cancelled": 18,
+        "medPerM2": 1312,
+        "medAmt": 90000,
+        "maxAmt": 465000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 313,
+        "cancelled": 15,
+        "medPerM2": 1290,
+        "medAmt": 95000,
+        "maxAmt": 204000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 266,
+        "cancelled": 10,
+        "medPerM2": 715,
+        "medAmt": 41500,
+        "maxAmt": 165000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 326,
+        "cancelled": 9,
+        "medPerM2": 1850,
+        "medAmt": 144500,
+        "maxAmt": 828000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 395,
+        "cancelled": 15,
+        "medPerM2": 2402,
+        "medAmt": 192500,
+        "maxAmt": 1800000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 533,
+        "cancelled": 14,
+        "medPerM2": 1500,
+        "medAmt": 112500,
+        "maxAmt": 939500,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 379,
+        "cancelled": 22,
+        "medPerM2": 1283,
+        "medAmt": 86800,
+        "maxAmt": 379824,
+        "truncated": false
+      }
+    },
+    "202405": {
+      "종로구": {
+        "n": 169,
+        "cancelled": 9,
+        "medPerM2": 1216,
+        "medAmt": 37235,
+        "maxAmt": 376000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 95,
+        "cancelled": 4,
+        "medPerM2": 1178,
+        "medAmt": 81000,
+        "maxAmt": 267000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 194,
+        "cancelled": 7,
+        "medPerM2": 1775,
+        "medAmt": 132750,
+        "maxAmt": 660000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 343,
+        "cancelled": 20,
+        "medPerM2": 1715,
+        "medAmt": 122500,
+        "maxAmt": 1090000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 278,
+        "cancelled": 22,
+        "medPerM2": 1131,
+        "medAmt": 50000,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 287,
+        "cancelled": 22,
+        "medPerM2": 1023,
+        "medAmt": 71500,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 293,
+        "cancelled": 15,
+        "medPerM2": 833,
+        "medAmt": 42500,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 336,
+        "cancelled": 14,
+        "medPerM2": 937,
+        "medAmt": 69125,
+        "maxAmt": 375000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 249,
+        "cancelled": 12,
+        "medPerM2": 683,
+        "medAmt": 25500,
+        "maxAmt": 189000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 222,
+        "cancelled": 6,
+        "medPerM2": 610,
+        "medAmt": 31900,
+        "maxAmt": 205000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 385,
+        "cancelled": 25,
+        "medPerM2": 902,
+        "medAmt": 51800,
+        "maxAmt": 145000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 453,
+        "cancelled": 24,
+        "medPerM2": 793,
+        "medAmt": 41000,
+        "maxAmt": 192000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 262,
+        "cancelled": 16,
+        "medPerM2": 1071,
+        "medAmt": 75900,
+        "maxAmt": 250000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 466,
+        "cancelled": 49,
+        "medPerM2": 1464,
+        "medAmt": 90750,
+        "maxAmt": 381500,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 349,
+        "cancelled": 39,
+        "medPerM2": 948,
+        "medAmt": 63000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 555,
+        "cancelled": 28,
+        "medPerM2": 815,
+        "medAmt": 32000,
+        "maxAmt": 182500,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 325,
+        "cancelled": 20,
+        "medPerM2": 802,
+        "medAmt": 50000,
+        "maxAmt": 178000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 161,
+        "cancelled": 9,
+        "medPerM2": 701,
+        "medAmt": 28500,
+        "maxAmt": 155000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 365,
+        "cancelled": 10,
+        "medPerM2": 1295,
+        "medAmt": 94000,
+        "maxAmt": 480000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 315,
+        "cancelled": 15,
+        "medPerM2": 1219,
+        "medAmt": 93000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 280,
+        "cancelled": 23,
+        "medPerM2": 767,
+        "medAmt": 46250,
+        "maxAmt": 205233,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 421,
+        "cancelled": 15,
+        "medPerM2": 2320,
+        "medAmt": 190000,
+        "maxAmt": 745000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 407,
+        "cancelled": 23,
+        "medPerM2": 2354,
+        "medAmt": 180000,
+        "maxAmt": 1500000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 606,
+        "cancelled": 9,
+        "medPerM2": 1547,
+        "medAmt": 116000,
+        "maxAmt": 740000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 472,
+        "cancelled": 16,
+        "medPerM2": 1346,
+        "medAmt": 92250,
+        "maxAmt": 258479,
+        "truncated": false
+      }
+    },
+    "202406": {
+      "종로구": {
+        "n": 125,
+        "cancelled": 12,
+        "medPerM2": 881,
+        "medAmt": 71000,
+        "maxAmt": 490000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 120,
+        "cancelled": 8,
+        "medPerM2": 1395,
+        "medAmt": 103750,
+        "maxAmt": 516901,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 275,
+        "cancelled": 13,
+        "medPerM2": 1869,
+        "medAmt": 140000,
+        "maxAmt": 2000000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 522,
+        "cancelled": 28,
+        "medPerM2": 1768,
+        "medAmt": 126400,
+        "maxAmt": 900000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 365,
+        "cancelled": 16,
+        "medPerM2": 1367,
+        "medAmt": 69000,
+        "maxAmt": 550000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 517,
+        "cancelled": 37,
+        "medPerM2": 1142,
+        "medAmt": 74500,
+        "maxAmt": 203000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 309,
+        "cancelled": 23,
+        "medPerM2": 831,
+        "medAmt": 49500,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 474,
+        "cancelled": 24,
+        "medPerM2": 1101,
+        "medAmt": 77400,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 259,
+        "cancelled": 20,
+        "medPerM2": 655,
+        "medAmt": 39000,
+        "maxAmt": 133027,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 250,
+        "cancelled": 12,
+        "medPerM2": 684,
+        "medAmt": 42000,
+        "maxAmt": 121300,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 473,
+        "cancelled": 20,
+        "medPerM2": 947,
+        "medAmt": 55500,
+        "maxAmt": 147500,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 510,
+        "cancelled": 21,
+        "medPerM2": 847,
+        "medAmt": 47142,
+        "maxAmt": 513564,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 409,
+        "cancelled": 34,
+        "medPerM2": 1178,
+        "medAmt": 81500,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 561,
+        "cancelled": 28,
+        "medPerM2": 1530,
+        "medAmt": 110000,
+        "maxAmt": 490000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 418,
+        "cancelled": 22,
+        "medPerM2": 1082,
+        "medAmt": 81200,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 649,
+        "cancelled": 39,
+        "medPerM2": 939,
+        "medAmt": 47200,
+        "maxAmt": 235000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 367,
+        "cancelled": 17,
+        "medPerM2": 846,
+        "medAmt": 59000,
+        "maxAmt": 173000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 181,
+        "cancelled": 6,
+        "medPerM2": 723,
+        "medAmt": 42000,
+        "maxAmt": 220000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 453,
+        "cancelled": 22,
+        "medPerM2": 1334,
+        "medAmt": 95500,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 471,
+        "cancelled": 27,
+        "medPerM2": 1413,
+        "medAmt": 106000,
+        "maxAmt": 233000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 358,
+        "cancelled": 12,
+        "medPerM2": 829,
+        "medAmt": 58000,
+        "maxAmt": 580000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 574,
+        "cancelled": 26,
+        "medPerM2": 2629,
+        "medAmt": 225750,
+        "maxAmt": 710000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 613,
+        "cancelled": 26,
+        "medPerM2": 2586,
+        "medAmt": 195000,
+        "maxAmt": 1150000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 745,
+        "cancelled": 20,
+        "medPerM2": 1650,
+        "medAmt": 126500,
+        "maxAmt": 640000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 714,
+        "cancelled": 22,
+        "medPerM2": 1483,
+        "medAmt": 114000,
+        "maxAmt": 295000,
+        "truncated": false
+      }
+    },
+    "202407": {
+      "종로구": {
+        "n": 137,
+        "cancelled": 8,
+        "medPerM2": 916,
+        "medAmt": 59200,
+        "maxAmt": 335000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 150,
+        "cancelled": 6,
+        "medPerM2": 1405,
+        "medAmt": 103750,
+        "maxAmt": 174500,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 290,
+        "cancelled": 19,
+        "medPerM2": 1920,
+        "medAmt": 134450,
+        "maxAmt": 2200000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 521,
+        "cancelled": 40,
+        "medPerM2": 1777,
+        "medAmt": 134000,
+        "maxAmt": 1450000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 416,
+        "cancelled": 25,
+        "medPerM2": 1416,
+        "medAmt": 90250,
+        "maxAmt": 287700,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 490,
+        "cancelled": 15,
+        "medPerM2": 1134,
+        "medAmt": 82000,
+        "maxAmt": 419000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 373,
+        "cancelled": 29,
+        "medPerM2": 893,
+        "medAmt": 45100,
+        "maxAmt": 260000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 564,
+        "cancelled": 27,
+        "medPerM2": 1001,
+        "medAmt": 76500,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 294,
+        "cancelled": 13,
+        "medPerM2": 756,
+        "medAmt": 41850,
+        "maxAmt": 195000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 318,
+        "cancelled": 12,
+        "medPerM2": 675,
+        "medAmt": 48500,
+        "maxAmt": 256100,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 763,
+        "cancelled": 32,
+        "medPerM2": 960,
+        "medAmt": 58000,
+        "maxAmt": 130000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 510,
+        "cancelled": 22,
+        "medPerM2": 927,
+        "medAmt": 55750,
+        "maxAmt": 245000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 477,
+        "cancelled": 28,
+        "medPerM2": 1206,
+        "medAmt": 89000,
+        "maxAmt": 322400,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 651,
+        "cancelled": 21,
+        "medPerM2": 1449,
+        "medAmt": 103000,
+        "maxAmt": 1130000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 602,
+        "cancelled": 29,
+        "medPerM2": 1141,
+        "medAmt": 88000,
+        "maxAmt": 405000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 675,
+        "cancelled": 31,
+        "medPerM2": 1040,
+        "medAmt": 63500,
+        "maxAmt": 329000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 423,
+        "cancelled": 18,
+        "medPerM2": 903,
+        "medAmt": 60000,
+        "maxAmt": 179000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 249,
+        "cancelled": 14,
+        "medPerM2": 819,
+        "medAmt": 53000,
+        "maxAmt": 139000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 544,
+        "cancelled": 24,
+        "medPerM2": 1349,
+        "medAmt": 98900,
+        "maxAmt": 455000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 605,
+        "cancelled": 26,
+        "medPerM2": 1379,
+        "medAmt": 107000,
+        "maxAmt": 440000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 398,
+        "cancelled": 13,
+        "medPerM2": 940,
+        "medAmt": 57950,
+        "maxAmt": 275000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 622,
+        "cancelled": 24,
+        "medPerM2": 2238,
+        "medAmt": 195000,
+        "maxAmt": 720000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 694,
+        "cancelled": 50,
+        "medPerM2": 2426,
+        "medAmt": 200000,
+        "maxAmt": 960000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 898,
+        "cancelled": 19,
+        "medPerM2": 1738,
+        "medAmt": 135000,
+        "maxAmt": 730000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 733,
+        "cancelled": 32,
+        "medPerM2": 1231,
+        "medAmt": 83000,
+        "maxAmt": 646000,
+        "truncated": false
+      }
+    },
+    "202408": {
+      "종로구": {
+        "n": 113,
+        "cancelled": 10,
+        "medPerM2": 849,
+        "medAmt": 44300,
+        "maxAmt": 294817,
+        "truncated": false
+      },
+      "중구": {
+        "n": 138,
+        "cancelled": 7,
+        "medPerM2": 1241,
+        "medAmt": 87025,
+        "maxAmt": 306000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 265,
+        "cancelled": 11,
+        "medPerM2": 1976,
+        "medAmt": 121000,
+        "maxAmt": 1629600,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 393,
+        "cancelled": 15,
+        "medPerM2": 1656,
+        "medAmt": 120500,
+        "maxAmt": 1225000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 343,
+        "cancelled": 20,
+        "medPerM2": 1534,
+        "medAmt": 85000,
+        "maxAmt": 370000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 438,
+        "cancelled": 28,
+        "medPerM2": 1079,
+        "medAmt": 78150,
+        "maxAmt": 535000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 403,
+        "cancelled": 21,
+        "medPerM2": 904,
+        "medAmt": 40900,
+        "maxAmt": 224000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 502,
+        "cancelled": 19,
+        "medPerM2": 985,
+        "medAmt": 70000,
+        "maxAmt": 168000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 257,
+        "cancelled": 17,
+        "medPerM2": 753,
+        "medAmt": 41400,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 289,
+        "cancelled": 9,
+        "medPerM2": 723,
+        "medAmt": 43800,
+        "maxAmt": 205000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 555,
+        "cancelled": 28,
+        "medPerM2": 958,
+        "medAmt": 58000,
+        "maxAmt": 150000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 492,
+        "cancelled": 17,
+        "medPerM2": 831,
+        "medAmt": 45000,
+        "maxAmt": 270000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 326,
+        "cancelled": 16,
+        "medPerM2": 1179,
+        "medAmt": 80000,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 529,
+        "cancelled": 25,
+        "medPerM2": 1404,
+        "medAmt": 88000,
+        "maxAmt": 1130000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 604,
+        "cancelled": 24,
+        "medPerM2": 1028,
+        "medAmt": 66000,
+        "maxAmt": 279500,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 583,
+        "cancelled": 21,
+        "medPerM2": 901,
+        "medAmt": 45500,
+        "maxAmt": 185000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 334,
+        "cancelled": 8,
+        "medPerM2": 826,
+        "medAmt": 51675,
+        "maxAmt": 178000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 181,
+        "cancelled": 10,
+        "medPerM2": 779,
+        "medAmt": 36500,
+        "maxAmt": 123500,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 502,
+        "cancelled": 26,
+        "medPerM2": 1252,
+        "medAmt": 84000,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 420,
+        "cancelled": 17,
+        "medPerM2": 1272,
+        "medAmt": 99300,
+        "maxAmt": 490000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 292,
+        "cancelled": 9,
+        "medPerM2": 906,
+        "medAmt": 60500,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 385,
+        "cancelled": 53,
+        "medPerM2": 2004,
+        "medAmt": 174000,
+        "maxAmt": 1800000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 556,
+        "cancelled": 28,
+        "medPerM2": 2473,
+        "medAmt": 200000,
+        "maxAmt": 1350000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 672,
+        "cancelled": 28,
+        "medPerM2": 1494,
+        "medAmt": 115000,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 504,
+        "cancelled": 19,
+        "medPerM2": 1277,
+        "medAmt": 89700,
+        "maxAmt": 316499,
+        "truncated": false
+      }
+    },
+    "202409": {
+      "종로구": {
+        "n": 73,
+        "cancelled": 4,
+        "medPerM2": 872,
+        "medAmt": 47500,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 91,
+        "cancelled": 10,
+        "medPerM2": 1088,
+        "medAmt": 62500,
+        "maxAmt": 335000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 158,
+        "cancelled": 9,
+        "medPerM2": 1798,
+        "medAmt": 91750,
+        "maxAmt": 1300000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 175,
+        "cancelled": 12,
+        "medPerM2": 1659,
+        "medAmt": 125000,
+        "maxAmt": 670000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 233,
+        "cancelled": 13,
+        "medPerM2": 1201,
+        "medAmt": 51500,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 262,
+        "cancelled": 15,
+        "medPerM2": 1159,
+        "medAmt": 61900,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 209,
+        "cancelled": 10,
+        "medPerM2": 862,
+        "medAmt": 40000,
+        "maxAmt": 230000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 271,
+        "cancelled": 17,
+        "medPerM2": 977,
+        "medAmt": 66800,
+        "maxAmt": 930251,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 166,
+        "cancelled": 9,
+        "medPerM2": 685,
+        "medAmt": 28850,
+        "maxAmt": 221000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 197,
+        "cancelled": 6,
+        "medPerM2": 594,
+        "medAmt": 37000,
+        "maxAmt": 127600,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 305,
+        "cancelled": 9,
+        "medPerM2": 898,
+        "medAmt": 51700,
+        "maxAmt": 205000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 364,
+        "cancelled": 25,
+        "medPerM2": 787,
+        "medAmt": 38900,
+        "maxAmt": 160000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 181,
+        "cancelled": 9,
+        "medPerM2": 928,
+        "medAmt": 58000,
+        "maxAmt": 395000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 294,
+        "cancelled": 21,
+        "medPerM2": 1226,
+        "medAmt": 60500,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 318,
+        "cancelled": 10,
+        "medPerM2": 971,
+        "medAmt": 61700,
+        "maxAmt": 327000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 383,
+        "cancelled": 49,
+        "medPerM2": 735,
+        "medAmt": 30000,
+        "maxAmt": 235000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 237,
+        "cancelled": 9,
+        "medPerM2": 776,
+        "medAmt": 45000,
+        "maxAmt": 133000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 102,
+        "cancelled": 4,
+        "medPerM2": 699,
+        "medAmt": 28150,
+        "maxAmt": 95500,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 348,
+        "cancelled": 17,
+        "medPerM2": 1262,
+        "medAmt": 79500,
+        "maxAmt": 520800,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 264,
+        "cancelled": 15,
+        "medPerM2": 1115,
+        "medAmt": 85000,
+        "maxAmt": 239000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 209,
+        "cancelled": 8,
+        "medPerM2": 843,
+        "medAmt": 37800,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 266,
+        "cancelled": 19,
+        "medPerM2": 1813,
+        "medAmt": 154500,
+        "maxAmt": 840000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 320,
+        "cancelled": 26,
+        "medPerM2": 2242,
+        "medAmt": 171666,
+        "maxAmt": 1495200,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 366,
+        "cancelled": 10,
+        "medPerM2": 1269,
+        "medAmt": 66000,
+        "maxAmt": 415000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 275,
+        "cancelled": 21,
+        "medPerM2": 1088,
+        "medAmt": 65000,
+        "maxAmt": 333746,
+        "truncated": false
+      }
+    },
+    "202410": {
+      "종로구": {
+        "n": 107,
+        "cancelled": 8,
+        "medPerM2": 845,
+        "medAmt": 45919,
+        "maxAmt": 266000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 120,
+        "cancelled": 8,
+        "medPerM2": 1255,
+        "medAmt": 73000,
+        "maxAmt": 962000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 181,
+        "cancelled": 8,
+        "medPerM2": 1624,
+        "medAmt": 85000,
+        "maxAmt": 1700000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 223,
+        "cancelled": 20,
+        "medPerM2": 1648,
+        "medAmt": 118000,
+        "maxAmt": 820000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 237,
+        "cancelled": 13,
+        "medPerM2": 1271,
+        "medAmt": 56500,
+        "maxAmt": 385000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 299,
+        "cancelled": 31,
+        "medPerM2": 970,
+        "medAmt": 64500,
+        "maxAmt": 345000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 305,
+        "cancelled": 22,
+        "medPerM2": 895,
+        "medAmt": 42416,
+        "maxAmt": 160000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 316,
+        "cancelled": 16,
+        "medPerM2": 897,
+        "medAmt": 64350,
+        "maxAmt": 153000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 247,
+        "cancelled": 19,
+        "medPerM2": 719,
+        "medAmt": 42350,
+        "maxAmt": 173000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 245,
+        "cancelled": 15,
+        "medPerM2": 659,
+        "medAmt": 39000,
+        "maxAmt": 195000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 306,
+        "cancelled": 20,
+        "medPerM2": 899,
+        "medAmt": 51900,
+        "maxAmt": 148000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 411,
+        "cancelled": 21,
+        "medPerM2": 749,
+        "medAmt": 34000,
+        "maxAmt": 970000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 248,
+        "cancelled": 9,
+        "medPerM2": 1000,
+        "medAmt": 71400,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 336,
+        "cancelled": 18,
+        "medPerM2": 1218,
+        "medAmt": 56000,
+        "maxAmt": 395000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 333,
+        "cancelled": 19,
+        "medPerM2": 904,
+        "medAmt": 44250,
+        "maxAmt": 393000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 474,
+        "cancelled": 35,
+        "medPerM2": 774,
+        "medAmt": 30000,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 284,
+        "cancelled": 16,
+        "medPerM2": 787,
+        "medAmt": 48450,
+        "maxAmt": 158500,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 128,
+        "cancelled": 9,
+        "medPerM2": 666,
+        "medAmt": 27975,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 314,
+        "cancelled": 24,
+        "medPerM2": 1288,
+        "medAmt": 85250,
+        "maxAmt": 553100,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 298,
+        "cancelled": 14,
+        "medPerM2": 1130,
+        "medAmt": 84000,
+        "maxAmt": 744000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 235,
+        "cancelled": 12,
+        "medPerM2": 744,
+        "medAmt": 35000,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 319,
+        "cancelled": 26,
+        "medPerM2": 1767,
+        "medAmt": 146500,
+        "maxAmt": 900000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 401,
+        "cancelled": 22,
+        "medPerM2": 2467,
+        "medAmt": 190000,
+        "maxAmt": 1520000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 421,
+        "cancelled": 20,
+        "medPerM2": 1322,
+        "medAmt": 81800,
+        "maxAmt": 765000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 371,
+        "cancelled": 24,
+        "medPerM2": 1167,
+        "medAmt": 61800,
+        "maxAmt": 337239,
+        "truncated": false
+      }
+    },
+    "202411": {
+      "종로구": {
+        "n": 96,
+        "cancelled": 7,
+        "medPerM2": 839,
+        "medAmt": 46350,
+        "maxAmt": 267000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 83,
+        "cancelled": 9,
+        "medPerM2": 1236,
+        "medAmt": 102500,
+        "maxAmt": 625000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 139,
+        "cancelled": 14,
+        "medPerM2": 1893,
+        "medAmt": 112000,
+        "maxAmt": 630000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 209,
+        "cancelled": 19,
+        "medPerM2": 1578,
+        "medAmt": 116000,
+        "maxAmt": 645000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 192,
+        "cancelled": 11,
+        "medPerM2": 1315,
+        "medAmt": 60924,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 307,
+        "cancelled": 19,
+        "medPerM2": 1152,
+        "medAmt": 64000,
+        "maxAmt": 585000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 244,
+        "cancelled": 13,
+        "medPerM2": 868,
+        "medAmt": 40175,
+        "maxAmt": 154000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 352,
+        "cancelled": 75,
+        "medPerM2": 899,
+        "medAmt": 38750,
+        "maxAmt": 225000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 142,
+        "cancelled": 14,
+        "medPerM2": 624,
+        "medAmt": 28800,
+        "maxAmt": 171000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 173,
+        "cancelled": 19,
+        "medPerM2": 612,
+        "medAmt": 33000,
+        "maxAmt": 114900,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 316,
+        "cancelled": 26,
+        "medPerM2": 939,
+        "medAmt": 49500,
+        "maxAmt": 174197,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 326,
+        "cancelled": 5,
+        "medPerM2": 771,
+        "medAmt": 34600,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 203,
+        "cancelled": 11,
+        "medPerM2": 1076,
+        "medAmt": 72500,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 288,
+        "cancelled": 30,
+        "medPerM2": 1278,
+        "medAmt": 60000,
+        "maxAmt": 750000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 276,
+        "cancelled": 11,
+        "medPerM2": 1049,
+        "medAmt": 63900,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 458,
+        "cancelled": 33,
+        "medPerM2": 777,
+        "medAmt": 28550,
+        "maxAmt": 213000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 249,
+        "cancelled": 14,
+        "medPerM2": 748,
+        "medAmt": 44500,
+        "maxAmt": 173000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 118,
+        "cancelled": 11,
+        "medPerM2": 745,
+        "medAmt": 32000,
+        "maxAmt": 120000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 275,
+        "cancelled": 8,
+        "medPerM2": 1306,
+        "medAmt": 85000,
+        "maxAmt": 488200,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 226,
+        "cancelled": 8,
+        "medPerM2": 1242,
+        "medAmt": 91750,
+        "maxAmt": 347000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 246,
+        "cancelled": 12,
+        "medPerM2": 767,
+        "medAmt": 38250,
+        "maxAmt": 278217,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 262,
+        "cancelled": 14,
+        "medPerM2": 1869,
+        "medAmt": 157250,
+        "maxAmt": 820000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 339,
+        "cancelled": 20,
+        "medPerM2": 2424,
+        "medAmt": 161000,
+        "maxAmt": 2080000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 440,
+        "cancelled": 19,
+        "medPerM2": 1493,
+        "medAmt": 97700,
+        "maxAmt": 590000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 321,
+        "cancelled": 30,
+        "medPerM2": 1185,
+        "medAmt": 65000,
+        "maxAmt": 318402,
+        "truncated": false
+      }
+    },
+    "202412": {
+      "종로구": {
+        "n": 52,
+        "cancelled": 7,
+        "medPerM2": 797,
+        "medAmt": 37500,
+        "maxAmt": 232000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 59,
+        "cancelled": 7,
+        "medPerM2": 1177,
+        "medAmt": 77000,
+        "maxAmt": 202700,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 62,
+        "cancelled": 2,
+        "medPerM2": 1661,
+        "medAmt": 95500,
+        "maxAmt": 640000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 119,
+        "cancelled": 20,
+        "medPerM2": 1621,
+        "medAmt": 108500,
+        "maxAmt": 290000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 133,
+        "cancelled": 4,
+        "medPerM2": 1124,
+        "medAmt": 43700,
+        "maxAmt": 255000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 168,
+        "cancelled": 10,
+        "medPerM2": 1060,
+        "medAmt": 46750,
+        "maxAmt": 345000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 155,
+        "cancelled": 10,
+        "medPerM2": 873,
+        "medAmt": 31000,
+        "maxAmt": 119000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 131,
+        "cancelled": 3,
+        "medPerM2": 907,
+        "medAmt": 55700,
+        "maxAmt": 141000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 122,
+        "cancelled": 7,
+        "medPerM2": 731,
+        "medAmt": 24700,
+        "maxAmt": 150000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 110,
+        "cancelled": 8,
+        "medPerM2": 638,
+        "medAmt": 37400,
+        "maxAmt": 127600,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 153,
+        "cancelled": 15,
+        "medPerM2": 906,
+        "medAmt": 52000,
+        "maxAmt": 148000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 244,
+        "cancelled": 9,
+        "medPerM2": 731,
+        "medAmt": 30000,
+        "maxAmt": 190000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 233,
+        "cancelled": 12,
+        "medPerM2": 1301,
+        "medAmt": 28831,
+        "maxAmt": 225500,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 188,
+        "cancelled": 9,
+        "medPerM2": 1198,
+        "medAmt": 44446,
+        "maxAmt": 338000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 183,
+        "cancelled": 9,
+        "medPerM2": 937,
+        "medAmt": 54500,
+        "maxAmt": 268000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 233,
+        "cancelled": 11,
+        "medPerM2": 767,
+        "medAmt": 28000,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 135,
+        "cancelled": 8,
+        "medPerM2": 741,
+        "medAmt": 33880,
+        "maxAmt": 1010793,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 63,
+        "cancelled": 8,
+        "medPerM2": 703,
+        "medAmt": 30500,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 155,
+        "cancelled": 12,
+        "medPerM2": 1257,
+        "medAmt": 81075,
+        "maxAmt": 516000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 137,
+        "cancelled": 3,
+        "medPerM2": 1170,
+        "medAmt": 91000,
+        "maxAmt": 285000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 160,
+        "cancelled": 7,
+        "medPerM2": 818,
+        "medAmt": 34300,
+        "maxAmt": 230000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 106,
+        "cancelled": 5,
+        "medPerM2": 1946,
+        "medAmt": 161000,
+        "maxAmt": 660000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 147,
+        "cancelled": 9,
+        "medPerM2": 1941,
+        "medAmt": 149000,
+        "maxAmt": 1830000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 309,
+        "cancelled": 11,
+        "medPerM2": 1284,
+        "medAmt": 71267,
+        "maxAmt": 424000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 308,
+        "cancelled": 23,
+        "medPerM2": 1212,
+        "medAmt": 41282,
+        "maxAmt": 494000,
+        "truncated": false
+      }
+    },
+    "202501": {
+      "종로구": {
+        "n": 78,
+        "cancelled": 5,
+        "medPerM2": 728,
+        "medAmt": 38500,
+        "maxAmt": 268000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 121,
+        "cancelled": 14,
+        "medPerM2": 1236,
+        "medAmt": 56500,
+        "maxAmt": 214600,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 114,
+        "cancelled": 10,
+        "medPerM2": 2002,
+        "medAmt": 157750,
+        "maxAmt": 1090000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 225,
+        "cancelled": 10,
+        "medPerM2": 1788,
+        "medAmt": 123093,
+        "maxAmt": 746500,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 278,
+        "cancelled": 6,
+        "medPerM2": 1357,
+        "medAmt": 40560,
+        "maxAmt": 361518,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 254,
+        "cancelled": 28,
+        "medPerM2": 1085,
+        "medAmt": 70000,
+        "maxAmt": 445000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 185,
+        "cancelled": 11,
+        "medPerM2": 890,
+        "medAmt": 38000,
+        "maxAmt": 185000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 259,
+        "cancelled": 15,
+        "medPerM2": 976,
+        "medAmt": 71000,
+        "maxAmt": 800000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 140,
+        "cancelled": 5,
+        "medPerM2": 567,
+        "medAmt": 29850,
+        "maxAmt": 112500,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 150,
+        "cancelled": 6,
+        "medPerM2": 634,
+        "medAmt": 34400,
+        "maxAmt": 96700,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 252,
+        "cancelled": 22,
+        "medPerM2": 887,
+        "medAmt": 50000,
+        "maxAmt": 129300,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 227,
+        "cancelled": 15,
+        "medPerM2": 804,
+        "medAmt": 48000,
+        "maxAmt": 141000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 205,
+        "cancelled": 17,
+        "medPerM2": 1079,
+        "medAmt": 70000,
+        "maxAmt": 176500,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 290,
+        "cancelled": 17,
+        "medPerM2": 1366,
+        "medAmt": 80250,
+        "maxAmt": 610000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 208,
+        "cancelled": 24,
+        "medPerM2": 926,
+        "medAmt": 46250,
+        "maxAmt": 725000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 354,
+        "cancelled": 20,
+        "medPerM2": 802,
+        "medAmt": 31250,
+        "maxAmt": 148400,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 245,
+        "cancelled": 5,
+        "medPerM2": 894,
+        "medAmt": 46500,
+        "maxAmt": 175000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 98,
+        "cancelled": 9,
+        "medPerM2": 724,
+        "medAmt": 32000,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 310,
+        "cancelled": 22,
+        "medPerM2": 1264,
+        "medAmt": 75250,
+        "maxAmt": 530000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 248,
+        "cancelled": 16,
+        "medPerM2": 1359,
+        "medAmt": 99500,
+        "maxAmt": 265000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 171,
+        "cancelled": 9,
+        "medPerM2": 929,
+        "medAmt": 56000,
+        "maxAmt": 218000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 269,
+        "cancelled": 8,
+        "medPerM2": 2110,
+        "medAmt": 180000,
+        "maxAmt": 700000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 276,
+        "cancelled": 44,
+        "medPerM2": 2542,
+        "medAmt": 193500,
+        "maxAmt": 770000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 441,
+        "cancelled": 20,
+        "medPerM2": 1592,
+        "medAmt": 126500,
+        "maxAmt": 720000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 375,
+        "cancelled": 36,
+        "medPerM2": 1187,
+        "medAmt": 63500,
+        "maxAmt": 310637,
+        "truncated": false
+      }
+    },
+    "202502": {
+      "종로구": {
+        "n": 312,
+        "cancelled": 11,
+        "medPerM2": 1503,
+        "medAmt": 30712,
+        "maxAmt": 309000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 147,
+        "cancelled": 15,
+        "medPerM2": 1364,
+        "medAmt": 89000,
+        "maxAmt": 278000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 232,
+        "cancelled": 26,
+        "medPerM2": 2297,
+        "medAmt": 180000,
+        "maxAmt": 1020000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 449,
+        "cancelled": 36,
+        "medPerM2": 1785,
+        "medAmt": 130000,
+        "maxAmt": 1350000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 264,
+        "cancelled": 19,
+        "medPerM2": 1492,
+        "medAmt": 95500,
+        "maxAmt": 430000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 394,
+        "cancelled": 34,
+        "medPerM2": 1048,
+        "medAmt": 73750,
+        "maxAmt": 167000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 241,
+        "cancelled": 21,
+        "medPerM2": 860,
+        "medAmt": 39700,
+        "maxAmt": 124000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 412,
+        "cancelled": 36,
+        "medPerM2": 920,
+        "medAmt": 60000,
+        "maxAmt": 790000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 275,
+        "cancelled": 11,
+        "medPerM2": 670,
+        "medAmt": 37800,
+        "maxAmt": 133000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 220,
+        "cancelled": 15,
+        "medPerM2": 611,
+        "medAmt": 31850,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 384,
+        "cancelled": 27,
+        "medPerM2": 944,
+        "medAmt": 53000,
+        "maxAmt": 149000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 347,
+        "cancelled": 15,
+        "medPerM2": 793,
+        "medAmt": 37000,
+        "maxAmt": 176000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 272,
+        "cancelled": 34,
+        "medPerM2": 1172,
+        "medAmt": 81000,
+        "maxAmt": 180500,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 501,
+        "cancelled": 27,
+        "medPerM2": 1606,
+        "medAmt": 114000,
+        "maxAmt": 870000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 438,
+        "cancelled": 23,
+        "medPerM2": 936,
+        "medAmt": 55070,
+        "maxAmt": 347000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 519,
+        "cancelled": 23,
+        "medPerM2": 868,
+        "medAmt": 34000,
+        "maxAmt": 213000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 342,
+        "cancelled": 18,
+        "medPerM2": 809,
+        "medAmt": 51000,
+        "maxAmt": 163000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 134,
+        "cancelled": 5,
+        "medPerM2": 732,
+        "medAmt": 32000,
+        "maxAmt": 121000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 411,
+        "cancelled": 32,
+        "medPerM2": 1409,
+        "medAmt": 94000,
+        "maxAmt": 672000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 431,
+        "cancelled": 29,
+        "medPerM2": 1453,
+        "medAmt": 111800,
+        "maxAmt": 344000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 304,
+        "cancelled": 9,
+        "medPerM2": 877,
+        "medAmt": 39350,
+        "maxAmt": 265000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 600,
+        "cancelled": 30,
+        "medPerM2": 2832,
+        "medAmt": 263000,
+        "maxAmt": 1000000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 712,
+        "cancelled": 74,
+        "medPerM2": 2817,
+        "medAmt": 229000,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 907,
+        "cancelled": 43,
+        "medPerM2": 1864,
+        "medAmt": 149500,
+        "maxAmt": 1050000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 587,
+        "cancelled": 57,
+        "medPerM2": 1431,
+        "medAmt": 100000,
+        "maxAmt": 463000,
+        "truncated": false
+      }
+    },
+    "202503": {
+      "종로구": {
+        "n": 165,
+        "cancelled": 17,
+        "medPerM2": 1002,
+        "medAmt": 65500,
+        "maxAmt": 290000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 234,
+        "cancelled": 53,
+        "medPerM2": 1356,
+        "medAmt": 93400,
+        "maxAmt": 197500,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 416,
+        "cancelled": 41,
+        "medPerM2": 2145,
+        "medAmt": 165000,
+        "maxAmt": 1750000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 885,
+        "cancelled": 300,
+        "medPerM2": 1706,
+        "medAmt": 119700,
+        "maxAmt": 980000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 439,
+        "cancelled": 19,
+        "medPerM2": 1498,
+        "medAmt": 104000,
+        "maxAmt": 495000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 901,
+        "cancelled": 66,
+        "medPerM2": 964,
+        "medAmt": 43000,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 329,
+        "cancelled": 26,
+        "medPerM2": 845,
+        "medAmt": 45500,
+        "maxAmt": 210120,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 570,
+        "cancelled": 62,
+        "medPerM2": 1072,
+        "medAmt": 75850,
+        "maxAmt": 1196894,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 245,
+        "cancelled": 9,
+        "medPerM2": 609,
+        "medAmt": 36000,
+        "maxAmt": 253000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 279,
+        "cancelled": 21,
+        "medPerM2": 644,
+        "medAmt": 37000,
+        "maxAmt": 147000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 644,
+        "cancelled": 42,
+        "medPerM2": 936,
+        "medAmt": 52950,
+        "maxAmt": 150000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 562,
+        "cancelled": 32,
+        "medPerM2": 798,
+        "medAmt": 39875,
+        "maxAmt": 162500,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 438,
+        "cancelled": 47,
+        "medPerM2": 1214,
+        "medAmt": 85000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 748,
+        "cancelled": 53,
+        "medPerM2": 1637,
+        "medAmt": 116750,
+        "maxAmt": 565000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 649,
+        "cancelled": 55,
+        "medPerM2": 1265,
+        "medAmt": 102500,
+        "maxAmt": 408000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 756,
+        "cancelled": 69,
+        "medPerM2": 919,
+        "medAmt": 47250,
+        "maxAmt": 265000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 534,
+        "cancelled": 43,
+        "medPerM2": 844,
+        "medAmt": 49000,
+        "maxAmt": 198000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 178,
+        "cancelled": 17,
+        "medPerM2": 679,
+        "medAmt": 36950,
+        "maxAmt": 135600,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 644,
+        "cancelled": 62,
+        "medPerM2": 1419,
+        "medAmt": 100000,
+        "maxAmt": 658500,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 736,
+        "cancelled": 60,
+        "medPerM2": 1494,
+        "medAmt": 115000,
+        "maxAmt": 300600,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 425,
+        "cancelled": 32,
+        "medPerM2": 934,
+        "medAmt": 65200,
+        "maxAmt": 379000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 765,
+        "cancelled": 44,
+        "medPerM2": 2231,
+        "medAmt": 200000,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 942,
+        "cancelled": 73,
+        "medPerM2": 2814,
+        "medAmt": 227750,
+        "maxAmt": 960000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 1219,
+        "cancelled": 52,
+        "medPerM2": 1643,
+        "medAmt": 133000,
+        "maxAmt": 698500,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 797,
+        "cancelled": 77,
+        "medPerM2": 1436,
+        "medAmt": 102000,
+        "maxAmt": 310000,
+        "truncated": false
+      }
+    },
+    "202504": {
+      "종로구": {
+        "n": 119,
+        "cancelled": 3,
+        "medPerM2": 865,
+        "medAmt": 60500,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 157,
+        "cancelled": 22,
+        "medPerM2": 1231,
+        "medAmt": 60000,
+        "maxAmt": 470000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 161,
+        "cancelled": 13,
+        "medPerM2": 1948,
+        "medAmt": 83000,
+        "maxAmt": 1300000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 420,
+        "cancelled": 80,
+        "medPerM2": 1862,
+        "medAmt": 138000,
+        "maxAmt": 900000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 476,
+        "cancelled": 37,
+        "medPerM2": 1430,
+        "medAmt": 44900,
+        "maxAmt": 386000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 447,
+        "cancelled": 40,
+        "medPerM2": 1270,
+        "medAmt": 66500,
+        "maxAmt": 808500,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 262,
+        "cancelled": 24,
+        "medPerM2": 870,
+        "medAmt": 43250,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 420,
+        "cancelled": 37,
+        "medPerM2": 1037,
+        "medAmt": 74000,
+        "maxAmt": 295000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 238,
+        "cancelled": 19,
+        "medPerM2": 631,
+        "medAmt": 33950,
+        "maxAmt": 113040,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 272,
+        "cancelled": 20,
+        "medPerM2": 618,
+        "medAmt": 35650,
+        "maxAmt": 120000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 440,
+        "cancelled": 34,
+        "medPerM2": 953,
+        "medAmt": 53700,
+        "maxAmt": 195000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 472,
+        "cancelled": 14,
+        "medPerM2": 753,
+        "medAmt": 34500,
+        "maxAmt": 160000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 345,
+        "cancelled": 26,
+        "medPerM2": 1134,
+        "medAmt": 77000,
+        "maxAmt": 305000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 505,
+        "cancelled": 31,
+        "medPerM2": 1506,
+        "medAmt": 109500,
+        "maxAmt": 740000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 517,
+        "cancelled": 44,
+        "medPerM2": 1064,
+        "medAmt": 71000,
+        "maxAmt": 345000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 622,
+        "cancelled": 52,
+        "medPerM2": 878,
+        "medAmt": 43400,
+        "maxAmt": 201000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 384,
+        "cancelled": 29,
+        "medPerM2": 850,
+        "medAmt": 52450,
+        "maxAmt": 676100,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 128,
+        "cancelled": 14,
+        "medPerM2": 702,
+        "medAmt": 35000,
+        "maxAmt": 118000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 497,
+        "cancelled": 43,
+        "medPerM2": 1404,
+        "medAmt": 93000,
+        "maxAmt": 488200,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 494,
+        "cancelled": 38,
+        "medPerM2": 1304,
+        "medAmt": 106000,
+        "maxAmt": 382100,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 336,
+        "cancelled": 26,
+        "medPerM2": 856,
+        "medAmt": 59800,
+        "maxAmt": 230588,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 186,
+        "cancelled": 21,
+        "medPerM2": 1363,
+        "medAmt": 62000,
+        "maxAmt": 494000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 235,
+        "cancelled": 26,
+        "medPerM2": 1669,
+        "medAmt": 81000,
+        "maxAmt": 1305000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 378,
+        "cancelled": 21,
+        "medPerM2": 1068,
+        "medAmt": 47250,
+        "maxAmt": 760000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 543,
+        "cancelled": 45,
+        "medPerM2": 1128,
+        "medAmt": 72000,
+        "maxAmt": 415000,
+        "truncated": false
+      }
+    },
+    "202505": {
+      "종로구": {
+        "n": 137,
+        "cancelled": 13,
+        "medPerM2": 959,
+        "medAmt": 64300,
+        "maxAmt": 657445,
+        "truncated": false
+      },
+      "중구": {
+        "n": 169,
+        "cancelled": 19,
+        "medPerM2": 1401,
+        "medAmt": 95350,
+        "maxAmt": 295000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 244,
+        "cancelled": 21,
+        "medPerM2": 1939,
+        "medAmt": 97500,
+        "maxAmt": 3200000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 597,
+        "cancelled": 100,
+        "medPerM2": 1918,
+        "medAmt": 141500,
+        "maxAmt": 1870000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 422,
+        "cancelled": 40,
+        "medPerM2": 1412,
+        "medAmt": 96250,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 511,
+        "cancelled": 57,
+        "medPerM2": 1197,
+        "medAmt": 77000,
+        "maxAmt": 315000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 303,
+        "cancelled": 32,
+        "medPerM2": 842,
+        "medAmt": 46500,
+        "maxAmt": 165000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 531,
+        "cancelled": 63,
+        "medPerM2": 1055,
+        "medAmt": 74500,
+        "maxAmt": 295184,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 273,
+        "cancelled": 17,
+        "medPerM2": 748,
+        "medAmt": 33300,
+        "maxAmt": 195000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 255,
+        "cancelled": 19,
+        "medPerM2": 651,
+        "medAmt": 35100,
+        "maxAmt": 98000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 580,
+        "cancelled": 50,
+        "medPerM2": 953,
+        "medAmt": 55500,
+        "maxAmt": 132900,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 538,
+        "cancelled": 31,
+        "medPerM2": 812,
+        "medAmt": 43150,
+        "maxAmt": 156000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 422,
+        "cancelled": 57,
+        "medPerM2": 1237,
+        "medAmt": 89900,
+        "maxAmt": 580000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 647,
+        "cancelled": 81,
+        "medPerM2": 1589,
+        "medAmt": 118500,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 610,
+        "cancelled": 68,
+        "medPerM2": 1204,
+        "medAmt": 74950,
+        "maxAmt": 415000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 864,
+        "cancelled": 48,
+        "medPerM2": 960,
+        "medAmt": 37550,
+        "maxAmt": 270000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 617,
+        "cancelled": 208,
+        "medPerM2": 1045,
+        "medAmt": 40500,
+        "maxAmt": 184000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 274,
+        "cancelled": 9,
+        "medPerM2": 771,
+        "medAmt": 31982,
+        "maxAmt": 140500,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 641,
+        "cancelled": 58,
+        "medPerM2": 1426,
+        "medAmt": 99000,
+        "maxAmt": 499600,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 741,
+        "cancelled": 56,
+        "medPerM2": 1342,
+        "medAmt": 110000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 422,
+        "cancelled": 35,
+        "medPerM2": 886,
+        "medAmt": 58000,
+        "maxAmt": 259862,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 293,
+        "cancelled": 31,
+        "medPerM2": 1701,
+        "medAmt": 112700,
+        "maxAmt": 583201,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 448,
+        "cancelled": 37,
+        "medPerM2": 2058,
+        "medAmt": 140500,
+        "maxAmt": 1520000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 621,
+        "cancelled": 42,
+        "medPerM2": 1577,
+        "medAmt": 113500,
+        "maxAmt": 995000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 673,
+        "cancelled": 80,
+        "medPerM2": 1542,
+        "medAmt": 114000,
+        "maxAmt": 685000,
+        "truncated": false
+      }
+    },
+    "202506": {
+      "종로구": {
+        "n": 186,
+        "cancelled": 22,
+        "medPerM2": 1011,
+        "medAmt": 86500,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 235,
+        "cancelled": 33,
+        "medPerM2": 1354,
+        "medAmt": 108000,
+        "maxAmt": 227000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 361,
+        "cancelled": 34,
+        "medPerM2": 1894,
+        "medAmt": 99500,
+        "maxAmt": 2280000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 878,
+        "cancelled": 102,
+        "medPerM2": 1909,
+        "medAmt": 150000,
+        "maxAmt": 800000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 589,
+        "cancelled": 55,
+        "medPerM2": 1561,
+        "medAmt": 100000,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 684,
+        "cancelled": 88,
+        "medPerM2": 1191,
+        "medAmt": 83250,
+        "maxAmt": 182000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 465,
+        "cancelled": 58,
+        "medPerM2": 904,
+        "medAmt": 55000,
+        "maxAmt": 147700,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 756,
+        "cancelled": 75,
+        "medPerM2": 1079,
+        "medAmt": 80000,
+        "maxAmt": 435000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 320,
+        "cancelled": 25,
+        "medPerM2": 757,
+        "medAmt": 49050,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 385,
+        "cancelled": 33,
+        "medPerM2": 703,
+        "medAmt": 47000,
+        "maxAmt": 125000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 864,
+        "cancelled": 82,
+        "medPerM2": 975,
+        "medAmt": 58000,
+        "maxAmt": 146000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 714,
+        "cancelled": 55,
+        "medPerM2": 997,
+        "medAmt": 61650,
+        "maxAmt": 162500,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 619,
+        "cancelled": 83,
+        "medPerM2": 1268,
+        "medAmt": 93500,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 927,
+        "cancelled": 104,
+        "medPerM2": 1670,
+        "medAmt": 123000,
+        "maxAmt": 425000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 802,
+        "cancelled": 98,
+        "medPerM2": 1174,
+        "medAmt": 88600,
+        "maxAmt": 415000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 886,
+        "cancelled": 71,
+        "medPerM2": 1026,
+        "medAmt": 65000,
+        "maxAmt": 202000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 574,
+        "cancelled": 57,
+        "medPerM2": 909,
+        "medAmt": 63250,
+        "maxAmt": 189000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 256,
+        "cancelled": 25,
+        "medPerM2": 758,
+        "medAmt": 42000,
+        "maxAmt": 175028,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 858,
+        "cancelled": 105,
+        "medPerM2": 1452,
+        "medAmt": 104250,
+        "maxAmt": 658500,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 941,
+        "cancelled": 91,
+        "medPerM2": 1416,
+        "medAmt": 116000,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 474,
+        "cancelled": 25,
+        "medPerM2": 894,
+        "medAmt": 69000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 527,
+        "cancelled": 77,
+        "medPerM2": 1967,
+        "medAmt": 175000,
+        "maxAmt": 875000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 711,
+        "cancelled": 105,
+        "medPerM2": 2727,
+        "medAmt": 219000,
+        "maxAmt": 1950000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 989,
+        "cancelled": 64,
+        "medPerM2": 1647,
+        "medAmt": 113700,
+        "maxAmt": 850000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 1100,
+        "cancelled": 136,
+        "medPerM2": 1534,
+        "medAmt": 119000,
+        "maxAmt": 330000,
+        "truncated": false
+      }
+    },
+    "202507": {
+      "종로구": {
+        "n": 107,
+        "cancelled": 10,
+        "medPerM2": 874,
+        "medAmt": 44158,
+        "maxAmt": 305000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 178,
+        "cancelled": 11,
+        "medPerM2": 1271,
+        "medAmt": 30067,
+        "maxAmt": 360000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 242,
+        "cancelled": 32,
+        "medPerM2": 1854,
+        "medAmt": 112500,
+        "maxAmt": 697000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 231,
+        "cancelled": 77,
+        "medPerM2": 1939,
+        "medAmt": 137200,
+        "maxAmt": 700000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 262,
+        "cancelled": 31,
+        "medPerM2": 1053,
+        "medAmt": 52000,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 302,
+        "cancelled": 28,
+        "medPerM2": 1069,
+        "medAmt": 69000,
+        "maxAmt": 219000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 305,
+        "cancelled": 27,
+        "medPerM2": 888,
+        "medAmt": 42000,
+        "maxAmt": 290000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 304,
+        "cancelled": 30,
+        "medPerM2": 967,
+        "medAmt": 70000,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 212,
+        "cancelled": 16,
+        "medPerM2": 696,
+        "medAmt": 31350,
+        "maxAmt": 560000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 223,
+        "cancelled": 17,
+        "medPerM2": 675,
+        "medAmt": 40100,
+        "maxAmt": 155000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 349,
+        "cancelled": 25,
+        "medPerM2": 914,
+        "medAmt": 53000,
+        "maxAmt": 155000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 505,
+        "cancelled": 34,
+        "medPerM2": 777,
+        "medAmt": 33000,
+        "maxAmt": 510000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 209,
+        "cancelled": 18,
+        "medPerM2": 1012,
+        "medAmt": 67500,
+        "maxAmt": 410000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 376,
+        "cancelled": 33,
+        "medPerM2": 1230,
+        "medAmt": 52000,
+        "maxAmt": 350000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 383,
+        "cancelled": 34,
+        "medPerM2": 887,
+        "medAmt": 42000,
+        "maxAmt": 407100,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 487,
+        "cancelled": 65,
+        "medPerM2": 841,
+        "medAmt": 31000,
+        "maxAmt": 703000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 310,
+        "cancelled": 23,
+        "medPerM2": 790,
+        "medAmt": 49875,
+        "maxAmt": 179000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 154,
+        "cancelled": 13,
+        "medPerM2": 726,
+        "medAmt": 29200,
+        "maxAmt": 124000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 329,
+        "cancelled": 39,
+        "medPerM2": 1234,
+        "medAmt": 79000,
+        "maxAmt": 527000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 302,
+        "cancelled": 16,
+        "medPerM2": 1103,
+        "medAmt": 64000,
+        "maxAmt": 298000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 261,
+        "cancelled": 16,
+        "medPerM2": 865,
+        "medAmt": 61500,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 324,
+        "cancelled": 39,
+        "medPerM2": 1846,
+        "medAmt": 165000,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 459,
+        "cancelled": 55,
+        "medPerM2": 2298,
+        "medAmt": 162000,
+        "maxAmt": 1900000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 619,
+        "cancelled": 51,
+        "medPerM2": 1535,
+        "medAmt": 108500,
+        "maxAmt": 750000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 343,
+        "cancelled": 27,
+        "medPerM2": 1164,
+        "medAmt": 75000,
+        "maxAmt": 385000,
+        "truncated": false
+      }
+    },
+    "202508": {
+      "종로구": {
+        "n": 91,
+        "cancelled": 6,
+        "medPerM2": 971,
+        "medAmt": 51000,
+        "maxAmt": 630000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 110,
+        "cancelled": 11,
+        "medPerM2": 1192,
+        "medAmt": 97500,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 260,
+        "cancelled": 19,
+        "medPerM2": 1791,
+        "medAmt": 59700,
+        "maxAmt": 1670000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 330,
+        "cancelled": 32,
+        "medPerM2": 2084,
+        "medAmt": 150000,
+        "maxAmt": 870000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 303,
+        "cancelled": 26,
+        "medPerM2": 1153,
+        "medAmt": 50000,
+        "maxAmt": 434000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 377,
+        "cancelled": 26,
+        "medPerM2": 1069,
+        "medAmt": 70500,
+        "maxAmt": 584400,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 246,
+        "cancelled": 18,
+        "medPerM2": 864,
+        "medAmt": 46000,
+        "maxAmt": 127000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 480,
+        "cancelled": 34,
+        "medPerM2": 1058,
+        "medAmt": 55250,
+        "maxAmt": 260000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 223,
+        "cancelled": 13,
+        "medPerM2": 640,
+        "medAmt": 33500,
+        "maxAmt": 170000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 204,
+        "cancelled": 11,
+        "medPerM2": 680,
+        "medAmt": 41850,
+        "maxAmt": 110000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 405,
+        "cancelled": 23,
+        "medPerM2": 961,
+        "medAmt": 53000,
+        "maxAmt": 128500,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 471,
+        "cancelled": 38,
+        "medPerM2": 775,
+        "medAmt": 37500,
+        "maxAmt": 163750,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 290,
+        "cancelled": 22,
+        "medPerM2": 1163,
+        "medAmt": 63800,
+        "maxAmt": 350000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 433,
+        "cancelled": 18,
+        "medPerM2": 1445,
+        "medAmt": 70000,
+        "maxAmt": 910000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 298,
+        "cancelled": 26,
+        "medPerM2": 900,
+        "medAmt": 44500,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 512,
+        "cancelled": 39,
+        "medPerM2": 884,
+        "medAmt": 45000,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 400,
+        "cancelled": 106,
+        "medPerM2": 802,
+        "medAmt": 42600,
+        "maxAmt": 146500,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 165,
+        "cancelled": 15,
+        "medPerM2": 703,
+        "medAmt": 32500,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 401,
+        "cancelled": 20,
+        "medPerM2": 1234,
+        "medAmt": 75000,
+        "maxAmt": 390000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 355,
+        "cancelled": 23,
+        "medPerM2": 1284,
+        "medAmt": 88000,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 252,
+        "cancelled": 18,
+        "medPerM2": 903,
+        "medAmt": 58750,
+        "maxAmt": 270000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 226,
+        "cancelled": 21,
+        "medPerM2": 1492,
+        "medAmt": 81500,
+        "maxAmt": 821000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 219,
+        "cancelled": 23,
+        "medPerM2": 1585,
+        "medAmt": 80500,
+        "maxAmt": 1030000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 385,
+        "cancelled": 22,
+        "medPerM2": 1180,
+        "medAmt": 55000,
+        "maxAmt": 1250000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 470,
+        "cancelled": 41,
+        "medPerM2": 1357,
+        "medAmt": 94500,
+        "maxAmt": 345000,
+        "truncated": false
+      }
+    },
+    "202509": {
+      "종로구": {
+        "n": 159,
+        "cancelled": 12,
+        "medPerM2": 957,
+        "medAmt": 61000,
+        "maxAmt": 595000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 213,
+        "cancelled": 15,
+        "medPerM2": 1474,
+        "medAmt": 122000,
+        "maxAmt": 460000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 267,
+        "cancelled": 13,
+        "medPerM2": 1877,
+        "medAmt": 90000,
+        "maxAmt": 740000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 685,
+        "cancelled": 44,
+        "medPerM2": 2003,
+        "medAmt": 150000,
+        "maxAmt": 1170000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 569,
+        "cancelled": 49,
+        "medPerM2": 1458,
+        "medAmt": 97500,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 644,
+        "cancelled": 36,
+        "medPerM2": 1271,
+        "medAmt": 88650,
+        "maxAmt": 319500,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 464,
+        "cancelled": 30,
+        "medPerM2": 974,
+        "medAmt": 39450,
+        "maxAmt": 160000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 664,
+        "cancelled": 41,
+        "medPerM2": 1099,
+        "medAmt": 83000,
+        "maxAmt": 305000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 235,
+        "cancelled": 6,
+        "medPerM2": 697,
+        "medAmt": 41500,
+        "maxAmt": 149000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 276,
+        "cancelled": 15,
+        "medPerM2": 710,
+        "medAmt": 44500,
+        "maxAmt": 106000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 596,
+        "cancelled": 28,
+        "medPerM2": 1010,
+        "medAmt": 57000,
+        "maxAmt": 154000,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 609,
+        "cancelled": 29,
+        "medPerM2": 848,
+        "medAmt": 45000,
+        "maxAmt": 470000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 449,
+        "cancelled": 22,
+        "medPerM2": 1401,
+        "medAmt": 101500,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 843,
+        "cancelled": 41,
+        "medPerM2": 1636,
+        "medAmt": 115000,
+        "maxAmt": 680000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 594,
+        "cancelled": 34,
+        "medPerM2": 1106,
+        "medAmt": 75250,
+        "maxAmt": 435000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 847,
+        "cancelled": 33,
+        "medPerM2": 1122,
+        "medAmt": 67000,
+        "maxAmt": 215000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 441,
+        "cancelled": 22,
+        "medPerM2": 923,
+        "medAmt": 62000,
+        "maxAmt": 190000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 163,
+        "cancelled": 13,
+        "medPerM2": 739,
+        "medAmt": 36800,
+        "maxAmt": 138000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 646,
+        "cancelled": 23,
+        "medPerM2": 1460,
+        "medAmt": 99000,
+        "maxAmt": 830000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 764,
+        "cancelled": 29,
+        "medPerM2": 1410,
+        "medAmt": 107500,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 488,
+        "cancelled": 21,
+        "medPerM2": 982,
+        "medAmt": 72900,
+        "maxAmt": 257500,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 259,
+        "cancelled": 21,
+        "medPerM2": 1565,
+        "medAmt": 85000,
+        "maxAmt": 1550000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 388,
+        "cancelled": 14,
+        "medPerM2": 2026,
+        "medAmt": 126250,
+        "maxAmt": 3040000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 717,
+        "cancelled": 29,
+        "medPerM2": 1426,
+        "medAmt": 82000,
+        "maxAmt": 683363,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 1015,
+        "cancelled": 55,
+        "medPerM2": 1631,
+        "medAmt": 125000,
+        "maxAmt": 395000,
+        "truncated": false
+      }
+    },
+    "202510": {
+      "종로구": {
+        "n": 161,
+        "cancelled": 10,
+        "medPerM2": 1189,
+        "medAmt": 73000,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 193,
+        "cancelled": 13,
+        "medPerM2": 1368,
+        "medAmt": 118000,
+        "maxAmt": 633934,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 246,
+        "cancelled": 14,
+        "medPerM2": 1939,
+        "medAmt": 126000,
+        "maxAmt": 624000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 493,
+        "cancelled": 32,
+        "medPerM2": 1869,
+        "medAmt": 150000,
+        "maxAmt": 1300000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 632,
+        "cancelled": 44,
+        "medPerM2": 1383,
+        "medAmt": 55000,
+        "maxAmt": 650000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 1018,
+        "cancelled": 40,
+        "medPerM2": 1192,
+        "medAmt": 69491,
+        "maxAmt": 360000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 422,
+        "cancelled": 30,
+        "medPerM2": 929,
+        "medAmt": 51850,
+        "maxAmt": 184000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 641,
+        "cancelled": 30,
+        "medPerM2": 1126,
+        "medAmt": 83500,
+        "maxAmt": 251015,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 260,
+        "cancelled": 8,
+        "medPerM2": 733,
+        "medAmt": 42850,
+        "maxAmt": 169000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 243,
+        "cancelled": 12,
+        "medPerM2": 706,
+        "medAmt": 44000,
+        "maxAmt": 123800,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 708,
+        "cancelled": 26,
+        "medPerM2": 982,
+        "medAmt": 58800,
+        "maxAmt": 174250,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 655,
+        "cancelled": 29,
+        "medPerM2": 989,
+        "medAmt": 62500,
+        "maxAmt": 186500,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 537,
+        "cancelled": 22,
+        "medPerM2": 1406,
+        "medAmt": 100000,
+        "maxAmt": 244500,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 718,
+        "cancelled": 36,
+        "medPerM2": 1562,
+        "medAmt": 108750,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 678,
+        "cancelled": 34,
+        "medPerM2": 1269,
+        "medAmt": 82000,
+        "maxAmt": 427000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 858,
+        "cancelled": 36,
+        "medPerM2": 1152,
+        "medAmt": 71075,
+        "maxAmt": 222500,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 472,
+        "cancelled": 19,
+        "medPerM2": 926,
+        "medAmt": 61750,
+        "maxAmt": 188000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 183,
+        "cancelled": 7,
+        "medPerM2": 726,
+        "medAmt": 39500,
+        "maxAmt": 134500,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 657,
+        "cancelled": 34,
+        "medPerM2": 1415,
+        "medAmt": 98500,
+        "maxAmt": 473000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 639,
+        "cancelled": 56,
+        "medPerM2": 1413,
+        "medAmt": 119000,
+        "maxAmt": 346000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 495,
+        "cancelled": 22,
+        "medPerM2": 1010,
+        "medAmt": 68400,
+        "maxAmt": 358000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 412,
+        "cancelled": 27,
+        "medPerM2": 1805,
+        "medAmt": 109850,
+        "maxAmt": 700000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 480,
+        "cancelled": 36,
+        "medPerM2": 2153,
+        "medAmt": 152750,
+        "maxAmt": 1150000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 906,
+        "cancelled": 43,
+        "medPerM2": 1714,
+        "medAmt": 131500,
+        "maxAmt": 2100000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 773,
+        "cancelled": 58,
+        "medPerM2": 1480,
+        "medAmt": 107416,
+        "maxAmt": 345000,
+        "truncated": false
+      }
+    },
+    "202511": {
+      "종로구": {
+        "n": 98,
+        "cancelled": 9,
+        "medPerM2": 809,
+        "medAmt": 43500,
+        "maxAmt": 840000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 76,
+        "cancelled": 3,
+        "medPerM2": 1013,
+        "medAmt": 38000,
+        "maxAmt": 453000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 257,
+        "cancelled": 18,
+        "medPerM2": 1826,
+        "medAmt": 103000,
+        "maxAmt": 1277000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 152,
+        "cancelled": 9,
+        "medPerM2": 1447,
+        "medAmt": 101000,
+        "maxAmt": 1850000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 240,
+        "cancelled": 11,
+        "medPerM2": 1071,
+        "medAmt": 48000,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 281,
+        "cancelled": 17,
+        "medPerM2": 966,
+        "medAmt": 68000,
+        "maxAmt": 197500,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 253,
+        "cancelled": 7,
+        "medPerM2": 877,
+        "medAmt": 42800,
+        "maxAmt": 166000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 292,
+        "cancelled": 16,
+        "medPerM2": 1026,
+        "medAmt": 76500,
+        "maxAmt": 1057186,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 180,
+        "cancelled": 11,
+        "medPerM2": 638,
+        "medAmt": 38500,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 192,
+        "cancelled": 6,
+        "medPerM2": 635,
+        "medAmt": 34000,
+        "maxAmt": 130000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 273,
+        "cancelled": 6,
+        "medPerM2": 976,
+        "medAmt": 57150,
+        "maxAmt": 144500,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 402,
+        "cancelled": 23,
+        "medPerM2": 881,
+        "medAmt": 40000,
+        "maxAmt": 205000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 262,
+        "cancelled": 10,
+        "medPerM2": 1034,
+        "medAmt": 73850,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 290,
+        "cancelled": 13,
+        "medPerM2": 1162,
+        "medAmt": 49000,
+        "maxAmt": 357000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 380,
+        "cancelled": 12,
+        "medPerM2": 1056,
+        "medAmt": 57450,
+        "maxAmt": 392000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 452,
+        "cancelled": 19,
+        "medPerM2": 822,
+        "medAmt": 33558,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 264,
+        "cancelled": 7,
+        "medPerM2": 849,
+        "medAmt": 55000,
+        "maxAmt": 198000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 122,
+        "cancelled": 4,
+        "medPerM2": 764,
+        "medAmt": 36000,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 286,
+        "cancelled": 10,
+        "medPerM2": 1108,
+        "medAmt": 61000,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 246,
+        "cancelled": 12,
+        "medPerM2": 1117,
+        "medAmt": 57460,
+        "maxAmt": 320000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 240,
+        "cancelled": 13,
+        "medPerM2": 753,
+        "medAmt": 48875,
+        "maxAmt": 765000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 401,
+        "cancelled": 21,
+        "medPerM2": 1815,
+        "medAmt": 125000,
+        "maxAmt": 830000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 462,
+        "cancelled": 48,
+        "medPerM2": 2141,
+        "medAmt": 150000,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 799,
+        "cancelled": 40,
+        "medPerM2": 1353,
+        "medAmt": 80000,
+        "maxAmt": 1150000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 298,
+        "cancelled": 9,
+        "medPerM2": 1080,
+        "medAmt": 52250,
+        "maxAmt": 320000,
+        "truncated": false
+      }
+    },
+    "202512": {
+      "종로구": {
+        "n": 81,
+        "cancelled": 6,
+        "medPerM2": 919,
+        "medAmt": 54000,
+        "maxAmt": 250000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 94,
+        "cancelled": 5,
+        "medPerM2": 1264,
+        "medAmt": 55250,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 104,
+        "cancelled": 3,
+        "medPerM2": 1828,
+        "medAmt": 96500,
+        "maxAmt": 570000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 219,
+        "cancelled": 7,
+        "medPerM2": 1758,
+        "medAmt": 36000,
+        "maxAmt": 530000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 189,
+        "cancelled": 7,
+        "medPerM2": 1234,
+        "medAmt": 42500,
+        "maxAmt": 468300,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 331,
+        "cancelled": 19,
+        "medPerM2": 1266,
+        "medAmt": 52300,
+        "maxAmt": 1116500,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 205,
+        "cancelled": 4,
+        "medPerM2": 910,
+        "medAmt": 49600,
+        "maxAmt": 290000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 337,
+        "cancelled": 19,
+        "medPerM2": 1052,
+        "medAmt": 81000,
+        "maxAmt": 174000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 166,
+        "cancelled": 5,
+        "medPerM2": 825,
+        "medAmt": 57750,
+        "maxAmt": 136400,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 167,
+        "cancelled": 7,
+        "medPerM2": 701,
+        "medAmt": 43400,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 482,
+        "cancelled": 9,
+        "medPerM2": 1009,
+        "medAmt": 57500,
+        "maxAmt": 192610,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 316,
+        "cancelled": 11,
+        "medPerM2": 953,
+        "medAmt": 64650,
+        "maxAmt": 175000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 281,
+        "cancelled": 10,
+        "medPerM2": 1163,
+        "medAmt": 81500,
+        "maxAmt": 218000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 269,
+        "cancelled": 6,
+        "medPerM2": 1250,
+        "medAmt": 55500,
+        "maxAmt": 1050000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 391,
+        "cancelled": 13,
+        "medPerM2": 1128,
+        "medAmt": 60000,
+        "maxAmt": 390000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 414,
+        "cancelled": 25,
+        "medPerM2": 1056,
+        "medAmt": 60000,
+        "maxAmt": 179200,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 310,
+        "cancelled": 11,
+        "medPerM2": 918,
+        "medAmt": 66450,
+        "maxAmt": 199500,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 154,
+        "cancelled": 5,
+        "medPerM2": 755,
+        "medAmt": 38750,
+        "maxAmt": 117500,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 408,
+        "cancelled": 9,
+        "medPerM2": 1222,
+        "medAmt": 64350,
+        "maxAmt": 375000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 218,
+        "cancelled": 5,
+        "medPerM2": 1396,
+        "medAmt": 101750,
+        "maxAmt": 348000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 295,
+        "cancelled": 6,
+        "medPerM2": 958,
+        "medAmt": 45408,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 244,
+        "cancelled": 9,
+        "medPerM2": 1713,
+        "medAmt": 57500,
+        "maxAmt": 770000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 263,
+        "cancelled": 26,
+        "medPerM2": 1626,
+        "medAmt": 75000,
+        "maxAmt": 1550000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 486,
+        "cancelled": 18,
+        "medPerM2": 1337,
+        "medAmt": 80000,
+        "maxAmt": 1010000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 297,
+        "cancelled": 8,
+        "medPerM2": 1256,
+        "medAmt": 79000,
+        "maxAmt": 275000,
+        "truncated": false
+      }
+    },
+    "202601": {
+      "종로구": {
+        "n": 144,
+        "cancelled": 7,
+        "medPerM2": 893,
+        "medAmt": 49250,
+        "maxAmt": 740000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 174,
+        "cancelled": 12,
+        "medPerM2": 1226,
+        "medAmt": 64250,
+        "maxAmt": 230000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 250,
+        "cancelled": 16,
+        "medPerM2": 1976,
+        "medAmt": 105250,
+        "maxAmt": 1404000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 247,
+        "cancelled": 24,
+        "medPerM2": 1777,
+        "medAmt": 113500,
+        "maxAmt": 800000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 384,
+        "cancelled": 21,
+        "medPerM2": 1126,
+        "medAmt": 50250,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 454,
+        "cancelled": 11,
+        "medPerM2": 1128,
+        "medAmt": 78900,
+        "maxAmt": 197000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 389,
+        "cancelled": 17,
+        "medPerM2": 954,
+        "medAmt": 50000,
+        "maxAmt": 180691,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 510,
+        "cancelled": 15,
+        "medPerM2": 1080,
+        "medAmt": 81000,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 271,
+        "cancelled": 2,
+        "medPerM2": 801,
+        "medAmt": 47000,
+        "maxAmt": 150000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 275,
+        "cancelled": 30,
+        "medPerM2": 705,
+        "medAmt": 37300,
+        "maxAmt": 112000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 630,
+        "cancelled": 13,
+        "medPerM2": 1000,
+        "medAmt": 59700,
+        "maxAmt": 196597,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 559,
+        "cancelled": 22,
+        "medPerM2": 906,
+        "medAmt": 46800,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 431,
+        "cancelled": 17,
+        "medPerM2": 1159,
+        "medAmt": 80000,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 408,
+        "cancelled": 30,
+        "medPerM2": 1204,
+        "medAmt": 57000,
+        "maxAmt": 520000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 492,
+        "cancelled": 16,
+        "medPerM2": 984,
+        "medAmt": 48900,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 660,
+        "cancelled": 34,
+        "medPerM2": 974,
+        "medAmt": 57500,
+        "maxAmt": 230000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 449,
+        "cancelled": 10,
+        "medPerM2": 907,
+        "medAmt": 60000,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 242,
+        "cancelled": 7,
+        "medPerM2": 746,
+        "medAmt": 37850,
+        "maxAmt": 156000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 496,
+        "cancelled": 15,
+        "medPerM2": 1295,
+        "medAmt": 75000,
+        "maxAmt": 467000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 490,
+        "cancelled": 19,
+        "medPerM2": 1257,
+        "medAmt": 69000,
+        "maxAmt": 1600000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 506,
+        "cancelled": 36,
+        "medPerM2": 852,
+        "medAmt": 53950,
+        "maxAmt": 480000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 416,
+        "cancelled": 20,
+        "medPerM2": 1640,
+        "medAmt": 73000,
+        "maxAmt": 1100000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 431,
+        "cancelled": 37,
+        "medPerM2": 1833,
+        "medAmt": 104000,
+        "maxAmt": 1100000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 791,
+        "cancelled": 31,
+        "medPerM2": 1371,
+        "medAmt": 71000,
+        "maxAmt": 510000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 483,
+        "cancelled": 24,
+        "medPerM2": 1289,
+        "medAmt": 73000,
+        "maxAmt": 383000,
+        "truncated": false
+      }
+    },
+    "202602": {
+      "종로구": {
+        "n": 181,
+        "cancelled": 50,
+        "medPerM2": 840,
+        "medAmt": 40000,
+        "maxAmt": 515000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 149,
+        "cancelled": 11,
+        "medPerM2": 1117,
+        "medAmt": 50000,
+        "maxAmt": 390000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 192,
+        "cancelled": 13,
+        "medPerM2": 2108,
+        "medAmt": 124500,
+        "maxAmt": 1030000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 224,
+        "cancelled": 15,
+        "medPerM2": 1742,
+        "medAmt": 128750,
+        "maxAmt": 1500000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 342,
+        "cancelled": 27,
+        "medPerM2": 1209,
+        "medAmt": 54000,
+        "maxAmt": 975000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 395,
+        "cancelled": 26,
+        "medPerM2": 1119,
+        "medAmt": 80000,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 370,
+        "cancelled": 12,
+        "medPerM2": 910,
+        "medAmt": 52800,
+        "maxAmt": 184714,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 572,
+        "cancelled": 25,
+        "medPerM2": 1076,
+        "medAmt": 82000,
+        "maxAmt": 253000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 264,
+        "cancelled": 9,
+        "medPerM2": 778,
+        "medAmt": 58000,
+        "maxAmt": 119000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 315,
+        "cancelled": 6,
+        "medPerM2": 732,
+        "medAmt": 40000,
+        "maxAmt": 120000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 868,
+        "cancelled": 20,
+        "medPerM2": 1047,
+        "medAmt": 57350,
+        "maxAmt": 179553,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 616,
+        "cancelled": 36,
+        "medPerM2": 931,
+        "medAmt": 60000,
+        "maxAmt": 176000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 334,
+        "cancelled": 13,
+        "medPerM2": 1122,
+        "medAmt": 78300,
+        "maxAmt": 220000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 330,
+        "cancelled": 14,
+        "medPerM2": 1243,
+        "medAmt": 65000,
+        "maxAmt": 400622,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 445,
+        "cancelled": 13,
+        "medPerM2": 1040,
+        "medAmt": 64500,
+        "maxAmt": 420000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 705,
+        "cancelled": 20,
+        "medPerM2": 930,
+        "medAmt": 58500,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 494,
+        "cancelled": 11,
+        "medPerM2": 883,
+        "medAmt": 63000,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 185,
+        "cancelled": 12,
+        "medPerM2": 766,
+        "medAmt": 43000,
+        "maxAmt": 124000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 543,
+        "cancelled": 15,
+        "medPerM2": 1262,
+        "medAmt": 85000,
+        "maxAmt": 464600,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 402,
+        "cancelled": 25,
+        "medPerM2": 1377,
+        "medAmt": 88875,
+        "maxAmt": 453000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 404,
+        "cancelled": 19,
+        "medPerM2": 924,
+        "medAmt": 55000,
+        "maxAmt": 170000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 292,
+        "cancelled": 22,
+        "medPerM2": 1698,
+        "medAmt": 108900,
+        "maxAmt": 810000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 294,
+        "cancelled": 15,
+        "medPerM2": 1762,
+        "medAmt": 97500,
+        "maxAmt": 970000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 632,
+        "cancelled": 45,
+        "medPerM2": 1385,
+        "medAmt": 71125,
+        "maxAmt": 645000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 494,
+        "cancelled": 13,
+        "medPerM2": 1296,
+        "medAmt": 83000,
+        "maxAmt": 310000,
+        "truncated": false
+      }
+    },
+    "202603": {
+      "종로구": {
+        "n": 160,
+        "cancelled": 9,
+        "medPerM2": 907,
+        "medAmt": 51000,
+        "maxAmt": 325000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 183,
+        "cancelled": 14,
+        "medPerM2": 1262,
+        "medAmt": 93500,
+        "maxAmt": 970000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 203,
+        "cancelled": 4,
+        "medPerM2": 1883,
+        "medAmt": 100000,
+        "maxAmt": 1565000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 229,
+        "cancelled": 20,
+        "medPerM2": 1895,
+        "medAmt": 143000,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 387,
+        "cancelled": 42,
+        "medPerM2": 1049,
+        "medAmt": 45200,
+        "maxAmt": 325000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 401,
+        "cancelled": 20,
+        "medPerM2": 1064,
+        "medAmt": 68000,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 446,
+        "cancelled": 17,
+        "medPerM2": 875,
+        "medAmt": 46850,
+        "maxAmt": 190000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 552,
+        "cancelled": 25,
+        "medPerM2": 1029,
+        "medAmt": 73000,
+        "maxAmt": 366000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 302,
+        "cancelled": 10,
+        "medPerM2": 696,
+        "medAmt": 48000,
+        "maxAmt": 189500,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 412,
+        "cancelled": 16,
+        "medPerM2": 731,
+        "medAmt": 45750,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 838,
+        "cancelled": 35,
+        "medPerM2": 986,
+        "medAmt": 59000,
+        "maxAmt": 198890,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 691,
+        "cancelled": 16,
+        "medPerM2": 862,
+        "medAmt": 39200,
+        "maxAmt": 170000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 378,
+        "cancelled": 11,
+        "medPerM2": 1089,
+        "medAmt": 76000,
+        "maxAmt": 405000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 382,
+        "cancelled": 23,
+        "medPerM2": 1264,
+        "medAmt": 60000,
+        "maxAmt": 440000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 448,
+        "cancelled": 19,
+        "medPerM2": 919,
+        "medAmt": 50000,
+        "maxAmt": 365000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 753,
+        "cancelled": 25,
+        "medPerM2": 849,
+        "medAmt": 39950,
+        "maxAmt": 286000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 553,
+        "cancelled": 10,
+        "medPerM2": 860,
+        "medAmt": 59900,
+        "maxAmt": 207000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 232,
+        "cancelled": 6,
+        "medPerM2": 747,
+        "medAmt": 40000,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 509,
+        "cancelled": 17,
+        "medPerM2": 1152,
+        "medAmt": 70000,
+        "maxAmt": 470000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 417,
+        "cancelled": 17,
+        "medPerM2": 1294,
+        "medAmt": 77500,
+        "maxAmt": 620000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 459,
+        "cancelled": 15,
+        "medPerM2": 860,
+        "medAmt": 48300,
+        "maxAmt": 277000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 308,
+        "cancelled": 15,
+        "medPerM2": 1558,
+        "medAmt": 72250,
+        "maxAmt": 1000000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 344,
+        "cancelled": 19,
+        "medPerM2": 1632,
+        "medAmt": 80000,
+        "maxAmt": 990000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 650,
+        "cancelled": 33,
+        "medPerM2": 1226,
+        "medAmt": 65850,
+        "maxAmt": 610000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 507,
+        "cancelled": 17,
+        "medPerM2": 1102,
+        "medAmt": 55000,
+        "maxAmt": 333000,
+        "truncated": false
+      }
+    },
+    "202604": {
+      "종로구": {
+        "n": 205,
+        "cancelled": 15,
+        "medPerM2": 945,
+        "medAmt": 58500,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 286,
+        "cancelled": 18,
+        "medPerM2": 1529,
+        "medAmt": 39150,
+        "maxAmt": 805000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 284,
+        "cancelled": 14,
+        "medPerM2": 1973,
+        "medAmt": 118750,
+        "maxAmt": 980000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 371,
+        "cancelled": 14,
+        "medPerM2": 2172,
+        "medAmt": 146000,
+        "maxAmt": 650000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 463,
+        "cancelled": 34,
+        "medPerM2": 1220,
+        "medAmt": 49000,
+        "maxAmt": 650000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 588,
+        "cancelled": 35,
+        "medPerM2": 1213,
+        "medAmt": 80000,
+        "maxAmt": 395260,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 631,
+        "cancelled": 20,
+        "medPerM2": 895,
+        "medAmt": 56000,
+        "maxAmt": 300800,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 714,
+        "cancelled": 10,
+        "medPerM2": 1065,
+        "medAmt": 79750,
+        "maxAmt": 1396832,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 382,
+        "cancelled": 13,
+        "medPerM2": 756,
+        "medAmt": 53250,
+        "maxAmt": 122500,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 607,
+        "cancelled": 19,
+        "medPerM2": 726,
+        "medAmt": 41700,
+        "maxAmt": 130000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 1133,
+        "cancelled": 23,
+        "medPerM2": 1030,
+        "medAmt": 59500,
+        "maxAmt": 202597,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 683,
+        "cancelled": 22,
+        "medPerM2": 853,
+        "medAmt": 43000,
+        "maxAmt": 309900,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 508,
+        "cancelled": 18,
+        "medPerM2": 1094,
+        "medAmt": 82000,
+        "maxAmt": 608022,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 485,
+        "cancelled": 21,
+        "medPerM2": 1359,
+        "medAmt": 68000,
+        "maxAmt": 590330,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 602,
+        "cancelled": 18,
+        "medPerM2": 944,
+        "medAmt": 48000,
+        "maxAmt": 388000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 1051,
+        "cancelled": 36,
+        "medPerM2": 1055,
+        "medAmt": 51000,
+        "maxAmt": 423500,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 672,
+        "cancelled": 10,
+        "medPerM2": 885,
+        "medAmt": 59000,
+        "maxAmt": 209000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 321,
+        "cancelled": 13,
+        "medPerM2": 791,
+        "medAmt": 43000,
+        "maxAmt": 194024,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 706,
+        "cancelled": 27,
+        "medPerM2": 1256,
+        "medAmt": 80150,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 586,
+        "cancelled": 19,
+        "medPerM2": 1443,
+        "medAmt": 96500,
+        "maxAmt": 329000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 551,
+        "cancelled": 19,
+        "medPerM2": 875,
+        "medAmt": 60000,
+        "maxAmt": 233200,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 508,
+        "cancelled": 21,
+        "medPerM2": 1787,
+        "medAmt": 150000,
+        "maxAmt": 1030000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 634,
+        "cancelled": 54,
+        "medPerM2": 2349,
+        "medAmt": 186000,
+        "maxAmt": 1100000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 1077,
+        "cancelled": 34,
+        "medPerM2": 1760,
+        "medAmt": 101500,
+        "maxAmt": 545000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 635,
+        "cancelled": 11,
+        "medPerM2": 1388,
+        "medAmt": 88000,
+        "maxAmt": 334000,
+        "truncated": false
+      }
+    },
+    "202605": {
+      "종로구": {
+        "n": 187,
+        "cancelled": 8,
+        "medPerM2": 1047,
+        "medAmt": 61000,
+        "maxAmt": 380000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 228,
+        "cancelled": 14,
+        "medPerM2": 1358,
+        "medAmt": 89500,
+        "maxAmt": 225000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 318,
+        "cancelled": 9,
+        "medPerM2": 2091,
+        "medAmt": 135000,
+        "maxAmt": 2550000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 305,
+        "cancelled": 11,
+        "medPerM2": 2169,
+        "medAmt": 166000,
+        "maxAmt": 1400000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 532,
+        "cancelled": 21,
+        "medPerM2": 1472,
+        "medAmt": 53750,
+        "maxAmt": 628500,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 478,
+        "cancelled": 22,
+        "medPerM2": 1177,
+        "medAmt": 85000,
+        "maxAmt": 246000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 531,
+        "cancelled": 19,
+        "medPerM2": 918,
+        "medAmt": 54000,
+        "maxAmt": 161656,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 726,
+        "cancelled": 30,
+        "medPerM2": 1122,
+        "medAmt": 82500,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 396,
+        "cancelled": 5,
+        "medPerM2": 772,
+        "medAmt": 49000,
+        "maxAmt": 123000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 531,
+        "cancelled": 13,
+        "medPerM2": 739,
+        "medAmt": 46977,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 946,
+        "cancelled": 30,
+        "medPerM2": 1044,
+        "medAmt": 60000,
+        "maxAmt": 215339,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 702,
+        "cancelled": 40,
+        "medPerM2": 925,
+        "medAmt": 53000,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 469,
+        "cancelled": 22,
+        "medPerM2": 1145,
+        "medAmt": 82500,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 500,
+        "cancelled": 33,
+        "medPerM2": 1385,
+        "medAmt": 85000,
+        "maxAmt": 660000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 531,
+        "cancelled": 26,
+        "medPerM2": 1025,
+        "medAmt": 68300,
+        "maxAmt": 348000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 962,
+        "cancelled": 34,
+        "medPerM2": 1026,
+        "medAmt": 63750,
+        "maxAmt": 645000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 908,
+        "cancelled": 23,
+        "medPerM2": 1026,
+        "medAmt": 52350,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 299,
+        "cancelled": 10,
+        "medPerM2": 736,
+        "medAmt": 44300,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 568,
+        "cancelled": 23,
+        "medPerM2": 1274,
+        "medAmt": 74000,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 637,
+        "cancelled": 25,
+        "medPerM2": 1471,
+        "medAmt": 89000,
+        "maxAmt": 487000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 659,
+        "cancelled": 40,
+        "medPerM2": 947,
+        "medAmt": 49000,
+        "maxAmt": 350000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 562,
+        "cancelled": 25,
+        "medPerM2": 2094,
+        "medAmt": 200000,
+        "maxAmt": 1055000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 672,
+        "cancelled": 37,
+        "medPerM2": 2707,
+        "medAmt": 230000,
+        "maxAmt": 1270000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 1057,
+        "cancelled": 40,
+        "medPerM2": 1794,
+        "medAmt": 118000,
+        "maxAmt": 859426,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 724,
+        "cancelled": 17,
+        "medPerM2": 1483,
+        "medAmt": 109500,
+        "maxAmt": 648863,
+        "truncated": false
+      }
+    },
+    "202606": {
+      "종로구": {
+        "n": 126,
+        "cancelled": 8,
+        "medPerM2": 853,
+        "medAmt": 53250,
+        "maxAmt": 500000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 134,
+        "cancelled": 11,
+        "medPerM2": 1271,
+        "medAmt": 53250,
+        "maxAmt": 395000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 173,
+        "cancelled": 7,
+        "medPerM2": 1878,
+        "medAmt": 98000,
+        "maxAmt": 2500000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 203,
+        "cancelled": 8,
+        "medPerM2": 2070,
+        "medAmt": 157500,
+        "maxAmt": 950000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 330,
+        "cancelled": 26,
+        "medPerM2": 1286,
+        "medAmt": 65750,
+        "maxAmt": 517500,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 388,
+        "cancelled": 13,
+        "medPerM2": 1257,
+        "medAmt": 88650,
+        "maxAmt": 300000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 423,
+        "cancelled": 12,
+        "medPerM2": 949,
+        "medAmt": 47500,
+        "maxAmt": 187000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 503,
+        "cancelled": 20,
+        "medPerM2": 1152,
+        "medAmt": 82000,
+        "maxAmt": 473401,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 305,
+        "cancelled": 5,
+        "medPerM2": 783,
+        "medAmt": 37800,
+        "maxAmt": 125000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 407,
+        "cancelled": 13,
+        "medPerM2": 718,
+        "medAmt": 48300,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 796,
+        "cancelled": 13,
+        "medPerM2": 1010,
+        "medAmt": 60000,
+        "maxAmt": 202478,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 511,
+        "cancelled": 18,
+        "medPerM2": 912,
+        "medAmt": 57000,
+        "maxAmt": 210000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 312,
+        "cancelled": 8,
+        "medPerM2": 1226,
+        "medAmt": 90500,
+        "maxAmt": 370000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 343,
+        "cancelled": 18,
+        "medPerM2": 1394,
+        "medAmt": 67000,
+        "maxAmt": 423000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 394,
+        "cancelled": 13,
+        "medPerM2": 1022,
+        "medAmt": 62850,
+        "maxAmt": 410000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 695,
+        "cancelled": 42,
+        "medPerM2": 880,
+        "medAmt": 51500,
+        "maxAmt": 237000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 585,
+        "cancelled": 10,
+        "medPerM2": 822,
+        "medAmt": 55900,
+        "maxAmt": 192000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 214,
+        "cancelled": 6,
+        "medPerM2": 760,
+        "medAmt": 42600,
+        "maxAmt": 135000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 447,
+        "cancelled": 20,
+        "medPerM2": 1413,
+        "medAmt": 86000,
+        "maxAmt": 540000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 339,
+        "cancelled": 12,
+        "medPerM2": 1495,
+        "medAmt": 89000,
+        "maxAmt": 501375,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 356,
+        "cancelled": 15,
+        "medPerM2": 892,
+        "medAmt": 46850,
+        "maxAmt": 320000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 460,
+        "cancelled": 15,
+        "medPerM2": 2004,
+        "medAmt": 119000,
+        "maxAmt": 1300000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 383,
+        "cancelled": 20,
+        "medPerM2": 2130,
+        "medAmt": 155000,
+        "maxAmt": 977000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 689,
+        "cancelled": 19,
+        "medPerM2": 1391,
+        "medAmt": 73700,
+        "maxAmt": 1424100,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 473,
+        "cancelled": 11,
+        "medPerM2": 1344,
+        "medAmt": 79500,
+        "maxAmt": 716680,
+        "truncated": false
+      }
+    },
+    "202607": {
+      "종로구": {
+        "n": 141,
+        "cancelled": 8,
+        "medPerM2": 936,
+        "medAmt": 62000,
+        "maxAmt": 336000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 135,
+        "cancelled": 13,
+        "medPerM2": 1459,
+        "medAmt": 75000,
+        "maxAmt": 367800,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 163,
+        "cancelled": 10,
+        "medPerM2": 2010,
+        "medAmt": 127000,
+        "maxAmt": 1100000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 166,
+        "cancelled": 10,
+        "medPerM2": 2075,
+        "medAmt": 156500,
+        "maxAmt": 1440000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 354,
+        "cancelled": 21,
+        "medPerM2": 1281,
+        "medAmt": 62400,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 339,
+        "cancelled": 18,
+        "medPerM2": 1271,
+        "medAmt": 93000,
+        "maxAmt": 555900,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 708,
+        "cancelled": 17,
+        "medPerM2": 1225,
+        "medAmt": 37750,
+        "maxAmt": 206602,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 509,
+        "cancelled": 12,
+        "medPerM2": 1182,
+        "medAmt": 81000,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 304,
+        "cancelled": 7,
+        "medPerM2": 796,
+        "medAmt": 42750,
+        "maxAmt": 125000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 410,
+        "cancelled": 13,
+        "medPerM2": 709,
+        "medAmt": 44000,
+        "maxAmt": 119500,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 807,
+        "cancelled": 15,
+        "medPerM2": 1074,
+        "medAmt": 64500,
+        "maxAmt": 214818,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 620,
+        "cancelled": 22,
+        "medPerM2": 886,
+        "medAmt": 49750,
+        "maxAmt": 316500,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 347,
+        "cancelled": 34,
+        "medPerM2": 1201,
+        "medAmt": 93000,
+        "maxAmt": 410000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 313,
+        "cancelled": 14,
+        "medPerM2": 1298,
+        "medAmt": 62000,
+        "maxAmt": 308000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 377,
+        "cancelled": 13,
+        "medPerM2": 1185,
+        "medAmt": 71500,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 724,
+        "cancelled": 25,
+        "medPerM2": 1015,
+        "medAmt": 55000,
+        "maxAmt": 215000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 493,
+        "cancelled": 18,
+        "medPerM2": 940,
+        "medAmt": 67000,
+        "maxAmt": 220000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 245,
+        "cancelled": 6,
+        "medPerM2": 791,
+        "medAmt": 41400,
+        "maxAmt": 200000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 454,
+        "cancelled": 30,
+        "medPerM2": 1536,
+        "medAmt": 90000,
+        "maxAmt": 450000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 405,
+        "cancelled": 10,
+        "medPerM2": 1713,
+        "medAmt": 75500,
+        "maxAmt": 340000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 366,
+        "cancelled": 17,
+        "medPerM2": 924,
+        "medAmt": 62750,
+        "maxAmt": 250000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 287,
+        "cancelled": 13,
+        "medPerM2": 1829,
+        "medAmt": 80000,
+        "maxAmt": 900000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 346,
+        "cancelled": 13,
+        "medPerM2": 1864,
+        "medAmt": 103500,
+        "maxAmt": 1330000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 692,
+        "cancelled": 13,
+        "medPerM2": 1478,
+        "medAmt": 78000,
+        "maxAmt": 861000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 444,
+        "cancelled": 22,
+        "medPerM2": 1326,
+        "medAmt": 80000,
+        "maxAmt": 319000,
+        "truncated": false
+      }
+    },
+    "202608": {
+      "종로구": {
+        "n": 88,
+        "cancelled": 4,
+        "medPerM2": 980,
+        "medAmt": 66000,
+        "maxAmt": 272000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 75,
+        "cancelled": 7,
+        "medPerM2": 1520,
+        "medAmt": 79500,
+        "maxAmt": 376000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 115,
+        "cancelled": 8,
+        "medPerM2": 1923,
+        "medAmt": 105000,
+        "maxAmt": 2630000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 96,
+        "cancelled": 3,
+        "medPerM2": 1778,
+        "medAmt": 150000,
+        "maxAmt": 920000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 250,
+        "cancelled": 12,
+        "medPerM2": 1155,
+        "medAmt": 55000,
+        "maxAmt": 576000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 276,
+        "cancelled": 10,
+        "medPerM2": 1132,
+        "medAmt": 60000,
+        "maxAmt": 337907,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 364,
+        "cancelled": 12,
+        "medPerM2": 1029,
+        "medAmt": 43875,
+        "maxAmt": 180000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 314,
+        "cancelled": 8,
+        "medPerM2": 1121,
+        "medAmt": 75000,
+        "maxAmt": 191000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 217,
+        "cancelled": 4,
+        "medPerM2": 715,
+        "medAmt": 36000,
+        "maxAmt": 140000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 327,
+        "cancelled": 13,
+        "medPerM2": 697,
+        "medAmt": 43800,
+        "maxAmt": 122000,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 595,
+        "cancelled": 16,
+        "medPerM2": 1095,
+        "medAmt": 64500,
+        "maxAmt": 218652,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 471,
+        "cancelled": 21,
+        "medPerM2": 931,
+        "medAmt": 50550,
+        "maxAmt": 191000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 227,
+        "cancelled": 7,
+        "medPerM2": 1079,
+        "medAmt": 77000,
+        "maxAmt": 510000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 252,
+        "cancelled": 18,
+        "medPerM2": 1269,
+        "medAmt": 61500,
+        "maxAmt": 660000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 248,
+        "cancelled": 7,
+        "medPerM2": 990,
+        "medAmt": 57750,
+        "maxAmt": 370000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 528,
+        "cancelled": 13,
+        "medPerM2": 916,
+        "medAmt": 49250,
+        "maxAmt": 240000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 352,
+        "cancelled": 9,
+        "medPerM2": 810,
+        "medAmt": 52600,
+        "maxAmt": 280000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 205,
+        "cancelled": 6,
+        "medPerM2": 788,
+        "medAmt": 44800,
+        "maxAmt": 150000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 278,
+        "cancelled": 12,
+        "medPerM2": 1370,
+        "medAmt": 70000,
+        "maxAmt": 545000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 275,
+        "cancelled": 8,
+        "medPerM2": 1474,
+        "medAmt": 92500,
+        "maxAmt": 1381733,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 409,
+        "cancelled": 15,
+        "medPerM2": 919,
+        "medAmt": 30000,
+        "maxAmt": 253200,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 230,
+        "cancelled": 11,
+        "medPerM2": 1516,
+        "medAmt": 69250,
+        "maxAmt": 910000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 243,
+        "cancelled": 16,
+        "medPerM2": 1616,
+        "medAmt": 77500,
+        "maxAmt": 973000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 513,
+        "cancelled": 8,
+        "medPerM2": 1375,
+        "medAmt": 52000,
+        "maxAmt": 683700,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 325,
+        "cancelled": 22,
+        "medPerM2": 1165,
+        "medAmt": 69000,
+        "maxAmt": 360000,
+        "truncated": false
+      }
+    },
+    "202609": {
+      "종로구": {
+        "n": 154,
+        "cancelled": 2,
+        "medPerM2": 1031,
+        "medAmt": 46067,
+        "maxAmt": 630000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 70,
+        "cancelled": 4,
+        "medPerM2": 1151,
+        "medAmt": 70750,
+        "maxAmt": 275000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 114,
+        "cancelled": 2,
+        "medPerM2": 2061,
+        "medAmt": 100000,
+        "maxAmt": 600000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 121,
+        "cancelled": 4,
+        "medPerM2": 2146,
+        "medAmt": 149000,
+        "maxAmt": 620000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 207,
+        "cancelled": 4,
+        "medPerM2": 1297,
+        "medAmt": 55000,
+        "maxAmt": 337000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 216,
+        "cancelled": 10,
+        "medPerM2": 1047,
+        "medAmt": 64250,
+        "maxAmt": 220000,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 346,
+        "cancelled": 13,
+        "medPerM2": 971,
+        "medAmt": 48200,
+        "maxAmt": 154000,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 475,
+        "cancelled": 10,
+        "medPerM2": 758,
+        "medAmt": 42279,
+        "maxAmt": 366800,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 194,
+        "cancelled": 5,
+        "medPerM2": 686,
+        "medAmt": 38900,
+        "maxAmt": 134000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 318,
+        "cancelled": 5,
+        "medPerM2": 713,
+        "medAmt": 46000,
+        "maxAmt": 114500,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 483,
+        "cancelled": 15,
+        "medPerM2": 1062,
+        "medAmt": 65000,
+        "maxAmt": 221767,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 466,
+        "cancelled": 13,
+        "medPerM2": 925,
+        "medAmt": 56500,
+        "maxAmt": 270000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 201,
+        "cancelled": 3,
+        "medPerM2": 1089,
+        "medAmt": 78800,
+        "maxAmt": 800000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 258,
+        "cancelled": 11,
+        "medPerM2": 1210,
+        "medAmt": 53900,
+        "maxAmt": 318000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 244,
+        "cancelled": 8,
+        "medPerM2": 920,
+        "medAmt": 49000,
+        "maxAmt": 349500,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 565,
+        "cancelled": 36,
+        "medPerM2": 906,
+        "medAmt": 35000,
+        "maxAmt": 706500,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 365,
+        "cancelled": 4,
+        "medPerM2": 814,
+        "medAmt": 49500,
+        "maxAmt": 277000,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 204,
+        "cancelled": 3,
+        "medPerM2": 776,
+        "medAmt": 38150,
+        "maxAmt": 134000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 304,
+        "cancelled": 2,
+        "medPerM2": 1274,
+        "medAmt": 68000,
+        "maxAmt": 499000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 205,
+        "cancelled": 6,
+        "medPerM2": 1287,
+        "medAmt": 80000,
+        "maxAmt": 540000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 281,
+        "cancelled": 11,
+        "medPerM2": 842,
+        "medAmt": 45000,
+        "maxAmt": 271301,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 238,
+        "cancelled": 5,
+        "medPerM2": 2002,
+        "medAmt": 95500,
+        "maxAmt": 1200000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 255,
+        "cancelled": 11,
+        "medPerM2": 1979,
+        "medAmt": 104000,
+        "maxAmt": 1000000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 610,
+        "cancelled": 11,
+        "medPerM2": 2053,
+        "medAmt": 42600,
+        "maxAmt": 848000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 299,
+        "cancelled": 6,
+        "medPerM2": 1165,
+        "medAmt": 60000,
+        "maxAmt": 308000,
+        "truncated": false
+      }
+    },
+    "202610": {
+      "종로구": {
+        "n": 69,
+        "cancelled": 1,
+        "medPerM2": 848,
+        "medAmt": 40000,
+        "maxAmt": 460000,
+        "truncated": false
+      },
+      "중구": {
+        "n": 83,
+        "cancelled": 0,
+        "medPerM2": 1529,
+        "medAmt": 59500,
+        "maxAmt": 325000,
+        "truncated": false
+      },
+      "용산구": {
+        "n": 106,
+        "cancelled": 2,
+        "medPerM2": 2210,
+        "medAmt": 112350,
+        "maxAmt": 2620000,
+        "truncated": false
+      },
+      "성동구": {
+        "n": 117,
+        "cancelled": 0,
+        "medPerM2": 1984,
+        "medAmt": 155500,
+        "maxAmt": 430000,
+        "truncated": false
+      },
+      "광진구": {
+        "n": 192,
+        "cancelled": 2,
+        "medPerM2": 1292,
+        "medAmt": 53000,
+        "maxAmt": 377000,
+        "truncated": false
+      },
+      "동대문구": {
+        "n": 577,
+        "cancelled": 7,
+        "medPerM2": 1486,
+        "medAmt": 24488,
+        "maxAmt": 207700,
+        "truncated": false
+      },
+      "중랑구": {
+        "n": 319,
+        "cancelled": 5,
+        "medPerM2": 973,
+        "medAmt": 52000,
+        "maxAmt": 168157,
+        "truncated": false
+      },
+      "성북구": {
+        "n": 285,
+        "cancelled": 9,
+        "medPerM2": 1113,
+        "medAmt": 82500,
+        "maxAmt": 197000,
+        "truncated": false
+      },
+      "강북구": {
+        "n": 264,
+        "cancelled": 6,
+        "medPerM2": 723,
+        "medAmt": 39000,
+        "maxAmt": 238000,
+        "truncated": false
+      },
+      "도봉구": {
+        "n": 381,
+        "cancelled": 7,
+        "medPerM2": 720,
+        "medAmt": 40654,
+        "maxAmt": 129500,
+        "truncated": false
+      },
+      "노원구": {
+        "n": 500,
+        "cancelled": 6,
+        "medPerM2": 1098,
+        "medAmt": 62250,
+        "maxAmt": 215084,
+        "truncated": false
+      },
+      "은평구": {
+        "n": 455,
+        "cancelled": 7,
+        "medPerM2": 849,
+        "medAmt": 46800,
+        "maxAmt": 195000,
+        "truncated": false
+      },
+      "서대문구": {
+        "n": 249,
+        "cancelled": 5,
+        "medPerM2": 1074,
+        "medAmt": 78000,
+        "maxAmt": 215000,
+        "truncated": false
+      },
+      "마포구": {
+        "n": 227,
+        "cancelled": 6,
+        "medPerM2": 1347,
+        "medAmt": 74400,
+        "maxAmt": 330000,
+        "truncated": false
+      },
+      "양천구": {
+        "n": 281,
+        "cancelled": 6,
+        "medPerM2": 967,
+        "medAmt": 52000,
+        "maxAmt": 400000,
+        "truncated": false
+      },
+      "강서구": {
+        "n": 546,
+        "cancelled": 21,
+        "medPerM2": 883,
+        "medAmt": 40350,
+        "maxAmt": 220000,
+        "truncated": false
+      },
+      "구로구": {
+        "n": 429,
+        "cancelled": 124,
+        "medPerM2": 797,
+        "medAmt": 50000,
+        "maxAmt": 181500,
+        "truncated": false
+      },
+      "금천구": {
+        "n": 250,
+        "cancelled": 2,
+        "medPerM2": 938,
+        "medAmt": 32500,
+        "maxAmt": 148000,
+        "truncated": false
+      },
+      "영등포구": {
+        "n": 293,
+        "cancelled": 5,
+        "medPerM2": 1234,
+        "medAmt": 69500,
+        "maxAmt": 390000,
+        "truncated": false
+      },
+      "동작구": {
+        "n": 274,
+        "cancelled": 3,
+        "medPerM2": 1455,
+        "medAmt": 80000,
+        "maxAmt": 480000,
+        "truncated": false
+      },
+      "관악구": {
+        "n": 357,
+        "cancelled": 12,
+        "medPerM2": 946,
+        "medAmt": 51000,
+        "maxAmt": 345000,
+        "truncated": false
+      },
+      "서초구": {
+        "n": 202,
+        "cancelled": 2,
+        "medPerM2": 1651,
+        "medAmt": 83000,
+        "maxAmt": 780000,
+        "truncated": false
+      },
+      "강남구": {
+        "n": 326,
+        "cancelled": 5,
+        "medPerM2": 1579,
+        "medAmt": 121057,
+        "maxAmt": 930000,
+        "truncated": false
+      },
+      "송파구": {
+        "n": 489,
+        "cancelled": 4,
+        "medPerM2": 1242,
+        "medAmt": 68000,
+        "maxAmt": 630000,
+        "truncated": false
+      },
+      "강동구": {
+        "n": 342,
+        "cancelled": 2,
+        "medPerM2": 1188,
+        "medAmt": 72750,
+        "maxAmt": 519287,
+        "truncated": false
+      }
+    },
     "202611": {
       "종로구": {
-        "n": 7,
+        "n": 8,
         "cancelled": 0,
         "medPerM2": 840,
-        "medAmt": 35500,
+        "medAmt": 33500,
         "maxAmt": 275000,
         "truncated": false
       },
       "중구": {
-        "n": 17,
+        "n": 19,
         "cancelled": 1,
-        "medPerM2": 1327,
-        "medAmt": 58000,
+        "medPerM2": 1701,
+        "medAmt": 64500,
         "maxAmt": 207000,
         "truncated": false
       },
       "용산구": {
-        "n": 10,
+        "n": 13,
         "cancelled": 0,
-        "medPerM2": 1738,
-        "medAmt": 109000,
+        "medPerM2": 1756,
+        "medAmt": 108000,
         "maxAmt": 253000,
         "truncated": false
       },
       "성동구": {
-        "n": 22,
-        "cancelled": 1,
-        "medPerM2": 2661,
-        "medAmt": 163200,
+        "n": 26,
+        "cancelled": 2,
+        "medPerM2": 2704,
+        "medAmt": 170450,
         "maxAmt": 330000,
         "truncated": false
       },
       "광진구": {
-        "n": 16,
+        "n": 19,
         "cancelled": 0,
-        "medPerM2": 1026,
-        "medAmt": 44500,
+        "medPerM2": 1011,
+        "medAmt": 42500,
         "maxAmt": 164500,
         "truncated": false
       },
       "동대문구": {
-        "n": 50,
+        "n": 60,
         "cancelled": 1,
-        "medPerM2": 1012,
-        "medAmt": 58500,
+        "medPerM2": 1057,
+        "medAmt": 72400,
         "maxAmt": 209000,
         "truncated": false
       },
       "중랑구": {
-        "n": 52,
+        "n": 69,
         "cancelled": 0,
-        "medPerM2": 1027,
-        "medAmt": 56950,
+        "medPerM2": 1016,
+        "medAmt": 59500,
         "maxAmt": 143107,
         "truncated": false
       },
       "성북구": {
-        "n": 75,
+        "n": 90,
         "cancelled": 0,
-        "medPerM2": 1444,
-        "medAmt": 30050,
-        "maxAmt": 135000,
+        "medPerM2": 1406,
+        "medAmt": 36000,
+        "maxAmt": 168000,
         "truncated": false
       },
       "강북구": {
-        "n": 57,
+        "n": 65,
         "cancelled": 0,
-        "medPerM2": 607,
-        "medAmt": 36500,
-        "maxAmt": 100000,
+        "medPerM2": 627,
+        "medAmt": 37500,
+        "maxAmt": 144000,
         "truncated": false
       },
       "도봉구": {
-        "n": 57,
-        "cancelled": 1,
-        "medPerM2": 788,
-        "medAmt": 48900,
-        "maxAmt": 109500,
+        "n": 70,
+        "cancelled": 2,
+        "medPerM2": 738,
+        "medAmt": 48950,
+        "maxAmt": 124000,
         "truncated": false
       },
       "노원구": {
-        "n": 29,
+        "n": 39,
         "cancelled": 0,
-        "medPerM2": 1181,
-        "medAmt": 55200,
+        "medPerM2": 1182,
+        "medAmt": 64800,
         "maxAmt": 188903,
         "truncated": false
       },
       "은평구": {
-        "n": 70,
+        "n": 83,
         "cancelled": 1,
-        "medPerM2": 912,
-        "medAmt": 43000,
+        "medPerM2": 911,
+        "medAmt": 41000,
         "maxAmt": 142500,
         "truncated": false
       },
       "서대문구": {
-        "n": 43,
+        "n": 47,
         "cancelled": 1,
         "medPerM2": 1089,
-        "medAmt": 62500,
+        "medAmt": 62800,
         "maxAmt": 158500,
         "truncated": false
       },
       "마포구": {
-        "n": 25,
+        "n": 31,
         "cancelled": 0,
-        "medPerM2": 985,
-        "medAmt": 27900,
+        "medPerM2": 1001,
+        "medAmt": 34000,
         "maxAmt": 210300,
         "truncated": false
       },
       "양천구": {
-        "n": 49,
+        "n": 56,
         "cancelled": 0,
-        "medPerM2": 1139,
-        "medAmt": 72000,
+        "medPerM2": 1086,
+        "medAmt": 70750,
         "maxAmt": 287000,
         "truncated": false
       },
       "강서구": {
-        "n": 82,
+        "n": 95,
         "cancelled": 2,
-        "medPerM2": 878,
-        "medAmt": 38250,
-        "maxAmt": 159000,
+        "medPerM2": 879,
+        "medAmt": 45000,
+        "maxAmt": 889064,
         "truncated": false
       },
       "구로구": {
-        "n": 29,
+        "n": 33,
         "cancelled": 0,
-        "medPerM2": 844,
-        "medAmt": 57000,
+        "medPerM2": 791,
+        "medAmt": 56200,
         "maxAmt": 129500,
         "truncated": false
       },
       "금천구": {
-        "n": 33,
+        "n": 42,
         "cancelled": 0,
-        "medPerM2": 680,
-        "medAmt": 39900,
+        "medPerM2": 731,
+        "medAmt": 43750,
         "maxAmt": 133300,
         "truncated": false
       },
       "영등포구": {
-        "n": 42,
+        "n": 53,
         "cancelled": 2,
-        "medPerM2": 1034,
-        "medAmt": 45250,
+        "medPerM2": 1039,
+        "medAmt": 46500,
         "maxAmt": 310000,
         "truncated": false
       },
       "동작구": {
-        "n": 22,
+        "n": 26,
         "cancelled": 1,
         "medPerM2": 1485,
-        "medAmt": 63450,
-        "maxAmt": 170000,
+        "medAmt": 71000,
+        "maxAmt": 329000,
         "truncated": false
       },
       "관악구": {
-        "n": 70,
-        "cancelled": 2,
-        "medPerM2": 934,
-        "medAmt": 58000,
+        "n": 91,
+        "cancelled": 3,
+        "medPerM2": 865,
+        "medAmt": 56000,
         "maxAmt": 140000,
         "truncated": false
       },
       "서초구": {
-        "n": 20,
+        "n": 22,
         "cancelled": 0,
         "medPerM2": 1220,
         "medAmt": 47825,
@@ -211,26 +7113,26 @@
         "truncated": false
       },
       "강남구": {
-        "n": 32,
+        "n": 40,
         "cancelled": 2,
         "medPerM2": 1564,
-        "medAmt": 59750,
+        "medAmt": 57500,
         "maxAmt": 660000,
         "truncated": false
       },
       "송파구": {
-        "n": 61,
+        "n": 63,
         "cancelled": 0,
-        "medPerM2": 1169,
-        "medAmt": 77700,
+        "medPerM2": 1168,
+        "medAmt": 77000,
         "maxAmt": 333000,
         "truncated": false
       },
       "강동구": {
-        "n": 44,
-        "cancelled": 0,
-        "medPerM2": 1065,
-        "medAmt": 55292,
+        "n": 62,
+        "cancelled": 2,
+        "medPerM2": 1148,
+        "medAmt": 59350,
         "maxAmt": 288000,
         "truncated": false
       }
