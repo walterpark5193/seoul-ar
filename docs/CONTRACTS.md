@@ -320,3 +320,36 @@ export function isJobMessage(x: unknown): x is JobMessage;
 - IAM 최소 권한: 버킷의 `data/*` Get/Put, 해당 배포의 `cloudfront:CreateInvalidation`, 두 파라미터의 `ssm:GetParameter` + `kms:Decrypt`(aws/ssm 키), 자기 자신 `lambda:InvokeFunction`.
 - Function URL(AuthType NONE) + CloudFront 추가 동작 `/api/*`: `FunctionUrlOrigin`, 캐시 비활성(`CACHING_DISABLED`), 오리진 요청 정책 `ALL_VIEWER_EXCEPT_HOST_HEADER`, 메서드 ALL, HTTPS 리다이렉트.
 - 출력 `FetchMonthUrl`. 테스트: Lambda 핸들러 단위 테스트(`node --test`, fetch/S3/publish 주입), CDK assertions(동작·권한·env).
+
+## 11. 시간 여행 재생 (Task 10, 2026-11-17 추가)
+
+호스트 전용 조작. `index.months.length >= 2`일 때 "시간 여행" 구역이 보인다: 재생/일시정지 버튼, 간격 선택(2초·4초·8초, 기본 4초), 진행 표시 "2026년 9월 → 10월 → **11월**". 재생 중에는 오름차순으로 월을 바꾸며 매 단계 기존 `StateMessage`를 발행한다(gu·metric 유지, month 만 바뀜). 마지막 달에서 멈춘다(반복 없음). 호스트가 다른 조작을 하면 재생이 멈춘다. 뷰어 쪽 변경은 없다(월 변화를 그대로 따라감).
+
+씬(4절 보강): `focus(gu, data, metric)`에서 `gu`가 같고 `data`가 다른 객체(다른 월)이면 막대를 0부터 다시 키우지 않고 **현재 높이에서 새 높이로 보간**한다(같은 이름의 법정동끼리 매칭, 새로 생긴 동은 0에서 자람, 사라진 동은 0으로 줄어든 뒤 제거). 색도 보간. 시간은 0.6초 ease-out 그대로. `setOverview`도 같은 규칙으로 구 색을 보간한다. reducedMotion 이면 즉시.
+
+## 12. AI 한 줄 해설 (Task 11, 2026-11-17 추가)
+
+### 12.1 파일
+`data/{month}/narration.json` (Cache-Control no-cache):
+```json
+{ "v": 1, "month": "202611", "generatedAt": "...", "model": "anthropic.claude-haiku-5-5", 
+  "items": { "서울 전체": "11월 서울 매매 1,014건, ㎡당 중앙값은 …", "강남구": "강남구 11월: ㎡당 중앙값 1,564만원, 압구정동이 가장 높습니다." } }
+```
+- 키는 "서울 전체" 와 GU_ORDER 25개. 값은 한국어 한 문장, 80자 이내, 사실만. 금지: 투자 권유·전망 표현(추천, 매수, 매도, 사세요, 팔세요, 오를, 내릴, 전망, 유망, 투자하), 본번·부번·건물명, 개별 거래 언급. 거래 0건이면 "거래가 없었습니다"류 한 문장.
+- 생성 실패한 항목은 키를 생략한다(프론트는 없으면 숨김).
+
+### 12.2 생성 (Lambda, Task 9a 코드에 추가)
+- Bedrock Converse API, 모델은 us-east-1에서 호출 가능한 Claude Haiku 계열(`anthropic.claude-haiku-5-5` 우선, 안 되면 `anthropic.claude-haiku-4-5-20251001-v1:0`; 인퍼런스 프로파일이 필요하면 `us.` 접두 ID). 모델 ID는 env `BEDROCK_MODEL_ID`로 넘기고 코드에 하드코딩하지 않는다. 입력은 집계 JSON(2절)만 넘긴다. 한 번의 호출로 26개 문장을 JSON 으로 받고(`{"서울 전체": "...", "강남구": "..."}`), 파싱 실패·누락 항목은 구별 개별 호출로 1회 재시도.
+- 출력 검증(코드): 길이 ≤ 80, 금지어 정규식, GU 키 유효성. 걸리면 해당 항목만 1회 재생성, 그래도 걸리면 생략.
+- 트리거: (a) 월 수집 작업(10절) 끝에 자동 생성, (b) 관리용 `POST /api/narrate-month` `{month}` + `x-presenter-key`(기존 202611 등 이미 있는 달용; 202 비동기, 진행은 `/seoul/jobs` 에 `type:"job"`, `kind:"narration"` 필드 추가 — JobMessage 에 선택 필드 `kind?: "fetch" | "narration"`).
+- IAM: `bedrock:InvokeModel` 을 해당 모델(및 인퍼런스 프로파일) ARN 으로 한정. 공개 트리거 없음(Bedrock 호출은 암호 보호 경로 또는 수집 작업에서만).
+- 비용 상한: 한 작업당 호출 ≤ 30회.
+
+### 12.3 프론트
+- 로더: `loadNarration(month) → Promise<Narration | null>` (404면 null, 메모리 캐시, index 재로딩 시 무효화).
+- 시트: 수치 아래 "AI 해설" 한 줄(선택 구 또는 서울 전체). 작은 글씨로 "Bedrock · 모델명 · 자동 생성, 참고용". 없으면 영역 자체를 숨긴다.
+- 호스트: "월 가져오기" 구역에 "해설 생성" 버튼(해당 월 narration 이 없을 때만 활성) → `/api/narrate-month`.
+
+## 13. 큰 화면 3D 모드 (Task 12, 2026-11-17 추가)
+
+`#/3d?stage=1` = 무대 모드. 기존 3D 뷰어와 같은 씬·같은 실시간 따라가기(follow 고정, 직접 조작 비활성)지만 레이아웃이 큰 화면용이다: 바텀시트 대신 왼쪽 위 큰 제목(구 이름 또는 "서울 전체", 월), 그 아래 큰 수치 3개(㎡당 중앙값, 거래, 최고가)와 AI 해설 한 줄, 오른쇄 아래 QR(관객용 주소)과 "폰으로 QR을 찍어 그림을 비춰 보세요" 안내, 자동 회전(reducedMotion 이면 정지), 커서 숨김, 어두운 배경. 라우터는 `#/3d` 에도 query 를 넘긴다. 호스트 화면에 "큰 화면 열기" 버튼(새 창으로 `#/3d?stage=1`)과 안내 "프로젙터 쪽 창에 두세요".
