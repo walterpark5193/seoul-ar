@@ -20,7 +20,7 @@ import {
 } from "./job.mjs";
 import { jobMessage, createReporter } from "./publish.mjs";
 import { generateNarration, narrationKey, NARRATION_KEYS } from "./narrate.mjs";
-import { clientIp, authKey, passcodeSecret, registerAttempt, clearAttempts } from "./auth.mjs";
+import { clientIp, authKey, registerAttempt, clearAttempts } from "./auth.mjs";
 
 export const MIN_MONTH = "200601";
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -114,7 +114,16 @@ function errFields(e, ...secrets) {
   return { error: String(e?.name ?? "Error"), code: e?.code, message };
 }
 
-async function handleHttp(event, deps, passcodeCache) {
+/** HMAC 비밀(서버 쪽 임의 값)을 컨테이너마다 한 번 읽는다. 실패는 캐시하지 않는다. */
+async function readAuthSecret(deps, cache) {
+  if (cache.value !== null) return cache.value;
+  const value = await deps.getAuthSecret(deps.env.AUTH_SECRET_ARN);
+  if (typeof value !== "string" || value.length === 0) throw new Error("인증 비밀 값이 비어 있음");
+  cache.value = value;
+  return value;
+}
+
+async function handleHttp(event, deps, caches) {
   const { env, store, log } = deps;
   const method = event.requestContext.http.method;
   const path = event.rawPath ?? event.requestContext.http.path;
@@ -122,19 +131,13 @@ async function handleHttp(event, deps, passcodeCache) {
   if (!kind) return fail(404, "not_found", "알 수 없는 경로입니다.");
   if (method !== "POST") return fail(405, "method_not_allowed", "POST 요청만 받습니다.");
 
-  let expected;
-  try {
-    expected = await readPasscode(deps, passcodeCache);
-  } catch (e) {
-    log("error", "발표자 암호 파라미터를 읽지 못함", errFields(e));
-    return fail(500, "config", "서버 설정을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
-  }
-  // IP(IPv6 는 /64) 별 시도 셈: 비교 전에 ETag 조건부 쓰기로 센다. 10분 창에 10번 → 10분 429.
-  // 셈을 기록하지 못하면 비교하지 않고 거절한다(fail-closed). 키는 HMAC(ip, sha256(암호)).
-  const attemptKey = authKey(clientIp(event), passcodeSecret(expected));
+  // IP(IPv6 는 /64) 별 시도 셈: 비교 전에 비공개 인증 상태 버킷에 ETag 조건부 쓰기로 센다. 10분 창에 10번 → 10분 429.
+  // 키는 HMAC(ip, 서버 쪽 임의 비밀). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 거절한다(fail-closed).
   let attempt;
+  let attemptKey;
   try {
-    attempt = await registerAttempt(store, attemptKey, deps.now());
+    attemptKey = authKey(clientIp(event), await readAuthSecret(deps, caches.authSecret));
+    attempt = await registerAttempt(deps.authStore, attemptKey, deps.now());
   } catch (e) {
     log("warn", "암호 시도를 기록하지 못해 거절(비교하지 않음)", errFields(e));
     return fail(401, "unauthorized", "암호를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -142,12 +145,20 @@ async function handleHttp(event, deps, passcodeCache) {
   if (!attempt.ok) {
     return fail(429, "too_many_attempts", "잠시 후 다시 시도해 주세요.", {}, { "retry-after": String(Math.ceil(attempt.lockedMs / 1000)) });
   }
+
+  let expected;
+  try {
+    expected = await readPasscode(deps, caches.passcode);
+  } catch (e) {
+    log("error", "발표자 암호 파라미터를 읽지 못함", errFields(e));
+    return fail(500, "config", "서버 설정을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  }
   if (!passcodeMatches(header(event.headers, "x-presenter-key"), expected)) {
     if (attempt.record.lockedUntil) log("warn", "암호 실패가 많아 이 접속을 10분 잠근다", { count: attempt.record.count });
     return fail(401, "unauthorized", "발표자 암호가 맞지 않습니다.");
   }
   try {
-    await clearAttempts(store, attemptKey, attempt.etag);
+    await clearAttempts(deps.authStore, attemptKey, attempt.etag);
   } catch (e) {
     log("warn", "암호 시도 기록을 초기화하지 못함", errFields(e));
   }
@@ -539,9 +550,9 @@ async function rebuildIndex(deps) {
 
 /** deps: { env, fetch, store, getParameter, invoke, invalidate, publish, converse, now, sleep, randomId, log, concurrency? } */
 export function createHandler(deps) {
-  const passcodeCache = { value: null, at: 0 };
+  const caches = { passcode: { value: null, at: 0 }, authSecret: { value: null } };
   return async function handle(event, context) {
-    if (event?.requestContext?.http) return handleHttp(event, deps, passcodeCache);
+    if (event?.requestContext?.http) return handleHttp(event, deps, caches);
     if (event?.action === "rebuild-index") return rebuildIndex(deps);
     if (event?.action === "narrate") return runNarrateJob(event, deps, context);
     if (event && typeof event === "object" && "jobId" in event) return runWorker(event, deps, context);

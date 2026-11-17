@@ -5,6 +5,7 @@ import { GU_ORDER } from "./gu.mjs";
 
 export const SERVICE = "tbLnOpendataRtmsV";
 export const FAKE_KEY = "fake-seoul-key-5e3c1d9a7b";
+export const AUTH_SECRET = "Rnd0mServerSideSecretForHmac32ch"; // 서버 쪽 임의 비밀(CDK 가 만든 값) 대역
 
 /** 조건부 쓰기(IfNoneMatch "*", IfMatch etag)를 S3 처럼 흉내 내는 메모리 저장소. */
 export function fakeStore(initial = {}) {
@@ -109,6 +110,7 @@ export function fakeDeps(over = {}) {
   const logs = [];
   const invokes = [];
   const invalidations = [];
+  const secretReads = [];
   let clock = over.nowMs ?? Date.UTC(2026, 10, 17, 3, 0, 0); // 2026-11-17 12:00 KST
   const params = { "/seoul-ar/seoul-api-key": FAKE_KEY, "/seoul-ar/presenter-passcode": "open-sesame", ...(over.params ?? {}) };
   const deps = {
@@ -120,10 +122,18 @@ export function fakeDeps(over = {}) {
       SSM_API_KEY_NAME: "/seoul-ar/seoul-api-key",
       SSM_PASSCODE_NAME: "/seoul-ar/presenter-passcode",
       SELF_FUNCTION_NAME: "SeoulArStack-FetchMonthWorker",
+      AUTH_BUCKET: "test-auth-bucket",
+      AUTH_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111111111111:secret:seoul-ar-auth-hmac-AbCdEf",
       ...(over.env ?? {}),
     },
     fetch: over.fetch ?? fakeSeoulFetch({}),
     store: over.store ?? fakeStore(),
+    authStore: over.authStore ?? fakeStore(), // 비공개 인증 상태 버킷(사이트 버킷과 따로)
+    async getAuthSecret(arn) {
+      secretReads.push(arn);
+      if (over.getAuthSecret) return over.getAuthSecret(arn);
+      return AUTH_SECRET;
+    },
     async getParameter(name) {
       if (over.getParameter) return over.getParameter(name);
       if (!(name in params)) throw new Error(`ParameterNotFound: ${name}`);
@@ -154,6 +164,7 @@ export function fakeDeps(over = {}) {
     logs,
     invokes,
     invalidations,
+    secretReads,
     setNow: (ms) => { clock = ms; },
   };
 }

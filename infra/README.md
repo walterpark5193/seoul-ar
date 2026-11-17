@@ -76,6 +76,7 @@ unset SEOUL_API_KEY PRESENTER_PASSCODE
 보안 권장:
 - 서울 API 는 HTTP 로만 열려 있다(확인함: 8088 포트는 TLS 핸드셰이크가 실패하고 443 은 응답하지 않는다). 그래서 키가 `openapi.seoul.go.kr` 까지 평문으로 간다. **이 앱 전용 키**를 발급해 쓰고 행사가 끝나면 **폐기·재발급**한다.
 - 발표자 암호는 **12자 이상**으로 정한다. 같은 접속(IP, IPv6 는 /64)에서 10분 안에 10번 시도해 틀리면 10분 동안 429 로 막는다(아래 표).
+- 이전 버전(암호 시도 기록을 공개 사이트 버킷 `data/jobs/_auth/` 에 두던 것)을 배포한 적이 있으면, 이번 배포 뒤 그 객체들을 지우고(`aws s3 rm s3://<BucketName>/data/jobs/_auth/ --recursive`) **발표자 암호를 바꾼다**. 그 기록 이름은 암호에서 유도돼 있어 오프라인 대입에 쓰일 수 있었다.
 - 행사장 와이파이처럼 관객과 같은 공인 IP(NAT)를 쓰면, 관객 누군가가 10번 틀려도 발표자까지 10분 막힌다. 발표자는 **휴대폰 핫스폿** 같은 다른 회선을 쓰고, 암호는 **처음부터 정확히** 넣는다.
 
 ### 2. 엔드포인트 `POST /api/fetch-month` (와 `POST /api/narrate-month`, 7절)
@@ -90,7 +91,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 | 400 | `{"error": "bad_month" \| "bad_request", "message"}` | YYYYMM 형식, 200601 이상, 한국 시간 이번 달 이하가 아님 / 본문이 JSON 이 아님 |
 | 401 | `{"error": "unauthorized", "message"}` | 암호 헤더 없음 또는 불일치(sha256 다이제스트를 `timingSafeEqual` 로 비교). 월 검사보다 먼저 |
 | 409 | `{"error": "busy", "message", "jobId"?, "month"?}` | 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시) |
-| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: `data/jobs/_auth/<HMAC-SHA256(ip, sha256(발표자 암호))>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). API 함수는 동시 실행 2개로 제한(병렬 대입 상한) |
+| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속(IP, IPv6 는 /64 접두사)에서 10분 안에 10번째 시도가 틀림 → 10분 잠금. 시도는 암호를 비교하기 **전에** 센다: 비공개 버킷 `AuthStateBucket` 의 `attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json`(no-store, 원래 주소는 남기지 않음)을 ETag 조건부 쓰기(처음 `IfNoneMatch: "*"`, 갱신 `IfMatch`)로 올리고 경합이면 3번까지 다시 한다. 비밀은 Secrets Manager `AuthHmacSecret`(CDK 가 만든 32자 임의 값, 발표자 암호와 무관, 컨테이너마다 한 번 읽음). 비밀을 못 읽거나 셈을 기록하지 못하면 비교하지 않고 401(fail-closed). 맞히면 초기화. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`). 예약 동시성은 두지 않는다(누구나 채워 발표자를 굶길 수 있다) |
 | 405 / 500 | `{"error", "message"}` | POST 아님 / 설정·잠금·작업자 호출 실패 |
 
 `message` 는 모두 한국어 한 문장이고 키·URL 이 없다.
@@ -99,7 +100,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + C
 
 Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch)를 쓴다.
 
-- `FetchMonthApi` (Function URL, 256 MB, 15 초, 동시 실행 2): 경로·메서드 → 암호 읽기(60초 캐시) → 시도 셈(잠금이면 429, 기록 실패면 401) → 암호 비교(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
+- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → 시도 셈(비공개 인증 상태 버킷, 잠금이면 429, 기록 실패면 401) → 암호 읽기(60초 캐시) → 암호 비교(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
 - `SeoulArStack-FetchMonthWorker` (512 MB, 600 초, 비동기 재시도 0, 5분 안에 시작 못 한 이벤트는 버림): 페이로드 `{jobId, month}`.
   1. SSM 에서 서울 API 키를 읽는다.
   2. 25구를 동시에 4개씩: `RCPT_YR = month[:4]`, `CGG_NM = 구` 로 1000건씩 페이지 호출. 페이지가 1000건 미만이거나, 페이지의 **가장 최근** `CTRT_DAY` 가 그 달 1일보다 앞서거나(정렬 순서가 확인되지 않아 페이지 전체가 지난 뒤에만 멈춘다), `list_total_count` 에 닿거나, 30페이지면 멈춘다. `CTRT_DAY[:6] === month` 인 행만 남긴다. `INFO-200` 은 빈 결과. 네트워크·429·5xx·형식 오류는 1.5초 쉬고 한 번 다시 시도한다. 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다.
@@ -120,8 +121,9 @@ Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타�
 | 주체 | 허용 |
 |---|---|
 | 작업자 | `s3:GetObject`·`s3:PutObject` on `bucket/data/*`, `s3:ListBucket` on bucket (조건 `s3:prefix` = `data/`, `data/*`), `cloudfront:CreateInvalidation` on 이 배포, `ssm:GetParameter` on `/seoul-ar/seoul-api-key`, `kms:Decrypt` (조건 `kms:ViaService = ssm.us-east-1.amazonaws.com`), `bedrock:InvokeModel` on 그 모델과 `us.` 프로파일 |
-| API | `s3:GetObject`·`s3:PutObject` on `bucket/data/jobs/*`, `s3:GetObject` on `bucket/data/index.json`(narrate-month 확인), `ssm:GetParameter` on `/seoul-ar/presenter-passcode`, `kms:Decrypt` (ssm 경유), `lambda:InvokeFunction` on 작업자 |
+| API | `s3:GetObject`·`s3:PutObject` on `bucket/data/jobs/*`(잠금, 작업 기록), `s3:GetObject` on `bucket/data/index.json`(narrate-month 확인), `ssm:GetParameter` on `/seoul-ar/presenter-passcode`, `kms:Decrypt` (ssm 경유), `lambda:InvokeFunction` on 작업자, `s3:GetObject`·`s3:PutObject` on `AuthStateBucket/*`(암호 시도 셈), `secretsmanager:GetSecretValue` on `AuthHmacSecret` 하나, **Deny** `s3:GetObject`·`s3:PutObject` on `bucket/data/jobs/_auth/*`(예전 공개 위치) |
 | RebuildIndex | `lambda:InvokeFunction` on 작업자 |
+| AuthStateBucket | 사이트와 따로 둔 비공개 버킷: 공개 차단, SSE-S3, SSL 강제, 1일 뒤 만료, 스택 삭제 시 비움. CloudFront 오리진이 아니다(공개 경로 없음). API 역할만 Get/Put |
 | Function URL | AuthType AWS_IAM. `lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`(`InvokedViaFunctionUrl`), Principal `cloudfront.amazonaws.com`, SourceArn = 이 배포 (OAC). 공개 권한 없음 |
 
 왜 함수가 둘인가: 한 함수에 Function URL 과 `DISTRIBUTION_ID` 를 같이 두면 Distribution → FunctionUrl → Function → (env `DISTRIBUTION_ID`) → Distribution 순환이 생겨 CloudFormation 이 배포를 거부한다. 그래서 Function URL 쪽(API)은 작업자를 CloudFormation 참조 없이 리터럴 이름/ARN 으로만 가리키고, 배포 ID 는 작업자만 가진다. 덤으로 인터넷에 열린 함수는 서울 API 키와 CloudFront 권한이 없다.

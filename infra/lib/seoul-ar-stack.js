@@ -10,6 +10,7 @@ const lambda = require("aws-cdk-lib/aws-lambda");
 const iam = require("aws-cdk-lib/aws-iam");
 const logs = require("aws-cdk-lib/aws-logs");
 const cr = require("aws-cdk-lib/custom-resources");
+const secretsmanager = require("aws-cdk-lib/aws-secretsmanager");
 
 const REGION = "us-east-1";
 // 사용자가 미리 만드는 SecureString 파라미터(CONTRACTS 10.1). 스택은 이름만 참조하고 만들지 않는다.
@@ -189,6 +190,23 @@ class SeoulArStack extends cdk.Stack {
       ],
     }));
 
+    // 암호 시도 셈(security round): 사이트와 따로 둔 비공개 버킷 + 서버 쪽 임의 HMAC 비밀.
+    // 사이트 버킷은 CloudFront 로 공개되므로 시도 기록을 두지 않는다. 비밀은 발표자 암호와 무관한 임의 값이다.
+    const authBucket = new s3.Bucket(this, "AuthStateBucket", {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: false,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      lifecycleRules: [{ expiration: cdk.Duration.days(1) }], // 셈은 길어야 20분 쓰인다
+    });
+    const authSecret = new secretsmanager.Secret(this, "AuthHmacSecret", {
+      description: "서울이 선다: 암호 시도 기록 키(HMAC)용 서버 쪽 임의 비밀",
+      generateSecretString: { excludePunctuation: true, passwordLength: 32 },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     const api = new lambda.Function(this, "FetchMonthApi", {
       description: "서울이 선다: POST /api/fetch-month, /api/narrate-month (발표자 암호, 잠금, 작업자 비동기 호출)",
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -197,12 +215,14 @@ class SeoulArStack extends cdk.Stack {
       code,
       memorySize: 256,
       timeout: cdk.Duration.seconds(15),
-      reservedConcurrentExecutions: 2, // 병렬 암호 대입 상한(셋째 동시 요청은 Lambda 가 429 로 거절)
+      // 예약 동시성은 두지 않는다: 누구나 채워 발표자를 굶길 수 있다. 대입은 IP 별 원자적 셈이 막는다.
       logGroup: logGroup("FetchMonthApiLogs"),
       environment: {
         BUCKET: bucket.bucketName,
         SSM_PASSCODE_NAME,
         SELF_FUNCTION_NAME: workerName, // 같은 코드의 작업자. 리터럴이라 순환 참조가 없다
+        AUTH_BUCKET: authBucket.bucketName,
+        AUTH_SECRET_ARN: authSecret.secretArn,
       },
     });
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["s3:GetObject", "s3:PutObject"], resources: [bucket.arnForObjects("data/jobs/*")] }));
@@ -211,6 +231,15 @@ class SeoulArStack extends cdk.Stack {
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["ssm:GetParameter"], resources: [paramArn(SSM_PASSCODE_NAME)] }));
     api.addToRolePolicy(kmsViaSsm);
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["lambda:InvokeFunction"], resources: [workerArn] }));
+    // 암호 시도 셈: 인증 상태 버킷 Get/Put(조건부 쓰기 IfMatch/IfNoneMatch 도 s3:PutObject), 비밀은 읽기만
+    api.addToRolePolicy(new iam.PolicyStatement({ actions: ["s3:GetObject", "s3:PutObject"], resources: [authBucket.arnForObjects("*")] }));
+    api.addToRolePolicy(new iam.PolicyStatement({ actions: ["secretsmanager:GetSecretValue"], resources: [authSecret.secretArn] }));
+    // 예전 위치(공개 사이트 버킷의 data/jobs/_auth/)는 API 역할이 읽지도 쓰지도 못하게 명시적으로 막는다
+    api.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.DENY,
+      actions: ["s3:GetObject", "s3:PutObject"],
+      resources: [bucket.arnForObjects("data/jobs/_auth/*")],
+    }));
 
     // AWS_IAM + CloudFront OAC: 이 배포만 Function URL 을 부를 수 있다(9a fix S1). 발표자 암호 검사는 그대로.
     // OAC 는 POST 본문을 서명해야 하므로 브라우저가 x-amz-content-sha256 (본문 SHA-256 hex) 헤더를 보내야 한다.

@@ -89,6 +89,16 @@ export function bedrockConverser({ client, ConverseCommand, timeoutMs = 60_000 }
   };
 }
 
+/** 서버 쪽 임의 비밀(SecretString)을 읽는다. 값은 오류 메시지에 넣지 않는다. */
+export function authSecretGetter({ client, GetSecretValueCommand }) {
+  return async function getAuthSecret(secretId) {
+    const r = await client.send(new GetSecretValueCommand({ SecretId: secretId }));
+    const value = typeof r?.SecretString === "string" ? r.SecretString : "";
+    if (value === "") throw new Error("인증 비밀이 비어 있음");
+    return value;
+  };
+}
+
 function jsonLog(level, msg, fields = {}) {
   const line = JSON.stringify({ level, msg, ...fields });
   if (level === "error") console.error(line);
@@ -114,10 +124,24 @@ export async function makeDefaultDeps(env, { importModule = (name) => import(nam
     }
     return converser(args);
   };
+  // 암호 시도 셈의 HMAC 비밀은 API 함수만 쓴다. 첫 사용 때 클라이언트를 불러온다(값 캐시는 index.mjs).
+  let secretGetter = null;
+  const getAuthSecret = async (arn) => {
+    if (!secretGetter) {
+      const sm = await importModule("@aws-sdk/client-secrets-manager");
+      secretGetter = authSecretGetter({ client: new sm.SecretsManagerClient({}), GetSecretValueCommand: sm.GetSecretValueCommand });
+    }
+    return secretGetter(arn);
+  };
+  const s3Client = new s3.S3Client({});
+  const s3Commands = { GetObjectCommand: s3.GetObjectCommand, PutObjectCommand: s3.PutObjectCommand, ListObjectsV2Command: s3.ListObjectsV2Command };
   return {
     env,
     fetch,
-    store: s3Store({ client: new s3.S3Client({}), bucket: env.BUCKET, GetObjectCommand: s3.GetObjectCommand, PutObjectCommand: s3.PutObjectCommand, ListObjectsV2Command: s3.ListObjectsV2Command }),
+    store: s3Store({ client: s3Client, bucket: env.BUCKET, ...s3Commands }),
+    // 비공개 인증 상태 버킷(암호 시도 셈). API 함수에만 AUTH_BUCKET 이 있다.
+    authStore: env.AUTH_BUCKET ? s3Store({ client: s3Client, bucket: env.AUTH_BUCKET, ...s3Commands }) : null,
+    getAuthSecret,
     getParameter: ssmGetter({ client: new ssm.SSMClient({}), GetParameterCommand: ssm.GetParameterCommand }),
     invalidate: cloudFrontInvalidator({ client: new cloudfront.CloudFrontClient({}), CreateInvalidationCommand: cloudfront.CreateInvalidationCommand }),
     invoke: lambdaInvoker({ client: new lambda.LambdaClient({}), InvokeCommand: lambda.InvokeCommand }),

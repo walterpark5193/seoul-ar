@@ -93,7 +93,9 @@ test("bucket deployment is configured and emits config.json source", () => {
 // 그래서 같은 코드(lambda/fetch-month)로 함수 둘을 만든다: API(Function URL) 와 작업자(무효화·발행).
 const WORKER_NAME = "SeoulArStack-FetchMonthWorker";
 // CONTRACTS 10.6 의 7개 + 12.2 의 BEDROCK_MODEL_ID
-const CONTRACT_ENV = ["BUCKET", "DISTRIBUTION_ID", "EVENTS_HTTP_ENDPOINT", "EVENTS_API_KEY", "SSM_API_KEY_NAME", "SSM_PASSCODE_NAME", "SELF_FUNCTION_NAME", "BEDROCK_MODEL_ID"];
+const CONTRACT_ENV = ["BUCKET", "DISTRIBUTION_ID", "EVENTS_HTTP_ENDPOINT", "EVENTS_API_KEY", "SSM_API_KEY_NAME", "SSM_PASSCODE_NAME", "SELF_FUNCTION_NAME", "BEDROCK_MODEL_ID",
+  // security round: 비공개 인증 상태 버킷과 서버 쪽 HMAC 비밀
+  "AUTH_BUCKET", "AUTH_SECRET_ARN"];
 
 function fetchMonthFns() {
   const fns = Object.entries(template.findResources("AWS::Lambda::Function"));
@@ -133,8 +135,8 @@ test("fetch-month worker: Node.js 22, 512 MB, 600 s, worker env", () => {
   assert.deepEqual(env.EVENTS_API_KEY["Fn::GetAtt"][1], "ApiKey");
 });
 
-test("fetch-month api: 동시 실행 2개로 제한(병렬 암호 대입 상한)", () => {
-  assert.equal(fetchMonthFns().api[1].Properties.ReservedConcurrentExecutions, 2);
+test("fetch-month: 예약 동시성 없음(누구나 채워 발표자를 굶길 수 있으므로. IP 별 원자적 셈에 맡긴다)", () => {
+  assert.equal(fetchMonthFns().api[1].Properties.ReservedConcurrentExecutions, undefined);
   assert.equal(fetchMonthFns().worker[1].Properties.ReservedConcurrentExecutions, undefined);
 });
 
@@ -143,10 +145,78 @@ test("fetch-month api: Node.js 22, env, SELF_FUNCTION_NAME 은 작업자 이름(
   assert.equal(a.Properties.Runtime, "nodejs22.x");
   assert.equal(a.Properties.Handler, "index.handler");
   const env = a.Properties.Environment.Variables;
-  assert.deepEqual(Object.keys(env).sort(), ["BUCKET", "SELF_FUNCTION_NAME", "SSM_PASSCODE_NAME"]);
+  assert.deepEqual(Object.keys(env).sort(), ["AUTH_BUCKET", "AUTH_SECRET_ARN", "BUCKET", "SELF_FUNCTION_NAME", "SSM_PASSCODE_NAME"]);
   assert.equal(env.SELF_FUNCTION_NAME, WORKER_NAME);
   assert.equal(env.SSM_PASSCODE_NAME, "/seoul-ar/presenter-passcode");
   assert.deepEqual(env.BUCKET, { Ref: logicalId("AWS::S3::Bucket") });
+  assert.deepEqual(env.AUTH_BUCKET, { Ref: authBucketId() });
+  assert.deepEqual(env.AUTH_SECRET_ARN, { Ref: logicalId("AWS::SecretsManager::Secret") });
+});
+
+// ---- security round: 비공개 인증 상태 버킷 + 서버 쪽 임의 HMAC 비밀 ----
+function authBucketId() {
+  const id = Object.keys(template.findResources("AWS::S3::Bucket")).find((k) => k.startsWith("AuthStateBucket"));
+  assert.ok(id, "AuthStateBucket");
+  return id;
+}
+
+test("사이트 버킷은 첫 번째 버킷(logicalId 도우미가 가리키는 것)", () => {
+  assert.ok(logicalId("AWS::S3::Bucket").startsWith("SiteBucket"));
+});
+
+test("AuthStateBucket: 공개 차단, SSE-S3, SSL 강제, 1일 뒤 만료, 삭제 시 비움", () => {
+  const R = template.toJSON().Resources;
+  const id = authBucketId();
+  const b = R[id];
+  assert.deepEqual(b.Properties.PublicAccessBlockConfiguration, { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true });
+  assert.deepEqual(b.Properties.BucketEncryption.ServerSideEncryptionConfiguration, [{ ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } }]);
+  assert.deepEqual(b.Properties.LifecycleConfiguration.Rules.map((r) => ({ d: r.ExpirationInDays, s: r.Status })), [{ d: 1, s: "Enabled" }]);
+  assert.equal(b.DeletionPolicy, "Delete");
+  const policy = Object.values(R).find((r) => r.Type === "AWS::S3::BucketPolicy" && r.Properties.Bucket.Ref === id);
+  assert.ok(policy, "버킷 정책");
+  const ssl = policy.Properties.PolicyDocument.Statement.find((st) => st.Effect === "Deny" && st.Condition?.Bool?.["aws:SecureTransport"] === "false");
+  assert.ok(ssl, "SSL 강제");
+  assert.ok(Object.values(R).some((r) => r.Type === "Custom::S3AutoDeleteObjects" && r.Properties.BucketName.Ref === id), "autoDeleteObjects");
+  // CloudFront 오리진이 아니다(공개 경로 없음)
+  const dist = Object.values(template.findResources("AWS::CloudFront::Distribution"))[0].Properties.DistributionConfig;
+  assert.ok(!JSON.stringify(dist.Origins).includes(id));
+});
+
+test("IAM API: 인증 상태 버킷 Get/Put 만, 작업자는 그 버킷에 권한 없음", () => {
+  const id = authBucketId();
+  const apiSts = statementsOf(fetchMonthFns().api).filter((st) => JSON.stringify(st.Resource).includes(`"${id}"`));
+  assert.equal(apiSts.length, 1);
+  assert.equal(apiSts[0].Effect, "Allow");
+  assert.deepEqual(actionsOf(apiSts[0]).sort(), ["s3:GetObject", "s3:PutObject"]);
+  assert.deepEqual(apiSts[0].Resource, { "Fn::Join": ["", [{ "Fn::GetAtt": [id, "Arn"] }, "/*"]] });
+  assert.equal(statementsOf(fetchMonthFns().worker).filter((st) => JSON.stringify(st.Resource).includes(`"${id}"`)).length, 0);
+});
+
+test("IAM API: 사이트 버킷의 data/jobs/_auth 는 명시적으로 거부, 허용 문 어디에도 _auth 없음", () => {
+  const sts = statementsOf(fetchMonthFns().api);
+  assert.ok(sts.filter((st) => st.Effect !== "Deny").every((st) => !JSON.stringify(st.Resource).includes("_auth")));
+  const deny = sts.find((st) => st.Effect === "Deny");
+  assert.ok(deny, "Deny 문");
+  assert.deepEqual(actionsOf(deny).sort(), ["s3:GetObject", "s3:PutObject"]);
+  assert.deepEqual(deny.Resource, { "Fn::Join": ["", [{ "Fn::GetAtt": [logicalId("AWS::S3::Bucket"), "Arn"] }, "/data/jobs/_auth/*"]] });
+});
+
+test("HMAC 비밀: Secrets Manager 임의 값(32자, 구두점 없음), API 역할만 GetSecretValue(그 비밀 하나)", () => {
+  template.resourceCountIs("AWS::SecretsManager::Secret", 1);
+  const [id, secret] = Object.entries(template.findResources("AWS::SecretsManager::Secret"))[0];
+  assert.equal(secret.Properties.GenerateSecretString.ExcludePunctuation, true);
+  assert.equal(secret.Properties.GenerateSecretString.PasswordLength, 32);
+  assert.equal(secret.Properties.SecretString, undefined, "값을 템플릿에 넣지 않는다");
+  const apiSm = statementsOf(fetchMonthFns().api).filter((st) => actionsOf(st).some((a) => a.startsWith("secretsmanager:")));
+  assert.equal(apiSm.length, 1);
+  assert.deepEqual(actionsOf(apiSm[0]), ["secretsmanager:GetSecretValue"]);
+  assert.deepEqual(apiSm[0].Resource, { Ref: id });
+  assert.equal(statementsOf(fetchMonthFns().worker).filter((st) => actionsOf(st).some((a) => a.startsWith("secretsmanager:"))).length, 0);
+  // 다른 어떤 정책도 이 비밀을 가리키지 않는다
+  const others = Object.values(template.findResources("AWS::IAM::Policy"))
+    .filter((p) => !p.Properties.Roles.some((r) => r.Ref === fetchMonthFns().api[1].Properties.Role["Fn::GetAtt"][0]))
+    .flatMap((p) => p.Properties.PolicyDocument.Statement);
+  assert.ok(others.every((st) => !JSON.stringify(st.Resource).includes(`"${id}"`)));
 });
 
 test("fetch-month: 두 함수의 env 이름을 합치면 계약의 7개와 같고, 같은 코드 자산을 쓴다", () => {

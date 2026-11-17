@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { s3Store, ssmGetter, cloudFrontInvalidator, lambdaInvoker, bedrockConverser, makeDefaultDeps } from "./aws.mjs";
+import { s3Store, ssmGetter, cloudFrontInvalidator, lambdaInvoker, bedrockConverser, authSecretGetter, makeDefaultDeps } from "./aws.mjs";
 import { PreconditionFailed } from "./job.mjs";
 
 // SDK 명령 클래스 대역: 입력을 그대로 들고 있다.
@@ -91,6 +91,30 @@ test("lambdaInvoker: InvocationType Event, JSON 페이로드, 202 가 아니면 
   assert.deepEqual(JSON.parse(new TextDecoder().decode(input.Payload)), { jobId: "j", month: "202610" });
   const bad = lambdaInvoker({ client: fakeClient(() => ({ StatusCode: 500 })), InvokeCommand: command("Invoke") });
   await assert.rejects(bad({ functionName: "W", payload: {} }));
+});
+
+test("authSecretGetter: 비밀 ARN 으로 SecretString 을 읽는다, 비어 있으면 오류", async () => {
+  const client = fakeClient(() => ({ SecretString: "Rnd0mServerSideSecretForHmac32ch" }));
+  const get = authSecretGetter({ client, GetSecretValueCommand: command("GetSecretValue") });
+  assert.equal(await get("arn:aws:secretsmanager:us-east-1:1:secret:x"), "Rnd0mServerSideSecretForHmac32ch");
+  assert.deepEqual(client.sent[0].input, { SecretId: "arn:aws:secretsmanager:us-east-1:1:secret:x" });
+  const empty = authSecretGetter({ client: fakeClient(() => ({})), GetSecretValueCommand: command("G") });
+  await assert.rejects(empty("arn:x"), (e) => !String(e.message).includes("Rnd0m"));
+});
+
+test("makeDefaultDeps: 인증 상태 버킷 저장소와 비밀 클라이언트(첫 사용 때만 불러옴)", async () => {
+  const imported = [];
+  const sent = [];
+  const Client = class { async send(cmd) { sent.push(cmd); return { SecretString: "s3cr3t", ETag: '"e"' }; } };
+  const anyModule = new Proxy({}, { get: (_, name) => (name === "then" ? undefined : String(name).endsWith("Client") ? Client : command(String(name))) });
+  const deps = await makeDefaultDeps({ BUCKET: "site", AUTH_BUCKET: "auth-state" }, { importModule: async (n) => { imported.push(n); return anyModule; } });
+  assert.equal(imported.includes("@aws-sdk/client-secrets-manager"), false);
+  assert.equal(await deps.getAuthSecret("arn:x"), "s3cr3t");
+  assert.equal(imported.filter((n) => n === "@aws-sdk/client-secrets-manager").length, 1);
+  await deps.authStore.put("attempts/k.json", "{}", { ifNoneMatch: "*" });
+  assert.equal(sent.at(-1).input.Bucket, "auth-state");
+  await deps.store.put("data/x.json", "{}", {});
+  assert.equal(sent.at(-1).input.Bucket, "site");
 });
 
 test("makeDefaultDeps: 런타임 내장 SDK 네 개를 불러 엮는다", async () => {

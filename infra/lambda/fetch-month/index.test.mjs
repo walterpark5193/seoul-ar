@@ -5,7 +5,7 @@ import { createHash, createHmac } from "node:crypto";
 import { validateMonth, currentMonthKst, passcodeMatches, createHandler, MIN_MONTH } from "./index.mjs";
 import { LOCK_KEY, INDEX_KEY, isLockFresh } from "./job.mjs";
 import { aggregateRows, buildIndex } from "./aggregate.mjs";
-import { fakeDeps, fakeStore, fakeSeoulFetch, fakeConverse, bulkReply, httpEvent, row, jsonResponse, FAKE_KEY, GU_ORDER } from "./fakes.mjs";
+import { fakeDeps, fakeStore, fakeSeoulFetch, fakeConverse, bulkReply, httpEvent, row, jsonResponse, FAKE_KEY, AUTH_SECRET, GU_ORDER } from "./fakes.mjs";
 
 const NOW = Date.UTC(2026, 10, 17, 3, 0, 0); // 2026-11-17 12:00 KST
 const PASS = "open-sesame";
@@ -117,8 +117,8 @@ describe("HTTP: POST /api/fetch-month", () => {
       assert.equal(res.body.error, "unauthorized");
       assert.match(res.body.message, /암호/);
       assert.equal(f.invokes.length, 0);
-      // 암호 실패 기록(data/jobs/_auth/) 말고는 아무것도 쓰지 않는다
-      assert.deepEqual(f.deps.store.puts.filter((p) => !p.key.startsWith("data/jobs/_auth/")), []);
+      // 사이트 버킷에는 아무것도 쓰지 않는다(시도 셈은 비공개 인증 상태 버킷에)
+      assert.deepEqual(f.deps.store.puts, []);
     }
   });
 
@@ -819,14 +819,17 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     assert.equal((await h(right())).statusCode, 202);
   });
 
-  test("기록 키는 HMAC-SHA256(ip, sha256(발표자 암호)), no-store, 원래 IP 와 sha256(ip) 는 안 남긴다", async () => {
+  test("기록은 비공개 인증 버킷의 attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json. 암호에서 아무것도 만들지 않는다", async () => {
     const f = fakeDeps({ nowMs: NOW });
     await createHandler(f.deps)(wrong());
-    const put = f.deps.store.puts.find((p) => p.key.startsWith("data/jobs/_auth/"));
-    const secret = createHash("sha256").update(PASS, "utf8").digest();
-    const expected = createHmac("sha256", secret).update("198.51.100.10", "utf8").digest("hex");
-    assert.equal(put.key, `data/jobs/_auth/${expected}.json`);
+    assert.deepEqual(f.deps.store.puts, [], "사이트 버킷(공개 경로)에는 쓰지 않는다");
+    const put = f.deps.authStore.puts[0];
+    const expected = createHmac("sha256", AUTH_SECRET).update("198.51.100.10", "utf8").digest("hex");
+    assert.equal(put.key, `attempts/${expected}.json`);
+    const fromPasscode = createHmac("sha256", createHash("sha256").update(PASS, "utf8").digest()).update("198.51.100.10", "utf8").digest("hex");
+    assert.notEqual(expected, fromPasscode, "암호에서 유도한 키가 아니다");
     assert.notEqual(expected, createHash("sha256").update("198.51.100.10").digest("hex"));
+    assert.deepEqual(f.secretReads, ["arn:aws:secretsmanager:us-east-1:111111111111:secret:seoul-ar-auth-hmac-AbCdEf"]);
     assert.equal(put.opts.cacheControl, "no-store");
     assert.ok(!put.text.includes("198.51.100.10") && !put.key.includes("198.51.100.10"));
     assert.equal(put.opts.ifNoneMatch, "*", "첫 기록은 IfNoneMatch");
@@ -837,10 +840,10 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
     const h = createHandler(f.deps);
     const res = await Promise.all(Array.from({ length: 12 }, () => h(wrong())));
     assert.ok(res.every((r) => r.statusCode === 401 || r.statusCode === 429));
-    const rec = JSON.parse([...f.deps.store.objects.entries()].find(([k]) => k.startsWith("data/jobs/_auth/"))[1].text);
+    const rec = JSON.parse([...f.deps.authStore.objects.entries()].find(([k]) => k.startsWith("attempts/"))[1].text);
     const unrecorded = f.logs.filter((l) => l.msg.startsWith("암호 시도를 기록하지 못해 거절")).length;
     assert.equal(rec.count + unrecorded, 12, JSON.stringify({ count: rec.count, unrecorded }));
-    assert.ok(f.deps.store.puts.filter((p) => p.key.startsWith("data/jobs/_auth/")).slice(1).every((p) => p.opts.ifMatch), "갱신은 IfMatch");
+    assert.ok(f.deps.authStore.puts.slice(1).every((p) => p.opts.ifMatch), "갱신은 IfMatch");
   });
 
   test("IPv6 는 /64 로 센다: 같은 /64 의 다른 주소가 한 셈, 다른 /64 는 따로", async () => {
@@ -892,9 +895,9 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
 
   test("기록이 없으면 S3 가 403 을 줘도(ListBucket 없음) 기록 없음으로 본다", async () => {
     const f = fakeDeps({ nowMs: NOW });
-    const realGet = f.deps.store.get.bind(f.deps.store);
-    f.deps.store.get = async (key) => {
-      if (key.startsWith("data/jobs/_auth/") && !f.deps.store.objects.has(key)) throw Object.assign(new Error("Access Denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } });
+    const realGet = f.deps.authStore.get.bind(f.deps.authStore);
+    f.deps.authStore.get = async (key) => {
+      if (!f.deps.authStore.objects.has(key)) throw Object.assign(new Error("Access Denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } });
       return realGet(key);
     };
     const h = createHandler(f.deps);
@@ -904,7 +907,7 @@ describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () =
 
   test("시도를 기록하지 못하면 암호를 비교하지 않고 401 (fail-closed)", async () => {
     const f = fakeDeps({ nowMs: NOW });
-    f.deps.store.failPut = (key) => (key.startsWith("data/jobs/_auth/") ? new Error("SlowDown") : null);
+    f.deps.authStore.failPut = () => new Error("SlowDown");
     const h = createHandler(f.deps);
     assert.equal((await h(right())).statusCode, 401);
     assert.equal(f.invokes.length, 0);
@@ -973,5 +976,64 @@ describe("11a fix: 409 문구", () => {
     const res = parse(await createHandler(f.deps)(post({ month: "202610" })));
     assert.equal(res.status, 409);
     assert.match(res.body.message, /^2026년 11월 해설을 만드는 중입니다/);
+  });
+});
+
+// ---- security round: 서버 쪽 임의 비밀 + 비공개 인증 상태 버킷 ----
+describe("security: HMAC 비밀은 서버 쪽 임의 값, 컨테이너마다 한 번 읽는다", () => {
+  const wrongFrom = () => post({ month: "202610" }, { "cloudfront-viewer-address": "198.51.100.10:46532", "x-presenter-key": "wrong" });
+
+  test("여러 요청에도 한 번만 읽는다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    await h(post({ month: "abc" }));
+    f.setNow(NOW + 3_600_000);
+    await h(post({ month: "abc" }));
+    assert.equal(f.secretReads.length, 1);
+  });
+
+  test("비밀을 못 읽으면 캐시하지 않고 비교 없이 401(fail-closed), 다음 요청에서 다시 읽는다", async () => {
+    let n = 0;
+    const f = fakeDeps({ nowMs: NOW, getAuthSecret: async () => { n++; if (n === 1) throw new Error("ResourceNotFoundException"); return AUTH_SECRET; } });
+    const h = createHandler(f.deps);
+    assert.equal((await h(post({ month: "202610" }))).statusCode, 401);
+    assert.equal(f.invokes.length, 0);
+    assert.ok(f.logs.some((l) => l.level === "warn" && l.msg.startsWith("암호 시도를 기록하지 못해 거절")));
+    assert.ok(!JSON.stringify(f.logs).includes(AUTH_SECRET));
+    assert.equal((await h(post({ month: "202610" }))).statusCode, 202);
+    assert.equal(f.secretReads.length, 2);
+  });
+
+  test("암호를 바꿔도 셈의 키는 그대로다(키는 암호와 무관)", async () => {
+    let pass = PASS;
+    const f = fakeDeps({ nowMs: NOW, getParameter: async (name) => (name === "/seoul-ar/presenter-passcode" ? pass : FAKE_KEY) });
+    const h = createHandler(f.deps);
+    await h(wrongFrom());
+    pass = "a-completely-different-passcode";
+    f.setNow(NOW + 61_000); // 암호 캐시가 지난 뒤
+    await h(wrongFrom());
+    const keys = new Set(f.deps.authStore.puts.map((p) => p.key));
+    assert.equal(keys.size, 1);
+    assert.equal(JSON.parse(f.deps.authStore.objects.get([...keys][0]).text).count, 2);
+  });
+
+  test("잠긴 접속은 발표자 암호(SSM)를 읽기 전에 429", async () => {
+    const reads = [];
+    const f = fakeDeps({ nowMs: NOW, getParameter: async (name) => { reads.push(name); return PASS; } });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 10; i++) await h(wrongFrom());
+    const before = reads.length;
+    f.setNow(NOW + 120_000); // 암호 캐시가 지난 뒤에도
+    assert.equal((await h(wrongFrom())).statusCode, 429);
+    assert.equal(reads.length, before);
+  });
+
+  test("사이트 버킷 어디에도 _auth 나 시도 기록을 쓰지 않는다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 3; i++) await h(wrongFrom());
+    await h(post({ month: "202610" }));
+    assert.ok(f.deps.store.puts.every((p) => !p.key.includes("_auth") && !p.key.startsWith("attempts/")), JSON.stringify(f.deps.store.puts.map((p) => p.key)));
+    assert.ok(f.deps.authStore.puts.length >= 3);
   });
 });

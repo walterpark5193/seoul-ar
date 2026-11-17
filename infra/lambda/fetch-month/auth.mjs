@@ -1,13 +1,15 @@
-// 발표자 암호 무차별 대입 방어 (9a fix S2, 11a 강화).
-// 접속(IP, IPv6 는 /64)마다 시도 횟수를 data/jobs/_auth/<HMAC-SHA256(ip, sha256(발표자 암호))>.json 에 둔다.
-//   - 키는 HMAC 이라 공개 경로(/data/jobs/_auth/*)로 읽혀도 IP 를 거꾸로 찾을 수 없다. 원래 주소는 어디에도 쓰지 않는다.
+// 발표자 암호 무차별 대입 방어 (9a fix S2, 11a 강화, security round).
+// 접속(IP, IPv6 는 /64)마다 시도 횟수를 **비공개 인증 상태 버킷**(AUTH_BUCKET, 사이트와 따로, 공개 경로 없음)의
+// attempts/<HMAC-SHA256(ip, 서버 쪽 임의 비밀)>.json 에 둔다.
+//   - 비밀은 CDK 가 만든 임의 값(AUTH_SECRET_ARN)이다. 발표자 암호에서는 아무것도 유도하지 않는다
+//     (암호에서 유도하면 공개된 기록 이름으로 암호를 오프라인 대입할 수 있었다). 원래 주소는 어디에도 쓰지 않는다.
 //   - 시도는 암호를 비교하기 "전에" 센다(ETag 조건부 쓰기: 처음 IfNoneMatch "*", 갱신 IfMatch). 경합이면 3번까지 다시.
 //     기록하지 못하면 비교하지 않고 거절한다(fail-closed). 맞히면 셈을 지운다.
 //   - 첫 시도부터 10분 창 안에 10번째 시도에서 잠그고, 그 시도도 틀리면 10분 동안 429.
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { isPrecondition } from "./job.mjs";
 
-export const AUTH_PREFIX = "data/jobs/_auth/";
+export const AUTH_PREFIX = "attempts/";
 export const AUTH_MAX_FAILS = 10;
 export const AUTH_WINDOW_MS = 10 * 60 * 1000;
 export const AUTH_LOCK_MS = 10 * 60 * 1000;
@@ -55,9 +57,7 @@ export function keyMaterial(ip) {
   return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
 }
 
-/** HMAC 비밀값: 발표자 암호의 sha256 다이제스트(이미 메모리에 있다). 암호를 바꾸면 셈도 새로 시작한다. */
-export const passcodeSecret = (passcode) => createHash("sha256").update(String(passcode), "utf8").digest();
-
+/** 인증 상태 버킷 안의 키. secret 은 서버 쪽 임의 비밀(발표자 암호와 무관). */
 export const authKey = (ip, secret) => `${AUTH_PREFIX}${createHmac("sha256", secret).update(keyMaterial(ip), "utf8").digest("hex")}.json`;
 
 /**
