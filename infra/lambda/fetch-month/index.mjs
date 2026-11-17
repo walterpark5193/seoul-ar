@@ -5,6 +5,8 @@
 // 2) 작업자 (Lambda Event 호출, 페이로드 {jobId, month}):
 //    25구 수집·집계 → data/{month}/{gu}.json 25개 → data/index.json 병합 → CloudFront /data/* 무효화 → done
 //    구 하나 끝날 때마다 running 발행, 실패하면 error 발행. 잠금은 finally 에서 항상 해제.
+//    수집이 끝나면(BEDROCK_MODEL_ID 가 있을 때) 같은 호출 안에서 AI 해설을 만든다(jobId "{jobId}-narration", kind "narration").
+// 2b) 해설 작업자 (페이로드 {action: "narrate", jobId, month}, POST /api/narrate-month 가 부른다): 이미 있는 달의 해설만 만든다.
 // 3) index 재구성 (Lambda 호출, 페이로드 {action: "rebuild-index"}, 배포마다 CDK 커스텀 리소스가 부른다):
 //    S3 data/YYYYMM/{gu}.json 의 total 로 data/index.json 을 다시 만든다(저장소 스냅샷 index 가 Lambda 가 가져온 달을 가리지 않게).
 //
@@ -17,16 +19,24 @@ import {
   acquireLock, releaseLock, writeJobRecord, mergeIndex, rebuildIndexFromStore, mapPool, JobError, INDEX_KEY, JSON_PUT, guKey,
 } from "./job.mjs";
 import { jobMessage, createReporter } from "./publish.mjs";
+import { generateNarration, narrationKey, NARRATION_KEYS } from "./narrate.mjs";
+import { clientIp, loadAuth, lockRemainingMs, noteFailure, noteSuccess } from "./auth.mjs";
 
 export const MIN_MONTH = "200601";
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const ROUTES = new Set(["/api/fetch-month", "/fetch-month"]); // CloudFront 경유, Function URL 직접
+// CloudFront 경유 경로와 Function URL 직접 경로 → 작업 종류
+const ROUTES = new Map([
+  ["/api/fetch-month", "fetch"], ["/fetch-month", "fetch"],
+  ["/api/narrate-month", "narration"], ["/narrate-month", "narration"],
+]);
 const JOB_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 const DEFAULT_CONCURRENCY = 4;
 // 남은 실행 시간이 이만큼 남으면 멈추고 error 를 알린다(페이지 한 번 + 재시도 60초, 쓰기·발행 여유).
 // 10분 잠금 stale 시간보다 먼저 끝나므로 다음 작업과 겹치지 않는다.
 const DEADLINE_MARGIN_MS = 90_000;
+const PASSCODE_TTL_MS = 60_000; // 발표자 암호 메모리 캐시(SSM 을 바꾸면 길어야 1분 뒤 반영)
 const TOTAL = GU_ORDER.length;
+const NARR_TOTAL = NARRATION_KEYS.length;
 
 /** 한국 시간(UTC+9) 기준 이번 달 YYYYMM. */
 export function currentMonthKst(nowMs) {
@@ -61,12 +71,21 @@ export function passcodeMatches(given, expected) {
 
 const JSON_HEADERS = Object.freeze({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
 
-function respond(statusCode, body) {
-  return { statusCode, headers: { ...JSON_HEADERS }, body: JSON.stringify(body) };
+function respond(statusCode, body, headers = {}) {
+  return { statusCode, headers: { ...JSON_HEADERS, ...headers }, body: JSON.stringify(body) };
 }
 
-function fail(statusCode, error, message, extra = {}) {
-  return respond(statusCode, { error, message, ...extra });
+function fail(statusCode, error, message, extra = {}, headers = {}) {
+  return respond(statusCode, { error, message, ...extra }, headers);
+}
+
+async function readPasscode(deps, cache) {
+  const nowMs = deps.now();
+  if (cache.value !== null && nowMs - cache.at < PASSCODE_TTL_MS) return cache.value;
+  const value = await deps.getParameter(deps.env.SSM_PASSCODE_NAME); // 실패는 캐시하지 않는다
+  cache.value = value;
+  cache.at = nowMs;
+  return value;
 }
 
 function header(headers, name) {
@@ -95,22 +114,50 @@ function errFields(e, ...secrets) {
   return { error: String(e?.name ?? "Error"), code: e?.code, message };
 }
 
-async function handleHttp(event, deps) {
+async function handleHttp(event, deps, passcodeCache) {
   const { env, store, log } = deps;
   const method = event.requestContext.http.method;
   const path = event.rawPath ?? event.requestContext.http.path;
-  if (!ROUTES.has(path)) return fail(404, "not_found", "알 수 없는 경로입니다.");
+  const kind = ROUTES.get(path);
+  if (!kind) return fail(404, "not_found", "알 수 없는 경로입니다.");
   if (method !== "POST") return fail(405, "method_not_allowed", "POST 요청만 받습니다.");
+
+  // IP 별 암호 실패 잠금(10분에 10번 → 10분 429). 기록을 못 읽거나 못 쓰면 통과시킨다.
+  let auth = null;
+  try {
+    auth = await loadAuth(store, clientIp(event));
+  } catch (e) {
+    log("warn", "암호 실패 기록을 읽지 못함(검사 없이 진행)", errFields(e));
+  }
+  const lockedMs = auth ? lockRemainingMs(auth.record, deps.now()) : 0;
+  if (lockedMs > 0) {
+    return fail(429, "too_many_attempts", "잠시 후 다시 시도해 주세요.", {}, { "retry-after": String(Math.ceil(lockedMs / 1000)) });
+  }
 
   let expected;
   try {
-    expected = await deps.getParameter(env.SSM_PASSCODE_NAME);
+    expected = await readPasscode(deps, passcodeCache);
   } catch (e) {
     log("error", "발표자 암호 파라미터를 읽지 못함", errFields(e));
     return fail(500, "config", "서버 설정을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
   }
   if (!passcodeMatches(header(event.headers, "x-presenter-key"), expected)) {
+    if (auth) {
+      try {
+        const rec = await noteFailure(store, auth, deps.now());
+        if (rec.lockedUntil) log("warn", "암호 실패가 많아 이 접속을 10분 잠근다", { count: rec.count });
+      } catch (e) {
+        log("warn", "암호 실패 기록을 쓰지 못함", errFields(e));
+      }
+    }
     return fail(401, "unauthorized", "발표자 암호가 맞지 않습니다.");
+  }
+  if (auth) {
+    try {
+      await noteSuccess(store, auth);
+    } catch (e) {
+      log("warn", "암호 실패 기록을 초기화하지 못함", errFields(e));
+    }
   }
 
   const body = parseBody(event);
@@ -119,7 +166,12 @@ async function handleHttp(event, deps) {
   const check = validateMonth(body.month, nowMs);
   if (!check.ok) return fail(400, "bad_month", check.message);
   const month = body.month;
+  if (kind === "narration" && !(await monthExists(deps, month))) {
+    return fail(400, "no_data", "아직 가져오지 않은 달입니다. 먼저 월을 가져와 주세요.");
+  }
   const jobId = deps.randomId();
+  const jobKind = kind === "narration" ? { kind: "narration" } : {};
+  const total = kind === "narration" ? NARR_TOTAL : TOTAL;
 
   let lock;
   try {
@@ -137,18 +189,171 @@ async function handleHttp(event, deps) {
   }
 
   try {
-    await writeJobRecord(store, jobMessage({ jobId, month, state: "running", done: 0, total: TOTAL, ts: nowMs }));
-    await deps.invoke({ functionName: env.SELF_FUNCTION_NAME, payload: { jobId, month } });
+    await writeJobRecord(store, jobMessage({ ...jobKind, jobId, month, state: "running", done: 0, total, ts: nowMs }));
+    const payload = kind === "narration" ? { action: "narrate", jobId, month } : { jobId, month };
+    await deps.invoke({ functionName: env.SELF_FUNCTION_NAME, payload });
   } catch (e) {
     log("error", "작업자 호출 실패", errFields(e));
     const message = "수집 작업을 시작하지 못했습니다.";
-    await writeJobRecord(store, jobMessage({ jobId, month, state: "error", done: 0, total: TOTAL, message, ts: deps.now() }))
+    await writeJobRecord(store, jobMessage({ ...jobKind, jobId, month, state: "error", done: 0, total, message, ts: deps.now() }))
       .catch((err) => log("warn", "작업 기록 쓰기 실패", errFields(err)));
     await releaseLock(store, { jobId, nowMs: deps.now() }).catch((err) => log("error", "잠금 해제 실패", errFields(err)));
     return fail(500, "start_failed", `${message} 잠시 뒤 다시 시도해 주세요.`);
   }
-  log("info", "작업 시작", { jobId, month });
+  log("info", "작업 시작", { jobId, month, kind });
   return respond(202, { jobId, month });
+}
+
+/** narrate-month 의 동기 확인: index 에 그 달이 있나. index 를 못 읽으면 작업자에게 맡긴다(true). */
+async function monthExists(deps, month) {
+  try {
+    const cur = await deps.store.get(INDEX_KEY);
+    if (!cur) return false;
+    const idx = JSON.parse(cur.text);
+    return Array.isArray(idx?.months) ? idx.months.includes(month) : true;
+  } catch (e) {
+    deps.log("warn", "index.json 확인 실패: 작업자가 다시 확인한다", errFields(e));
+    return true;
+  }
+}
+
+function makeDeadline(deps, context) {
+  const remaining = typeof context?.getRemainingTimeInMillis === "function" ? context.getRemainingTimeInMillis() : null;
+  const deadline = remaining === null ? Infinity : deps.now() + remaining - DEADLINE_MARGIN_MS;
+  return () => {
+    if (deps.now() > deadline) throw new JobError("제한 시간 안에 작업을 끝내지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  };
+}
+
+function missingNote(missing) {
+  if (missing.length === 0) return {};
+  const names = missing.slice(0, 5).join(", ") + (missing.length > 5 ? ` 외 ${missing.length - 5}곳` : "");
+  return { message: `일부 해설은 만들지 못해 비워 두었습니다: ${names}` };
+}
+
+/**
+ * 해설 생성 → data/{month}/narration.json → /data/{month}/narration.json 무효화. 진행은 send 로(kind narration).
+ * 실패는 사용자용 JobError 로 정리해 던진다.
+ */
+async function produceNarration({ deps, jobId, month, perGu, send, checkDeadline }) {
+  const { env, store, log } = deps;
+  if (!env.BEDROCK_MODEL_ID || typeof deps.converse !== "function") {
+    throw new JobError("AI 해설 설정(BEDROCK_MODEL_ID)이 없어 해설을 만들지 못했습니다.");
+  }
+  let result;
+  try {
+    result = await generateNarration({
+      converse: deps.converse,
+      modelId: env.BEDROCK_MODEL_ID,
+      month,
+      perGu,
+      generatedAt: new Date(deps.now()).toISOString(),
+      beforeCall: checkDeadline,
+      log,
+      onProgress: ({ done, key }) => { void send({ state: "running", done, ...(key ? { gu: key } : {}) }); },
+    });
+  } catch (e) {
+    if (e instanceof JobError) throw e;
+    log("error", "Bedrock 호출 실패", errFields(e));
+    throw new JobError("AI 해설을 만들지 못했습니다(Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요).");
+  }
+  if (Object.keys(result.narration.items).length === 0) {
+    throw new JobError("AI 해설을 하나도 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  }
+  try {
+    await store.put(narrationKey(month), JSON.stringify(result.narration, null, 2) + "\n", JSON_PUT);
+  } catch (e) {
+    log("error", "narration.json 저장 실패", errFields(e));
+    throw new JobError("해설 파일을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  }
+  if (env.DISTRIBUTION_ID) {
+    try {
+      await deps.invalidate({ distributionId: env.DISTRIBUTION_ID, paths: [`/data/${month}/narration.json`], callerReference: jobId });
+    } catch (e) {
+      log("warn", "CloudFront 무효화 실패", errFields(e));
+    }
+  }
+  log("info", "해설 완료", { jobId, month, calls: result.calls, missing: result.missing, model: result.narration.model });
+  return result;
+}
+
+function narrationSender(deps, jobId, month) {
+  const report = createReporter({ publish: deps.publish, record: (m) => writeJobRecord(deps.store, m), log: deps.log });
+  return (fields) => report(jobMessage({ kind: "narration", jobId, month, total: NARR_TOTAL, ...fields, ts: deps.now() }));
+}
+
+/** 수집 끝 자동 해설. 어떤 경우에도 던지지 않는다(수집 결과는 이미 done). */
+async function autoNarrate({ deps, jobId, month, perGu, checkDeadline }) {
+  const send = narrationSender(deps, jobId, month);
+  try {
+    const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });
+    await send({ state: "done", done: NARR_TOTAL, ...missingNote(result.missing) });
+  } catch (e) {
+    const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";
+    if (!(e instanceof JobError)) deps.log("error", "자동 해설 실패", errFields(e));
+    await send({ state: "error", done: 0, message });
+  }
+}
+
+/** 이미 있는 달의 해설 작업(POST /api/narrate-month). 잠금은 API 가 잡았고 여기서 finally 로 푼다. */
+async function runNarrateJob(event, deps, context) {
+  const { store, log } = deps;
+  const { jobId } = event;
+  if (typeof jobId !== "string" || !JOB_ID_RE.test(jobId)) {
+    log("error", "해설 작업 입력 오류: jobId 형식", {});
+    return { ok: false };
+  }
+  const month = typeof event.month === "string" ? event.month.slice(0, 6) : "";
+  const send = narrationSender(deps, jobId, month);
+  const checkDeadline = makeDeadline(deps, context);
+  let terminal;
+  try {
+    if (!validateMonth(event.month, deps.now()).ok) throw new JobError("요청한 월이 올바르지 않아 해설을 만들지 않았습니다.");
+    let index = null;
+    try {
+      const cur = await store.get(INDEX_KEY);
+      index = cur ? JSON.parse(cur.text) : null;
+    } catch (e) {
+      log("error", "index.json 읽기 실패", errFields(e));
+    }
+    if (!Array.isArray(index?.months) || !index.months.includes(month)) {
+      throw new JobError("이 달의 데이터가 없어 해설을 만들 수 없습니다. 먼저 월을 가져와 주세요.");
+    }
+    const perGu = await mapPool(GU_ORDER, 8, async (gu) => {
+      const cur = await store.get(guKey(month, gu)).catch((e) => { log("warn", "구 파일 읽기 실패", { gu, ...errFields(e) }); return null; });
+      let data = null;
+      try { data = cur ? JSON.parse(cur.text) : null; } catch { data = null; }
+      if (!data?.total || !Array.isArray(data.dongs)) return aggregateRows([], { month, gu, generatedAt: String(index.generatedAt ?? "") });
+      return { ...data, gu, month };
+    });
+    const result = await produceNarration({ deps, jobId, month, perGu, send, checkDeadline });
+    terminal = { state: "done", done: NARR_TOTAL, ...missingNote(result.missing) };
+  } catch (e) {
+    const message = e instanceof JobError ? e.message : "알 수 없는 오류로 AI 해설을 만들지 못했습니다.";
+    if (!(e instanceof JobError)) log("error", "해설 작업 실패", errFields(e));
+    terminal = { state: "error", done: 0, message };
+  } finally {
+    await safeRelease(deps, jobId);
+  }
+  // 잠금을 푼 뒤에 마지막 상태를 알린다(받자마자 다음 작업을 눌러도 409 가 나지 않게)
+  await send(terminal);
+  return { ok: terminal.state === "done" };
+}
+
+async function safeRelease(deps, jobId) {
+  try {
+    await releaseLock(deps.store, { jobId, nowMs: deps.now() });
+  } catch (e) {
+    deps.log("error", "잠금 해제 실패(10분 뒤 stale 로 풀림)", errFields(e));
+  }
+}
+
+/** 수집 done 에 붙일 안내: 페이지 상한에 닿은 구, 11·12월의 다음 해 신고. 없으면 {}. */
+function fetchDoneNote(month, cappedGus) {
+  const parts = [];
+  if (cappedGus.length > 0) parts.push(`일부 구는 거래가 많아 끝까지 받지 못했습니다: ${cappedGus.join(", ")}`);
+  if (month.endsWith("11") || month.endsWith("12")) parts.push("11·12월은 다음 해에 신고된 거래가 빠질 수 있습니다");
+  return parts.length > 0 ? { message: parts.join(". ") + "." } : {};
 }
 
 async function runWorker(event, deps, context) {
@@ -163,11 +368,15 @@ async function runWorker(event, deps, context) {
   const send = (fields) => report(jobMessage({ jobId, month, total: TOTAL, ...fields, ts: deps.now() }));
   let done = 0;
   let apiKey = "";
-  const remaining = typeof context?.getRemainingTimeInMillis === "function" ? context.getRemainingTimeInMillis() : null;
-  const deadline = remaining === null ? Infinity : deps.now() + remaining - DEADLINE_MARGIN_MS;
-  const checkDeadline = () => {
-    if (deps.now() > deadline) throw new JobError("제한 시간 안에 수집을 끝내지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+  const checkDeadline = makeDeadline(deps, context);
+  // 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다(첫 오류만 알린다)
+  let poolFailed = false;
+  const beforePage = () => {
+    if (poolFailed) throw new JobError("다른 구에서 오류가 나 수집을 멈췄습니다.");
+    checkDeadline();
   };
+  let terminal;
+  let perGu = null;
 
   try {
     if (!validateMonth(event.month, deps.now()).ok) throw new JobError("요청한 월이 올바르지 않아 수집하지 않았습니다.");
@@ -180,23 +389,35 @@ async function runWorker(event, deps, context) {
     }
 
     const generatedAt = new Date(deps.now()).toISOString();
-    const perGu = await mapPool(GU_ORDER, deps.concurrency ?? DEFAULT_CONCURRENCY, async (gu) => {
-      let fetched;
+    const capped = new Set();
+    perGu = await mapPool(GU_ORDER, deps.concurrency ?? DEFAULT_CONCURRENCY, async (gu) => {
       try {
-        fetched = await fetchMonthRows({ fetch: deps.fetch, key: apiKey, gu, month, beforePage: checkDeadline });
+        let fetched;
+        try {
+          fetched = await fetchMonthRows({ fetch: deps.fetch, key: apiKey, gu, month, sleep: deps.sleep, beforePage });
+        } catch (e) {
+          if (e instanceof JobError) throw e;
+          log("error", "서울 API 호출 실패", { gu, ...errFields(e, apiKey) });
+          const reason = e instanceof SeoulApiError ? e.message : "알 수 없는 오류";
+          throw new JobError(`${gu} 거래를 가져오지 못했습니다(${reason}).`);
+        }
+        const data = aggregateRows(fetched.rows, { month, gu, generatedAt }, {
+          onMalformed: (info) => log("warn", "금액을 읽을 수 없는 행 제외", info),
+        });
+        // truncated = 페이지 상한에 닿아 그 달을 끝까지 받지 못함(집계 모듈의 "1000건 이상" 대신, 9a fix 결정).
+        // index 의 summary[month][gu] 는 이 total 을 그대로 쓰므로 같이 맞는다.
+        data.total.truncated = fetched.capped;
+        if (fetched.capped) {
+          capped.add(gu);
+          log("warn", "페이지 상한에 닿음: 그 달 앞부분이 빠졌을 수 있음", { gu, month, pages: fetched.pages });
+        }
+        done += 1;
+        await send({ state: "running", done, gu });
+        return data;
       } catch (e) {
-        if (e instanceof JobError) throw e;
-        log("error", "서울 API 호출 실패", { gu, ...errFields(e, apiKey) });
-        const reason = e instanceof SeoulApiError ? e.message : "알 수 없는 오류";
-        throw new JobError(`${gu} 거래를 가져오지 못했습니다(${reason}).`);
+        poolFailed = true;
+        throw e;
       }
-      if (fetched.capped) log("warn", "페이지 상한에 닿음: 그 달 앞부분이 빠졌을 수 있음", { gu, month, pages: fetched.pages });
-      const data = aggregateRows(fetched.rows, { month, gu, generatedAt }, {
-        onMalformed: (info) => log("warn", "금액을 읽을 수 없는 행 제외", info),
-      });
-      done += 1;
-      await send({ state: "running", done, gu });
-      return data;
     });
 
     // 수집이 끝났으면 마감 여유(90초) 안에서 쓰기를 마친다(쓰기 26건 + 무효화는 몇 초).
@@ -234,21 +455,23 @@ async function runWorker(event, deps, context) {
       log("warn", "DISTRIBUTION_ID 없음: 무효화를 건너뜀", {});
     }
 
-    await send({ state: "done", done: TOTAL });
-    log("info", "작업 완료", { jobId, month });
-    return { ok: true };
+    const cappedGus = GU_ORDER.filter((gu) => capped.has(gu));
+    terminal = { state: "done", done: TOTAL, ...fetchDoneNote(month, cappedGus) };
   } catch (e) {
     const message = e instanceof JobError ? e.message : "알 수 없는 오류로 수집을 마치지 못했습니다.";
     if (!(e instanceof JobError)) log("error", "작업 실패", errFields(e, apiKey));
-    await send({ state: "error", done, message });
-    return { ok: false };
+    terminal = { state: "error", done, message };
   } finally {
-    try {
-      await releaseLock(store, { jobId, nowMs: deps.now() });
-    } catch (e) {
-      log("error", "잠금 해제 실패(10분 뒤 stale 로 풀림)", errFields(e));
-    }
+    await safeRelease(deps, jobId);
   }
+  // 잠금을 푼 뒤에 마지막 상태를 알린다(받자마자 다음 달을 눌러도 409 가 나지 않게)
+  await send(terminal);
+  if (terminal.state !== "done") return { ok: false };
+  log("info", "작업 완료", { jobId, month });
+  // 자동 해설은 잠금 없이 돈다(narration.json 만 쓰고 index 는 건드리지 않는다)
+  if (env.BEDROCK_MODEL_ID) await autoNarrate({ deps, jobId: `${jobId}-narration`, month, perGu, checkDeadline });
+  else log("info", "BEDROCK_MODEL_ID 없음: 자동 해설을 건너뜀", {});
+  return { ok: true };
 }
 
 /**
@@ -269,7 +492,7 @@ async function rebuildIndex(deps) {
   try {
     const index = await rebuildIndexFromStore(store, { generatedAt: new Date(nowMs).toISOString(), log });
     if (!index) {
-      log("warn", "읽을 수 있는 구 파일이 없어 index 를 그대로 둔다", {});
+      log("error", "index 재구성 실패: 읽을 수 있는 구 파일이 없어 index 를 그대로 둔다", {});
       return { ok: false, months: [] };
     }
     await store.put(INDEX_KEY, JSON.stringify(index, null, 2) + "\n", JSON_PUT);
@@ -283,7 +506,7 @@ async function rebuildIndex(deps) {
     log("info", "index 재구성 완료", { months: index.months });
     return { ok: true, months: index.months };
   } catch (e) {
-    log("error", "index 재구성 실패", errFields(e));
+    log("error", "index 재구성 실패: S3 오류로 index 를 그대로 둔다", errFields(e));
     return { ok: false, months: [] };
   } finally {
     if (locked) {
@@ -292,11 +515,13 @@ async function rebuildIndex(deps) {
   }
 }
 
-/** deps: { env, fetch, store, getParameter, invoke, invalidate, publish, now, randomId, log, concurrency? } */
+/** deps: { env, fetch, store, getParameter, invoke, invalidate, publish, converse, now, sleep, randomId, log, concurrency? } */
 export function createHandler(deps) {
+  const passcodeCache = { value: null, at: 0 };
   return async function handle(event, context) {
-    if (event?.requestContext?.http) return handleHttp(event, deps);
+    if (event?.requestContext?.http) return handleHttp(event, deps, passcodeCache);
     if (event?.action === "rebuild-index") return rebuildIndex(deps);
+    if (event?.action === "narrate") return runNarrateJob(event, deps, context);
     if (event && typeof event === "object" && "jobId" in event) return runWorker(event, deps, context);
     deps.log("warn", "알 수 없는 이벤트 형식", {});
     return { ok: false };

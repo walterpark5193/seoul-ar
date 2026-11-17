@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   SERVICE, BASE_URL, PAGE_SIZE, MAX_PAGES, SeoulApiError,
-  buildPageUrl, parsePage, fetchPage, filterRows, oldestContractDay, fetchMonthRows,
+  buildPageUrl, parsePage, fetchPage, filterRows, newestContractDay, fetchMonthRows,
 } from "./seoulApi.mjs";
 import { fakeSeoulFetch, jsonResponse, row, FAKE_KEY } from "./fakes.mjs";
 
@@ -16,7 +16,7 @@ describe("URL 구성 (server.py _fetch_page 와 같은 경로)", () => {
     assert.equal(SERVICE, "tbLnOpendataRtmsV");
     assert.equal(BASE_URL, "http://openapi.seoul.go.kr:8088");
     assert.equal(PAGE_SIZE, 1000);
-    assert.equal(MAX_PAGES, 12);
+    assert.equal(MAX_PAGES, 30);
   });
 
   test("/{key}/json/{SERVICE}/{start}/{end}/{RCPT_YR}/%20/{CGG_NM}/ — 키와 구 이름은 퍼센트 인코딩, 자치구코드 자리는 %20", () => {
@@ -65,7 +65,7 @@ describe("parsePage", () => {
   });
 });
 
-describe("filterRows / oldestContractDay", () => {
+describe("filterRows / newestContractDay", () => {
   test("CTRT_DAY 앞 6자리가 month 이고 CGG_NM 이 gu 인 행만", () => {
     const rows = [
       row({ CTRT_DAY: "20261031" }),
@@ -80,15 +80,15 @@ describe("filterRows / oldestContractDay", () => {
     assert.deepEqual(out.map((r) => r.CTRT_DAY), ["20261031", "20261001"]);
   });
 
-  test("가장 오래된 계약일, 형식이 맞는 것만 본다", () => {
-    assert.equal(oldestContractDay([row({ CTRT_DAY: "20261003" }), row({ CTRT_DAY: "20260912" }), row({ CTRT_DAY: "x" })]), "20260912");
-    assert.equal(oldestContractDay([row({ CTRT_DAY: "" })]), null);
-    assert.equal(oldestContractDay([]), null);
+  test("가장 최근 계약일, 형식이 맞는 것만 본다", () => {
+    assert.equal(newestContractDay([row({ CTRT_DAY: "20260912" }), row({ CTRT_DAY: "20261003" }), row({ CTRT_DAY: "x" })]), "20261003");
+    assert.equal(newestContractDay([row({ CTRT_DAY: "" })]), null);
+    assert.equal(newestContractDay([]), null);
   });
 });
 
 describe("fetchPage: 키와 URL 을 오류에 넣지 않는다", () => {
-  const args = (fetch) => ({ fetch, key: FAKE_KEY, start: 1, end: 1000, year: "2026", gu: "강남구", retries: 0 });
+  const args = (fetch) => ({ fetch, key: FAKE_KEY, start: 1, end: 1000, year: "2026", gu: "강남구", retries: 0, sleep: async () => {} });
   const clean = (e) => {
     const text = `${e.message}\n${e.stack}\n${String(e.cause ?? "")}`;
     assert.ok(!text.includes(FAKE_KEY), "키 없음");
@@ -118,13 +118,32 @@ describe("fetchPage: 키와 URL 을 오류에 넣지 않는다", () => {
     await assert.rejects(fetchPage(args(fetch)), (e) => e.code === "ERROR-290" && clean(e));
   });
 
-  test("네트워크 오류는 한 번 다시 시도한다", async () => {
-    let n = 0;
+  test("네트워크·429·5xx·형식 오류는 1~2초 쉬고 한 번 다시 시도한다", async () => {
     const ok = fakeSeoulFetch({ 강남구: [row()] });
-    const fetch = async (url, init) => (++n === 1 ? Promise.reject(new Error("socket hang up")) : ok(url, init));
-    const out = await fetchPage({ ...args(fetch), retries: 1 });
-    assert.equal(n, 2);
-    assert.equal(out.rows.length, 1);
+    const firstFails = [
+      () => Promise.reject(new Error("socket hang up")),
+      () => ({ ok: false, status: 429, json: async () => ({}) }),
+      () => ({ ok: false, status: 503, json: async () => ({}) }),
+      () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("x"); } }),
+    ];
+    for (const first of firstFails) {
+      let n = 0;
+      const sleeps = [];
+      const fetch = async (url, init) => (++n === 1 ? first() : ok(url, init));
+      const out = await fetchPage({ ...args(fetch), retries: 1, sleep: async (ms) => { sleeps.push({ ms, n }); } });
+      assert.equal(n, 2);
+      assert.equal(out.rows.length, 1);
+      assert.equal(sleeps.length, 1);
+      assert.ok(sleeps[0].ms >= 1000 && sleeps[0].ms <= 2000, String(sleeps[0].ms));
+      assert.equal(sleeps[0].n, 1, "첫 시도 뒤, 재시도 전에 쉰다");
+    }
+  });
+
+  test("4xx(429 제외)는 다시 시도하지 않는다", async () => {
+    let n = 0;
+    const fetch = async () => { n++; return { ok: false, status: 404, json: async () => ({}) }; };
+    await assert.rejects(fetchPage({ ...args(fetch), retries: 1 }), (e) => e.code === "HTTP");
+    assert.equal(n, 1);
   });
 
   test("API 오류 코드는 다시 시도하지 않는다", async () => {
@@ -142,7 +161,7 @@ describe("fetchPage: 키와 URL 을 오류에 넣지 않는다", () => {
 });
 
 describe("fetchMonthRows: 페이지 멈춤 규칙", () => {
-  const base = { key: FAKE_KEY, gu: "강남구", month: "202610", retries: 0 };
+  const base = { key: FAKE_KEY, gu: "강남구", month: "202610", retries: 0, sleep: async () => {} };
 
   test("RCPT_YR = month 앞 4자리, CGG_NM = gu 로 부른다", async () => {
     const fetch = fakeSeoulFetch({ 강남구: rowsOn("20261010", 3) });
@@ -163,15 +182,24 @@ describe("fetchMonthRows: 페이지 멈춤 규칙", () => {
     assert.equal(out.capped, false);
   });
 
-  test("페이지의 가장 오래된 CTRT_DAY 가 그 달 1일보다 앞서면 멈춘다", async () => {
-    // 1쪽: 11월 500 + 10월 500 (모두 10/1 이후) → 계속, 2쪽: 10월 600 + 9월 400 → 멈춤, 3쪽은 부르지 않음
-    const data = [...rowsOn("20261103", 500), ...rowsOn("20261012", 500), ...rowsOn("20261002", 600), ...rowsOn("20260920", 400), ...rowsOn("20260801", 1000)];
+  test("페이지의 가장 최근 CTRT_DAY 가 그 달 1일보다 앞서면(그 페이지 전부가 지난달 이전) 멈춘다", async () => {
+    // 1쪽: 11월 500 + 10월 500, 2쪽: 10월 600 + 9월 400 (아직 10월이 있으니 계속), 3쪽: 8월 1000 → 멈춤, 4쪽은 부르지 않음
+    const data = [...rowsOn("20261103", 500), ...rowsOn("20261012", 500), ...rowsOn("20261002", 600), ...rowsOn("20260920", 400), ...rowsOn("20260801", 1000), ...rowsOn("20260701", 1000)];
     const fetch = fakeSeoulFetch({ 강남구: data });
     const out = await fetchMonthRows({ ...base, fetch });
-    assert.deepEqual(fetch.calls.map((c) => c.start), [1, 1001]);
+    assert.deepEqual(fetch.calls.map((c) => c.start), [1, 1001, 2001]);
     assert.equal(out.rows.length, 1100);
-    assert.equal(out.pages, 2);
+    assert.equal(out.pages, 3);
     assert.equal(out.capped, false);
+  });
+
+  test("접수일 순처럼 계약일이 섞여 와도 그 달 행을 끝까지 모은다(가장 오래된 날로 멈추면 1쪽에서 끊긴다)", async () => {
+    const mixed = (n) => Array.from({ length: n }, (_, i) => row({ CTRT_DAY: i % 2 === 0 ? "20261015" : "20260915" }));
+    const data = [...mixed(1000), ...mixed(1000), ...rowsOn("20261020", 300)];
+    const fetch = fakeSeoulFetch({ 강남구: data });
+    const out = await fetchMonthRows({ ...base, fetch });
+    assert.equal(fetch.calls.length, 3);
+    assert.equal(out.rows.length, 500 + 500 + 300);
   });
 
   test("가장 오래된 계약일이 바로 1일이면 멈추지 않는다(그 달 안)", async () => {
@@ -182,13 +210,20 @@ describe("fetchMonthRows: 페이지 멈춤 규칙", () => {
     assert.equal(out.rows.length, 1010);
   });
 
-  test("최대 12페이지에서 멈추고 capped 를 알린다", async () => {
-    const fetch = fakeSeoulFetch({ 강남구: rowsOn("20261015", 20000) });
+  test("최대 30페이지에서 멈추고 capped 를 알린다", async () => {
+    const fetch = fakeSeoulFetch({ 강남구: rowsOn("20261015", 31000) });
     const out = await fetchMonthRows({ ...base, fetch });
-    assert.equal(fetch.calls.length, 12);
-    assert.equal(fetch.calls.at(-1).start, 11001);
-    assert.equal(out.rows.length, 12000);
+    assert.equal(fetch.calls.length, 30);
+    assert.equal(fetch.calls.at(-1).start, 29001);
+    assert.equal(out.rows.length, 30000);
     assert.equal(out.capped, true);
+  });
+
+  test("딱 30페이지로 끝나면(list_total_count) capped 가 아니다", async () => {
+    const fetch = fakeSeoulFetch({ 강남구: rowsOn("20261015", 30000) });
+    const out = await fetchMonthRows({ ...base, fetch });
+    assert.equal(fetch.calls.length, 30);
+    assert.equal(out.capped, false);
   });
 
   test("list_total_count 에 닿으면 빈 다음 페이지를 부르지 않는다", async () => {
@@ -225,7 +260,7 @@ describe("fetchMonthRows: beforePage (작업자 마감 검사)", () => {
     const fetch = fakeSeoulFetch({ 강남구: rowsOn("20261015", 5000) });
     let n = 0;
     const beforePage = () => { if (++n === 3) throw new Error("마감"); };
-    await assert.rejects(fetchMonthRows({ key: FAKE_KEY, gu: "강남구", month: "202610", retries: 0, fetch, beforePage }), /마감/);
+    await assert.rejects(fetchMonthRows({ key: FAKE_KEY, gu: "강남구", month: "202610", retries: 0, sleep: async () => {}, fetch, beforePage }), /마감/);
     assert.equal(fetch.calls.length, 2);
   });
 });

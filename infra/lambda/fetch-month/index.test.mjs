@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { validateMonth, currentMonthKst, passcodeMatches, createHandler, MIN_MONTH } from "./index.mjs";
 import { LOCK_KEY, INDEX_KEY, isLockFresh } from "./job.mjs";
 import { aggregateRows, buildIndex } from "./aggregate.mjs";
-import { fakeDeps, fakeStore, fakeSeoulFetch, httpEvent, row, jsonResponse, FAKE_KEY, GU_ORDER } from "./fakes.mjs";
+import { fakeDeps, fakeStore, fakeSeoulFetch, fakeConverse, bulkReply, httpEvent, row, jsonResponse, FAKE_KEY, GU_ORDER } from "./fakes.mjs";
 
 const NOW = Date.UTC(2026, 10, 17, 3, 0, 0); // 2026-11-17 12:00 KST
 const PASS = "open-sesame";
@@ -116,7 +116,8 @@ describe("HTTP: POST /api/fetch-month", () => {
       assert.equal(res.body.error, "unauthorized");
       assert.match(res.body.message, /암호/);
       assert.equal(f.invokes.length, 0);
-      assert.equal(f.deps.store.puts.length, 0);
+      // 암호 실패 기록(data/jobs/_auth/) 말고는 아무것도 쓰지 않는다
+      assert.deepEqual(f.deps.store.puts.filter((p) => !p.key.startsWith("data/jobs/_auth/")), []);
     }
   });
 
@@ -489,5 +490,399 @@ describe("{action: \"rebuild-index\"}: 배포 뒤 S3 내용으로 index 를 다�
   test("무효화 실패는 경고만", async () => {
     const f = fakeDeps({ nowMs: NOW, store: rebuildStore(), invalidate: async () => { throw new Error("Throttling"); } });
     assert.equal((await createHandler(f.deps)({ action: "rebuild-index" })).ok, true);
+  });
+});
+
+// ---- Task 11: AI 한 줄 해설 ----
+const NARR_ENV = { BEDROCK_MODEL_ID: "anthropic.claude-haiku-5-5" };
+
+function storeWith202611() {
+  const init = { [INDEX_KEY]: existingIndex() };
+  for (const gu of GU_ORDER) {
+    init[`data/202611/${gu}.json`] = aggregateRows(gu === "강남구" ? [row({ CTRT_DAY: "20261105", THING_AMT: "300000", ARCH_AREA: 100 })] : [], { month: "202611", gu, generatedAt: "x" });
+  }
+  return fakeStore(init);
+}
+
+function narratePost(month, headers = { "x-presenter-key": PASS }) {
+  return httpEvent({ path: "/api/narrate-month", headers, body: JSON.stringify({ month }) });
+}
+
+describe("HTTP: POST /api/narrate-month", () => {
+  test("202: 잠금, 작업 기록(kind narration, running 0/26), 작업자 {action: narrate}", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    const res = parse(await createHandler(f.deps)(narratePost("202611")));
+    assert.equal(res.status, 202);
+    assert.deepEqual(res.body, { jobId: "job-0001-aaaa", month: "202611" });
+    assert.deepEqual(f.deps.store.json("data/jobs/job-0001-aaaa.json"), {
+      v: 1, type: "job", kind: "narration", jobId: "job-0001-aaaa", month: "202611", state: "running", done: 0, total: 26, ts: NOW,
+    });
+    assert.deepEqual(f.invokes, [{ functionName: "SeoulArStack-FetchMonthWorker", payload: { action: "narrate", jobId: "job-0001-aaaa", month: "202611" } }]);
+    assert.equal(f.deps.store.json(LOCK_KEY).jobId, "job-0001-aaaa");
+  });
+
+  test("401 암호, 400 월 형식, 400 아직 가져오지 않은 달, 409 잠금", async () => {
+    const h = (f) => createHandler(f.deps);
+    let f = fakeDeps({ nowMs: NOW, store: storeWith202611() });
+    assert.equal((await h(f)(narratePost("202611", {}))).statusCode, 401);
+    f = fakeDeps({ nowMs: NOW, store: storeWith202611() });
+    assert.equal((await h(f)(narratePost("2026-11"))).statusCode, 400);
+    f = fakeDeps({ nowMs: NOW, store: storeWith202611() });
+    const missing = parse(await h(f)(narratePost("202610")));
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.error, "no_data");
+    assert.match(missing.body.message, /가져오지 않은 달/);
+    assert.equal(f.invokes.length, 0);
+    const store = storeWith202611();
+    store.objects.set(LOCK_KEY, { text: JSON.stringify({ v: 1, jobId: "busy-1", month: "202609", ts: NOW }), etag: '"l"', opts: {} });
+    f = fakeDeps({ nowMs: NOW, store });
+    assert.equal((await h(f)(narratePost("202611"))).statusCode, 409);
+  });
+});
+
+describe("작업자 {action: narrate}", () => {
+  async function narrateJob(over = {}) {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV, ...over });
+    const h = createHandler(f.deps);
+    assert.equal((await h(narratePost("202611"))).statusCode, 202);
+    await h(f.invokes[0].payload);
+    return f;
+  }
+
+  test("index 와 구 파일로 해설: narration.json(no-cache), 무효화, kind narration 진행, 잠금 해제", async () => {
+    const f = await narrateJob();
+    const put = f.deps.store.puts.find((p) => p.key === "data/202611/narration.json");
+    assert.ok(put, "narration.json");
+    assert.equal(put.opts.cacheControl, "no-cache");
+    const n = JSON.parse(put.text);
+    assert.equal(n.v, 1);
+    assert.equal(n.month, "202611");
+    assert.equal(n.model, "anthropic.claude-haiku-5-5");
+    assert.equal(n.generatedAt, new Date(NOW).toISOString());
+    assert.equal(Object.keys(n.items).length, 26);
+    assert.ok(f.deps.converse.calls[0].prompt.includes("강남구"));
+    assert.deepEqual(f.invalidations, [{ distributionId: "EDISTTEST", paths: ["/data/202611/narration.json"], callerReference: "job-0001-aaaa" }]);
+    assert.ok(f.published.length >= 2);
+    for (const m of f.published) {
+      assert.equal(m.kind, "narration");
+      assert.equal(m.type, "job");
+      assert.equal(m.v, 1);
+      assert.equal(m.total, 26);
+      assert.equal(typeof m.ts, "number");
+    }
+    assert.equal(f.published.at(-1).state, "done");
+    assert.equal(f.published.at(-1).done, 26);
+    assert.equal("message" in f.published.at(-1), false);
+    assert.deepEqual(f.deps.store.json("data/jobs/job-0001-aaaa.json"), f.published.at(-1));
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+    // 수집은 하지 않는다
+    assert.equal(f.deps.fetch.calls.length, 0);
+    assert.equal(f.deps.store.puts.some((p) => p.key === INDEX_KEY), false);
+  });
+
+  test("일부 생략이면 done 에 사용자 문장으로 알린다", async () => {
+    const converse = fakeConverse((c) => (c.single === null ? bulkReply({ 중구: undefined }) : "JSON 도 문장도 아닌\n두 줄"));
+    const f = await narrateJob({ converse });
+    const last = f.published.at(-1);
+    assert.equal(last.state, "done");
+    assert.match(last.message, /중구/);
+    assert.equal("중구" in JSON.parse(f.deps.store.puts.find((p) => p.key === "data/202611/narration.json").text).items, false);
+  });
+
+  test("모델 권한 없음 → error(kind narration, Bedrock 안내), 파일 안 씀, 잠금 해제", async () => {
+    const converse = fakeConverse(() => { throw Object.assign(new Error("You don't have access to the model with the specified model ID."), { name: "AccessDeniedException" }); });
+    const f = await narrateJob({ converse });
+    const last = f.published.at(-1);
+    assert.equal(last.state, "error");
+    assert.equal(last.kind, "narration");
+    assert.match(last.message, /Bedrock/);
+    assert.ok(!/AccessDenied|model ID/.test(last.message));
+    assert.equal(f.deps.store.puts.some((p) => p.key.endsWith("narration.json")), false);
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+  });
+
+  test("BEDROCK_MODEL_ID 가 없으면 error (설정 안내)", async () => {
+    const f = await narrateJob({ env: {} });
+    assert.equal(f.published.at(-1).state, "error");
+    assert.match(f.published.at(-1).message, /설정/);
+  });
+
+  test("index 에 없는 달은 error", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    await createHandler(f.deps)({ action: "narrate", jobId: "job-0002-bbbb", month: "202610" });
+    assert.equal(f.published.at(-1).state, "error");
+    assert.equal(f.published.at(-1).kind, "narration");
+  });
+});
+
+describe("수집 끝 자동 해설", () => {
+  test("BEDROCK_MODEL_ID 가 있으면 수집 done 뒤 {jobId}-narration 로 해설을 만든다 (수집 기록은 done 그대로)", async () => {
+    const f = workerSetup({ env: NARR_ENV });
+    await startedJob(f);
+    const fetchMsgs = f.published.filter((m) => m.jobId === "job-0001-aaaa");
+    const narrMsgs = f.published.filter((m) => m.jobId === "job-0001-aaaa-narration");
+    assert.equal(fetchMsgs.length, 26);
+    assert.equal(fetchMsgs.at(-1).state, "done");
+    assert.ok(fetchMsgs.every((m) => m.kind === undefined));
+    assert.ok(f.published.indexOf(fetchMsgs.at(-1)) < f.published.indexOf(narrMsgs[0]), "수집 done 이 먼저");
+    assert.ok(narrMsgs.every((m) => m.kind === "narration" && m.month === "202610"));
+    assert.equal(narrMsgs.at(-1).state, "done");
+    assert.equal(f.deps.store.json("data/jobs/job-0001-aaaa.json").state, "done");
+    assert.equal(f.deps.store.json("data/jobs/job-0001-aaaa-narration.json").state, "done");
+    const n = f.deps.store.json("data/202610/narration.json");
+    assert.equal(Object.keys(n.items).length, 26);
+    // 해설 입력은 이번에 집계한 값
+    assert.ok(f.deps.converse.calls[0].prompt.includes("대치동"));
+    assert.equal(f.deps.store.json(LOCK_KEY).released, true);
+  });
+
+  test("자동 해설 실패는 수집 결과를 바꾸지 않는다", async () => {
+    const converse = fakeConverse(() => { throw Object.assign(new Error("denied"), { name: "AccessDeniedException" }); });
+    const f = workerSetup({ env: NARR_ENV, converse });
+    await startedJob(f);
+    assert.equal(f.deps.store.json("data/jobs/job-0001-aaaa.json").state, "done");
+    assert.equal(f.deps.store.json("data/jobs/job-0001-aaaa-narration.json").state, "error");
+    assert.ok(f.deps.store.json(INDEX_KEY).months.includes("202610"));
+  });
+
+  test("BEDROCK_MODEL_ID 가 없으면 자동 해설을 건너뛴다", async () => {
+    const f = workerSetup();
+    await startedJob(f);
+    assert.equal(f.deps.converse.calls.length, 0);
+    assert.ok(f.published.every((m) => m.kind === undefined));
+  });
+});
+
+// ---- 9a fix round 1 ----
+describe("fix: truncated = 페이지 상한에 닿음 (거짓 경고 없음, 실제 잘림은 표시)", () => {
+  const many = (day, n) => Array.from({ length: n }, () => row({ CTRT_DAY: day, THING_AMT: "100000", ARCH_AREA: 50 }));
+
+  test("그 달 1,500건을 끝까지 받으면 truncated false (파일과 index 모두), done 에 message 없음", async () => {
+    const fetch = fakeSeoulFetch({ ...seoulData(), 강남구: many("20261015", 1500) });
+    const f = workerSetup({ fetch });
+    await startedJob(f);
+    const g = f.deps.store.json("data/202610/강남구.json");
+    assert.equal(g.total.n, 1500);
+    assert.equal(g.total.truncated, false);
+    assert.equal(f.deps.store.json(INDEX_KEY).summary["202610"]["강남구"].truncated, false);
+    assert.equal("message" in f.published.at(-1), false);
+  });
+
+  test("30페이지 상한에 닿으면 truncated true (파일과 index), done message 에 그 구들 (GU_ORDER 순)", async () => {
+    const fetch = fakeSeoulFetch({ ...seoulData(), 송파구: many("20261015", 31000), 강남구: many("20261015", 31000) });
+    const f = workerSetup({ fetch, concurrency: 4 });
+    await startedJob(f);
+    for (const gu of ["강남구", "송파구"]) {
+      assert.equal(f.deps.store.json(`data/202610/${gu}.json`).total.truncated, true, gu);
+      assert.equal(f.deps.store.json(INDEX_KEY).summary["202610"][gu].truncated, true, gu);
+    }
+    assert.equal(f.deps.store.json("data/202610/서초구.json").total.truncated, false);
+    const last = f.published.at(-1);
+    assert.equal(last.state, "done");
+    assert.match(last.message, /일부 구는 거래가 많아 끝까지 받지 못했습니다: 강남구, 송파구/);
+    assert.deepEqual(f.deps.store.json("data/jobs/job-0001-aaaa.json"), last);
+  });
+});
+
+describe("fix: 11·12월 안내", () => {
+  for (const month of ["202611", "202512"]) {
+    test(`${month}: done message 에 다음 해 신고 안내`, async () => {
+      const store = fakeStore({ [INDEX_KEY]: existingIndex() });
+      const f = workerSetup({ store, fetch: fakeSeoulFetch({}) });
+      await startedJob(f, month);
+      const last = f.published.at(-1);
+      assert.equal(last.state, "done");
+      assert.match(last.message, /11·12월은 다음 해에 신고된 거래가 빠질 수 있습니다/);
+    });
+  }
+
+  test("10월은 안내 없음, 상한 + 11월이면 두 문장 모두", async () => {
+    const store = fakeStore({ [INDEX_KEY]: existingIndex() });
+    const fetch = fakeSeoulFetch({ 강남구: Array.from({ length: 31000 }, () => row({ CTRT_DAY: "20261115" })) });
+    const f = workerSetup({ store, fetch });
+    await startedJob(f, "202611");
+    const msg = f.published.at(-1).message;
+    assert.match(msg, /강남구/);
+    assert.match(msg, /11·12월/);
+  });
+});
+
+describe("fix: 마지막 done/error 를 보내기 전에 잠금을 푼다", () => {
+  function lockWatcher(f) {
+    const seen = [];
+    f.deps.publish = async (m) => {
+      f.published.push(m);
+      if (m.state !== "running") seen.push({ state: m.state, kind: m.kind, released: f.deps.store.json(LOCK_KEY)?.released === true });
+    };
+    return seen;
+  }
+
+  test("수집 done", async () => {
+    const f = workerSetup();
+    const seen = lockWatcher(f);
+    await startedJob(f);
+    assert.deepEqual(seen, [{ state: "done", kind: undefined, released: true }]);
+  });
+
+  test("수집 error", async () => {
+    const f = workerSetup({ fetch: async () => jsonResponse({ RESULT: { CODE: "ERROR-500" } }) });
+    const seen = lockWatcher(f);
+    await startedJob(f);
+    assert.deepEqual(seen, [{ state: "error", kind: undefined, released: true }]);
+  });
+
+  test("해설 작업 done, 자동 해설은 잠금 없이(수집 잠금은 이미 풀림)", async () => {
+    const f = fakeDeps({ nowMs: NOW, store: storeWith202611(), env: NARR_ENV });
+    const seen = lockWatcher(f);
+    const h = createHandler(f.deps);
+    await h(narratePost("202611"));
+    await h(f.invokes[0].payload);
+    assert.deepEqual(seen, [{ state: "done", kind: "narration", released: true }]);
+    const g = workerSetup({ env: NARR_ENV });
+    const seen2 = lockWatcher(g);
+    await startedJob(g);
+    assert.deepEqual(seen2, [{ state: "done", kind: undefined, released: true }, { state: "done", kind: "narration", released: true }]);
+  });
+});
+
+describe("fix: 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다", () => {
+  test("동시 2개: 중구 실패 뒤 종로구는 더 페이지를 넘기지 않는다", async () => {
+    const big = Array.from({ length: 5000 }, () => row({ CGG_NM: "종로구", CTRT_DAY: "20261015" }));
+    const base = fakeSeoulFetch({ 종로구: big });
+    const fetch = async (url, init) => {
+      const gu = decodeURIComponent(new URL(url).pathname.split("/")[8]);
+      if (gu === "중구") return jsonResponse({ RESULT: { CODE: "ERROR-500" } });
+      await new Promise((r) => setTimeout(r, 5));
+      return base(url, init);
+    };
+    const f = workerSetup({ fetch, concurrency: 2 });
+    await startedJob(f);
+    assert.equal(f.published.at(-1).state, "error");
+    assert.match(f.published.at(-1).message, /중구/);
+    assert.ok(base.calls.length <= 2, `종로구 페이지 ${base.calls.length}번`);
+  });
+});
+
+describe("fix: index 재구성 실패는 'index 재구성 실패' error 로그", () => {
+  test("구 파일 없음, S3 오류 모두", async () => {
+    const empty = fakeDeps({ nowMs: NOW, store: fakeStore({ [INDEX_KEY]: existingIndex() }) });
+    await createHandler(empty.deps)({ action: "rebuild-index" });
+    assert.ok(empty.logs.some((l) => l.level === "error" && l.msg.startsWith("index 재구성 실패")), JSON.stringify(empty.logs));
+    const store = fakeStore({ [INDEX_KEY]: existingIndex() });
+    store.failList = () => new Error("AccessDenied");
+    const broken = fakeDeps({ nowMs: NOW, store });
+    await createHandler(broken.deps)({ action: "rebuild-index" });
+    assert.ok(broken.logs.some((l) => l.level === "error" && l.msg.startsWith("index 재구성 실패")));
+  });
+});
+
+describe("fix: 발표자 암호는 60초 메모리 캐시", () => {
+  test("60초 안에는 SSM 을 다시 읽지 않고, 지나면 다시 읽는다", async () => {
+    const reads = [];
+    const f = fakeDeps({ nowMs: NOW, getParameter: async (name) => { reads.push(name); return PASS; } });
+    const h = createHandler(f.deps);
+    await h(post({ month: "abc" }));
+    f.setNow(NOW + 30_000);
+    await h(post({ month: "abc" }));
+    assert.equal(reads.filter((n) => n === "/seoul-ar/presenter-passcode").length, 1);
+    f.setNow(NOW + 61_000);
+    await h(post({ month: "abc" }));
+    assert.equal(reads.filter((n) => n === "/seoul-ar/presenter-passcode").length, 2);
+  });
+
+  test("읽기 실패는 캐시하지 않는다", async () => {
+    let n = 0;
+    const f = fakeDeps({ nowMs: NOW, getParameter: async () => { n++; if (n === 1) throw new Error("Throttling"); return PASS; } });
+    const h = createHandler(f.deps);
+    assert.equal((await h(post({ month: "202610" }))).statusCode, 500);
+    assert.equal((await h(post({ month: "202610" }))).statusCode, 202);
+  });
+});
+
+describe("fix: IP 별 암호 실패 잠금 (10분에 10번 → 10분 429)", () => {
+  const VIEWER = { "cloudfront-viewer-address": "198.51.100.10:46532" };
+  const wrong = (extra = {}) => post({ month: "202610" }, { ...VIEWER, "x-presenter-key": "wrong", ...extra });
+  const right = (extra = {}) => post({ month: "202610" }, { ...VIEWER, "x-presenter-key": PASS, ...extra });
+
+  test("10번 틀리면 다음 요청은 맞는 암호여도 429, 10분 뒤 풀린다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 10; i++) assert.equal((await h(wrong())).statusCode, 401, `시도 ${i + 1}`);
+    const locked = parse(await h(right()));
+    assert.equal(locked.status, 429);
+    assert.equal(locked.body.error, "too_many_attempts");
+    assert.equal(locked.body.message, "잠시 후 다시 시도해 주세요.");
+    assert.equal(locked.headers["retry-after"], "600");
+    assert.equal(f.invokes.length, 0);
+    f.setNow(NOW + 10 * 60_000 + 1);
+    assert.equal((await h(right())).statusCode, 202);
+  });
+
+  test("기록은 data/jobs/_auth/<sha256(ip)>.json, no-store, 원래 IP 는 안 남긴다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    await createHandler(f.deps)(wrong());
+    const put = f.deps.store.puts.find((p) => p.key.startsWith("data/jobs/_auth/"));
+    assert.match(put.key, /^data\/jobs\/_auth\/[0-9a-f]{64}\.json$/);
+    assert.equal(put.opts.cacheControl, "no-store");
+    assert.ok(!put.text.includes("198.51.100.10") && !put.key.includes("198.51.100.10"));
+  });
+
+  test("성공하면 초기화: 9번 틀리고 1번 맞히고 9번 더 틀려도 잠기지 않는다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 9; i++) await h(wrong());
+    assert.equal((await h(right())).statusCode, 202);
+    f.deps.store.objects.delete(LOCK_KEY); // 다음 202 를 위해 작업 잠금만 비운다
+    for (let i = 0; i < 9; i++) assert.equal((await h(wrong())).statusCode, 401);
+    assert.notEqual((await h(right())).statusCode, 429);
+  });
+
+  test("10분 창이 지나면 셈을 새로 한다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 9; i++) await h(wrong());
+    f.setNow(NOW + 11 * 60_000);
+    for (let i = 0; i < 9; i++) await h(wrong());
+    assert.notEqual((await h(right())).statusCode, 429);
+  });
+
+  test("다른 IP 는 영향 없음, 헤더가 없으면 sourceIp 로 센다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 10; i++) await h(wrong());
+    assert.equal((await h(right({ "cloudfront-viewer-address": "203.0.113.99:1234" }))).statusCode, 202);
+    const g = fakeDeps({ nowMs: NOW });
+    const hg = createHandler(g.deps);
+    const bare = (key) => httpEvent({ headers: { "x-presenter-key": key }, body: JSON.stringify({ month: "202610" }), sourceIp: "192.0.2.5" });
+    for (let i = 0; i < 10; i++) await hg(bare("wrong"));
+    assert.equal((await hg(bare(PASS))).statusCode, 429);
+  });
+
+  test("400 은 실패로 세지 않는다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 12; i++) assert.equal((await h(post({ month: "bad" }, { ...VIEWER, "x-presenter-key": PASS }))).statusCode, 400);
+    assert.equal((await h(right())).statusCode, 202);
+  });
+
+  test("기록이 없으면 S3 가 403 을 줘도(ListBucket 없음) 기록 없음으로 본다", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    const realGet = f.deps.store.get.bind(f.deps.store);
+    f.deps.store.get = async (key) => {
+      if (key.startsWith("data/jobs/_auth/") && !f.deps.store.objects.has(key)) throw Object.assign(new Error("Access Denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } });
+      return realGet(key);
+    };
+    const h = createHandler(f.deps);
+    for (let i = 0; i < 10; i++) await h(wrong());
+    assert.equal((await h(right())).statusCode, 429);
+  });
+
+  test("기록 저장소 오류는 통과시킨다(fail-open) + warn", async () => {
+    const f = fakeDeps({ nowMs: NOW });
+    f.deps.store.failPut = (key) => (key.startsWith("data/jobs/_auth/") ? new Error("SlowDown") : null);
+    const h = createHandler(f.deps);
+    assert.equal((await h(wrong())).statusCode, 401);
+    assert.equal((await h(right())).statusCode, 202);
+    assert.ok(f.logs.some((l) => l.level === "warn"));
   });
 });

@@ -1,4 +1,4 @@
-// 런타임 기본 I/O: Node.js 22 Lambda 런타임에 내장된 AWS SDK v3 와 global fetch 만 쓴다(npm 의존성 없음).
+// 런타임 기본 I/O: Node.js 22 Lambda 런타임에 내장된 AWS SDK v3(S3, SSM, CloudFront, Lambda, Bedrock Runtime)와 global fetch 만 쓴다(npm 의존성 없음).
 // 각 어댑터는 client 와 명령 클래스를 받으므로 SDK 없이 테스트할 수 있다(aws.test.mjs).
 import { randomUUID } from "node:crypto";
 import { PreconditionFailed, isPrecondition } from "./job.mjs";
@@ -76,6 +76,19 @@ export function lambdaInvoker({ client, InvokeCommand }) {
   };
 }
 
+/** Bedrock Converse 한 번. 응답 텍스트 조각을 이어 붙여 돌려준다. temperature 는 넣지 않는다(모델별 제약을 피한다). */
+export function bedrockConverser({ client, ConverseCommand, timeoutMs = 60_000 }) {
+  return async function converse({ modelId, system, prompt, maxTokens }) {
+    const r = await client.send(new ConverseCommand({
+      modelId,
+      system: [{ text: system }],
+      messages: [{ role: "user", content: [{ text: prompt }] }],
+      inferenceConfig: { maxTokens },
+    }), { abortSignal: AbortSignal.timeout(timeoutMs) });
+    return (r?.output?.message?.content ?? []).map((part) => part?.text ?? "").join("");
+  };
+}
+
 function jsonLog(level, msg, fields = {}) {
   const line = JSON.stringify({ level, msg, ...fields });
   if (level === "error") console.error(line);
@@ -92,6 +105,15 @@ export async function makeDefaultDeps(env, { importModule = (name) => import(nam
     importModule("@aws-sdk/client-lambda"),
   ]);
   const fetch = globalThis.fetch;
+  // Bedrock 런타임은 해설을 만들 때(작업자)만 불러온다. API 함수는 쓰지 않는다.
+  let converser = null;
+  const converse = async (args) => {
+    if (!converser) {
+      const br = await importModule("@aws-sdk/client-bedrock-runtime");
+      converser = bedrockConverser({ client: new br.BedrockRuntimeClient({}), ConverseCommand: br.ConverseCommand });
+    }
+    return converser(args);
+  };
   return {
     env,
     fetch,
@@ -100,7 +122,9 @@ export async function makeDefaultDeps(env, { importModule = (name) => import(nam
     invalidate: cloudFrontInvalidator({ client: new cloudfront.CloudFrontClient({}), CreateInvalidationCommand: cloudfront.CreateInvalidationCommand }),
     invoke: lambdaInvoker({ client: new lambda.LambdaClient({}), InvokeCommand: lambda.InvokeCommand }),
     publish: createPublisher({ fetch, endpoint: env.EVENTS_HTTP_ENDPOINT, apiKey: env.EVENTS_API_KEY }),
+    converse,
     now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     randomId: () => randomUUID(),
     log: jsonLog,
     concurrency: 4,

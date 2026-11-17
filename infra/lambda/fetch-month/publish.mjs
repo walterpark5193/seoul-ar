@@ -5,11 +5,14 @@ export const JOBS_CHANNEL = "/seoul/jobs";
 const TIMEOUT_MS = 5_000;
 
 /**
- * JobMessage: { v: 1, type: "job", jobId, month, state, done, total, gu?, message?, ts }.
+ * JobMessage: { v: 1, type: "job", kind?, jobId, month, state, done, total, gu?, message?, ts }.
+ * kind(12.2): 없으면 월 수집, "narration" 은 AI 해설.
  * 브라우저 isJobMessage 가 그대로 받도록 숫자는 숫자로, 선택 필드는 값이 있을 때만 넣는다.
  */
-export function jobMessage({ jobId, month, state, done, total, gu, message, ts }) {
-  const msg = { v: 1, type: "job", jobId, month, state, done, total };
+export function jobMessage({ kind, jobId, month, state, done, total, gu, message, ts }) {
+  const msg = { v: 1, type: "job" };
+  if (kind !== undefined) msg.kind = kind;
+  Object.assign(msg, { jobId, month, state, done, total });
   if (gu !== undefined) msg.gu = gu;
   if (message !== undefined) msg.message = message;
   msg.ts = ts;

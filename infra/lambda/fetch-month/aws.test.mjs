@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { s3Store, ssmGetter, cloudFrontInvalidator, lambdaInvoker, makeDefaultDeps } from "./aws.mjs";
+import { s3Store, ssmGetter, cloudFrontInvalidator, lambdaInvoker, bedrockConverser, makeDefaultDeps } from "./aws.mjs";
 import { PreconditionFailed } from "./job.mjs";
 
 // SDK 명령 클래스 대역: 입력을 그대로 들고 있다.
@@ -110,4 +110,31 @@ test("makeDefaultDeps: 런타임 내장 SDK 네 개를 불러 엮는다", async 
   }
   assert.equal(deps.env, env);
   assert.match(deps.randomId(), /^[0-9a-f-]{36}$/);
+});
+
+test("bedrockConverser: Converse 요청 모양, 응답 텍스트 이어 붙이기, 타임아웃 signal", async () => {
+  const sent = [];
+  const client = { send: async (cmd, opts) => { sent.push({ cmd, opts }); return { output: { message: { content: [{ text: '{"a":' }, { text: ' "b"}' }] } } }; } };
+  const converse = bedrockConverser({ client, ConverseCommand: command("Converse") });
+  const text = await converse({ modelId: "anthropic.claude-haiku-5-5", system: "규칙", prompt: "질문", maxTokens: 400 });
+  assert.equal(text, '{"a": "b"}');
+  assert.deepEqual(sent[0].cmd.input, {
+    modelId: "anthropic.claude-haiku-5-5",
+    system: [{ text: "규칙" }],
+    messages: [{ role: "user", content: [{ text: "질문" }] }],
+    inferenceConfig: { maxTokens: 400 },
+  });
+  assert.ok(sent[0].opts.abortSignal, "abortSignal");
+});
+
+test("makeDefaultDeps: Bedrock 런타임은 첫 converse 때만 불러온다(API 함수 콜드 스타트 절약)", async () => {
+  const imported = [];
+  const Client = class { async send() { return { output: { message: { content: [{ text: "ok" }] } } }; } };
+  const anyModule = new Proxy({}, { get: (_, name) => (name === "then" ? undefined : String(name).endsWith("Client") ? Client : command(String(name))) });
+  const deps = await makeDefaultDeps({ BUCKET: "b" }, { importModule: async (n) => { imported.push(n); return anyModule; } });
+  assert.equal(imported.includes("@aws-sdk/client-bedrock-runtime"), false);
+  assert.equal(await deps.converse({ modelId: "m", system: "s", prompt: "p", maxTokens: 10 }), "ok");
+  assert.equal(imported.filter((n) => n === "@aws-sdk/client-bedrock-runtime").length, 1);
+  await deps.converse({ modelId: "m", system: "s", prompt: "p", maxTokens: 10 });
+  assert.equal(imported.filter((n) => n === "@aws-sdk/client-bedrock-runtime").length, 1);
 });

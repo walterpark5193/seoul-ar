@@ -84,3 +84,12 @@ describe("createReporter: 발행과 작업 기록을 순서대로, 실패는 삼
     assert.equal(logs[0].level, "warn");
   });
 });
+
+describe("jobMessage kind (CONTRACTS 12.2)", () => {
+  test("kind 가 있으면 type 다음에 넣고, 없으면 키 자체를 넣지 않는다", () => {
+    const m = jobMessage({ kind: "narration", jobId: "j", month: "202611", state: "running", done: 0, total: 26, ts: 1 });
+    assert.deepEqual(Object.keys(m), ["v", "type", "kind", "jobId", "month", "state", "done", "total", "ts"]);
+    assert.equal(m.kind, "narration");
+    assert.equal("kind" in jobMessage({ jobId: "j", month: "202611", state: "done", done: 25, total: 25, ts: 1 }), false);
+  });
+});

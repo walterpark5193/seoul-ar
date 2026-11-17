@@ -7,7 +7,7 @@ CDK(JavaScript) 스택 `SeoulArStack`, 리전 us-east-1 고정(조직 SCP가 ap-
 - `BucketDeployment` 두 개:
   - `DeploySite`: `frontend/dist`(단 `data/*` 제외)와 배포 시점에 만든 `config.json`을 버킷 루트에 올리고(prune) CloudFront 캐시를 비운다. `exclude: ["data/*"]` 이므로 `data/` 아래는 올리지도 지우지도 않는다.
   - `DeployDataSeed`: `frontend/dist/data` → `data/` 를 prune 없이 올린다(저장소의 달 폴더와 `index.json`). 아무것도 지우지 않는다. `dist/data` 가 없으면 건너뛴다(정보 메시지만).
-- 월 실시간 수집(아래): Lambda 두 개, Function URL, CloudFront `/api/*`, 배포마다 index 재구성.
+- 월 실시간 수집과 AI 해설(아래): Lambda 두 개, Function URL, CloudFront `/api/*`, 배포마다 index 재구성, Bedrock.
 
 ## 배포
 
@@ -71,13 +71,17 @@ aws ssm put-parameter --region us-east-1 --name /seoul-ar/presenter-passcode \
 unset SEOUL_API_KEY PRESENTER_PASSCODE
 ```
 
-값을 바꿀 때는 같은 명령에 `--overwrite` 를 붙인다. Lambda 는 요청마다 SSM 을 읽으므로 재배포가 필요 없다.
+값을 바꿀 때는 같은 명령에 `--overwrite` 를 붙인다. 재배포는 필요 없다(서울 API 키는 작업마다 읽고, 발표자 암호는 길어야 1분 뒤 반영된다: 60초 메모리 캐시).
 
-### 2. 엔드포인트 `POST /api/fetch-month`
+보안 권장:
+- 서울 API 는 HTTP 로만 열려 있다(확인함: 8088 포트는 TLS 핸드셰이크가 실패하고 443 은 응답하지 않는다). 그래서 키가 `openapi.seoul.go.kr` 까지 평문으로 간다. **이 앱 전용 키**를 발급해 쓰고 행사가 끝나면 **폐기·재발급**한다.
+- 발표자 암호는 **12자 이상**으로 정한다. 같은 접속(IP)에서 10분 안에 10번 틀리면 10분 동안 429 로 막는다(아래 표).
 
-CloudFront 추가 동작 `/api/*` → Lambda Function URL(AuthType NONE). 캐시 없음(`CACHING_DISABLED`), 오리진 요청 정책 `ALL_VIEWER_EXCEPT_HOST_HEADER`(헤더·본문 전달), 메서드 전부 허용, HTTPS 리다이렉트. Function URL 을 직접 불러도 같은 검사를 거친다(경로 `/fetch-month` 도 받는다).
+### 2. 엔드포인트 `POST /api/fetch-month` (와 `POST /api/narrate-month`, 7절)
 
-요청: 헤더 `x-presenter-key: <발표자 암호>`, 본문 `{"month": "202610"}`.
+CloudFront 추가 동작 `/api/*` → Lambda Function URL(**AuthType AWS_IAM + CloudFront OAC**: 이 배포만 SigV4 로 서명해 부를 수 있고, Function URL 을 직접 부르면 403). 캐시 없음(`CACHING_DISABLED`), 오리진 요청 정책 `ALL_VIEWER_EXCEPT_HOST_HEADER`(헤더·본문·`CloudFront-Viewer-Address` 전달), 메서드 전부 허용, HTTPS 리다이렉트. 발표자 암호 검사는 그대로 한다.
+
+요청: 헤더 `x-presenter-key: <발표자 암호>` 와 **`x-amz-content-sha256: <본문의 SHA-256 hex>`**, 본문 `{"month": "202610"}`. OAC 는 POST 본문을 서명해야 해서, 이 헤더가 없으면 Lambda 가 403 을 주고 CloudFront 는 그것을 SPA 규칙대로 `/index.html` 200 으로 바꾼다(브라우저에서는 JSON 이 아닌 응답으로 보인다). 브라우저는 `crypto.subtle.digest("SHA-256", 본문 바이트)` 로 만든다.
 
 | 코드 | 본문 | 뜻 |
 |---|---|---|
@@ -85,6 +89,7 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(AuthType NONE). 캐시
 | 400 | `{"error": "bad_month" \| "bad_request", "message"}` | YYYYMM 형식, 200601 이상, 한국 시간 이번 달 이하가 아님 / 본문이 JSON 이 아님 |
 | 401 | `{"error": "unauthorized", "message"}` | 암호 헤더 없음 또는 불일치(sha256 다이제스트를 `timingSafeEqual` 로 비교). 월 검사보다 먼저 |
 | 409 | `{"error": "busy", "message", "jobId"?, "month"?}` | 다른 작업 진행 중(`data/jobs/lock.json`, 10분 지나면 stale 로 무시) |
+| 429 | `{"error": "too_many_attempts", "message": "잠시 후 다시 시도해 주세요."}`, 헤더 `retry-after`(초) | 같은 접속 IP 에서 10분 안에 암호를 10번 틀림 → 10분 잠금. IP 는 `CloudFront-Viewer-Address`(없으면 `sourceIp`), 기록은 `data/jobs/_auth/<sha256(ip)>.json`(no-store), 맞히면 초기화. 기록 저장소 오류는 통과(fail-open) |
 | 405 / 500 | `{"error", "message"}` | POST 아님 / 설정·잠금·작업자 호출 실패 |
 
 `message` 는 모두 한국어 한 문장이고 키·URL 이 없다.
@@ -93,14 +98,14 @@ CloudFront 추가 동작 `/api/*` → Lambda Function URL(AuthType NONE). 캐시
 
 Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타임 내장 AWS SDK v3 와 global fetch)를 쓴다.
 
-- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → 암호(401) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
-- `SeoulArStack-FetchMonthWorker` (512 MB, 600 초, 비동기 재시도 0): 페이로드 `{jobId, month}`.
+- `FetchMonthApi` (Function URL, 256 MB, 15 초): 경로·메서드 → IP 잠금(429) → 암호(401, 60초 캐시) → 월(400) → 잠금(409, S3 조건부 쓰기 `IfNoneMatch`/`IfMatch` 로 원자적) → 작업 기록 `running 0/25` → 작업자를 `InvocationType: Event` 로 호출(`SELF_FUNCTION_NAME`) → 202.
+- `SeoulArStack-FetchMonthWorker` (512 MB, 600 초, 비동기 재시도 0, 5분 안에 시작 못 한 이벤트는 버림): 페이로드 `{jobId, month}`.
   1. SSM 에서 서울 API 키를 읽는다.
-  2. 25구를 동시에 4개씩: `RCPT_YR = month[:4]`, `CGG_NM = 구` 로 1000건씩 페이지 호출. 페이지가 1000건 미만이거나, 페이지의 가장 오래된 `CTRT_DAY` 가 그 달 1일보다 앞서거나, `list_total_count` 에 닿거나, 12페이지면 멈춘다. `CTRT_DAY[:6] === month` 인 행만 남긴다. `INFO-200` 은 빈 결과.
-  3. 구 하나 끝날 때마다 `tools/data/aggregate.mjs` 의 `aggregateRows` 로 집계하고 `running`(done 1..25, 구 이름)을 발행.
+  2. 25구를 동시에 4개씩: `RCPT_YR = month[:4]`, `CGG_NM = 구` 로 1000건씩 페이지 호출. 페이지가 1000건 미만이거나, 페이지의 **가장 최근** `CTRT_DAY` 가 그 달 1일보다 앞서거나(정렬 순서가 확인되지 않아 페이지 전체가 지난 뒤에만 멈춘다), `list_total_count` 에 닿거나, 30페이지면 멈춘다. `CTRT_DAY[:6] === month` 인 행만 남긴다. `INFO-200` 은 빈 결과. 네트워크·429·5xx·형식 오류는 1.5초 쉬고 한 번 다시 시도한다. 한 구가 실패하면 다른 구도 다음 페이지를 부르지 않는다.
+  3. 구 하나 끝날 때마다 `tools/data/aggregate.mjs` 의 `aggregateRows` 로 집계하고 `running`(done 1..25, 구 이름)을 발행. `total.truncated`(와 index 의 그 구 summary)는 "30페이지 상한에 닿아 끝까지 받지 못함"으로 바꿔 쓴다.
   4. 25구가 다 되면 `data/{month}/{gu}.json` 25개 → `data/index.json` 병합(기존 달 유지, 그 달 summary 교체, months 정렬, generatedAt 갱신). 모두 `Cache-Control: no-cache`.
-  5. CloudFront `/data/*` 무효화(실패해도 경고만: 파일이 no-cache 라 곧 보인다) → `done 25/25` 발행.
-  6. 실패하면 `error`(사용자용 `message`) 발행. 어떤 경우든 `finally` 에서 잠금 해제. Lambda 제한 시간 90초 전이면 스스로 멈추고 `error` 를 알린다(10분 stale 전에 끝나 다음 작업과 겹치지 않게).
+  5. CloudFront `/data/*` 무효화(실패해도 경고만: 파일이 no-cache 라 곧 보인다).
+  6. 잠금을 먼저 풀고 `done 25/25` 또는 `error`(사용자용 `message`)를 발행한다(받자마자 다음 달을 눌러도 409 가 나지 않게). `done` 의 `message`: 상한에 닿은 구가 있으면 "일부 구는 거래가 많아 끝까지 받지 못했습니다: 강남구, 송파구", 11·12월이면 "11·12월은 다음 해에 신고된 거래가 빠질 수 있습니다". Lambda 제한 시간 90초 전이면 스스로 멈추고 `error` 를 알린다(10분 stale 전에 끝나 다음 작업과 겹치지 않게).
 - 진행 이벤트(`JobMessage`, CONTRACTS 10.4): `POST {EVENTS_HTTP_ENDPOINT}`, 헤더 `x-api-key`, 본문 `{"channel": "/seoul/jobs", "events": ["<JSON 문자열>"]}`. 같은 메시지를 `data/jobs/{jobId}.json` 에도 쓴다(폴링 폴백).
 
 ### 4. 재배포와 index 재구성
@@ -113,10 +118,10 @@ Lambda 두 개가 같은 코드(`lambda/fetch-month`, 의존성 없음: 런타�
 
 | 주체 | 허용 |
 |---|---|
-| 작업자 | `s3:GetObject`·`s3:PutObject` on `bucket/data/*`, `s3:ListBucket` on bucket (조건 `s3:prefix` = `data/`, `data/*`), `cloudfront:CreateInvalidation` on 이 배포, `ssm:GetParameter` on `/seoul-ar/seoul-api-key`, `kms:Decrypt` (조건 `kms:ViaService = ssm.us-east-1.amazonaws.com`) |
-| API | `s3:GetObject`·`s3:PutObject` on `bucket/data/jobs/*`, `ssm:GetParameter` on `/seoul-ar/presenter-passcode`, `kms:Decrypt` (ssm 경유), `lambda:InvokeFunction` on 작업자 |
+| 작업자 | `s3:GetObject`·`s3:PutObject` on `bucket/data/*`, `s3:ListBucket` on bucket (조건 `s3:prefix` = `data/`, `data/*`), `cloudfront:CreateInvalidation` on 이 배포, `ssm:GetParameter` on `/seoul-ar/seoul-api-key`, `kms:Decrypt` (조건 `kms:ViaService = ssm.us-east-1.amazonaws.com`), `bedrock:InvokeModel` on 그 모델과 `us.` 프로파일 |
+| API | `s3:GetObject`·`s3:PutObject` on `bucket/data/jobs/*`, `s3:GetObject` on `bucket/data/index.json`(narrate-month 확인), `ssm:GetParameter` on `/seoul-ar/presenter-passcode`, `kms:Decrypt` (ssm 경유), `lambda:InvokeFunction` on 작업자 |
 | RebuildIndex | `lambda:InvokeFunction` on 작업자 |
-| Function URL | `lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`(`InvokedViaFunctionUrl`), Principal `*`, AuthType NONE (보호는 발표자 암호) |
+| Function URL | AuthType AWS_IAM. `lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`(`InvokedViaFunctionUrl`), Principal `cloudfront.amazonaws.com`, SourceArn = 이 배포 (OAC). 공개 권한 없음 |
 
 왜 함수가 둘인가: 한 함수에 Function URL 과 `DISTRIBUTION_ID` 를 같이 두면 Distribution → FunctionUrl → Function → (env `DISTRIBUTION_ID`) → Distribution 순환이 생겨 CloudFormation 이 배포를 거부한다. 그래서 Function URL 쪽(API)은 작업자를 CloudFormation 참조 없이 리터럴 이름/ARN 으로만 가리키고, 배포 ID 는 작업자만 가진다. 덤으로 인터넷에 열린 함수는 서울 API 키와 CloudFront 권한이 없다.
 
@@ -131,9 +136,20 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 
 `lambda/fetch-month/shared.test.mjs` 가 두 파일이 바이트 단위로 같은지 검사하므로, 동기화를 잊으면 `npm test` 가 실패한다. Lambda 자산에서는 `*.test.mjs` 와 `fakes.mjs` 를 뺀다.
 
-### 7. 알려진 한계
+### 7. AI 한 줄 해설 (CONTRACTS 12)
 
-- 서울 API 는 `http://openapi.seoul.go.kr:8088` (HTTP) 로만 열려 있어 키가 평문으로 오간다(캡스톤 server.py 와 같음).
-- 접수연도(`RCPT_YR`)로 거르므로, 12월에 계약하고 다음 해 1월에 신고한 거래는 12월 수집에서 빠진다.
-- 거래가 많은 오래된 달은 12페이지(12,000건, 접수연도 전체 기준) 안에 다 못 받을 수 있다(작업자 로그 `페이지 상한에 닿음`).
-- `truncated` 는 집계 코드 그대로 "그 달 행이 1000건 이상"이다. 실시간 수집은 여러 페이지를 받으므로 1000건 이상이어도 잘린 것이 아닐 수 있다.
+달마다 `data/{month}/narration.json`(`{v, month, generatedAt, model, items}`, `Cache-Control: no-cache`)을 만든다. 키는 `"서울 전체"`와 25구, 값은 한국어 한 문장(80자 이내).
+
+- 언제: (a) 월 수집이 `done` 된 뒤 같은 작업자 호출 안에서 자동으로(수집 잠금은 이미 풀린 뒤라 잠금 없이 돈다. narration.json 만 쓰고 index 는 건드리지 않는다. 진행은 `/seoul/jobs` 에 `kind: "narration"`, jobId `{수집 jobId}-narration`, 기록 `data/jobs/{그 jobId}.json`). 실패해도 수집 결과는 그대로다. (b) 이미 있는 달은 `POST /api/narrate-month` `{"month"}` + `x-presenter-key` → 202 `{jobId, month}`. 검사와 잠금은 fetch-month 와 같고, index 에 없는 달이면 400 `no_data`.
+- 어떻게: Bedrock Converse 로 한 번에 26개를 JSON 으로 받고, 코드로 검증한다(80자, 줄바꿈 없음, 금지어 `추천|매수|매도|사세요|팔세요|오를|내릴|전망|유망|투자하`, 번지·지번 숫자, 키 유효성). 누락·실패 항목만 구별로 1회 다시 만들고, 그래도 안 되면 그 키를 뺀다. 한 작업 호출은 30회 이하(보통 1회, 최대 27회). 입력은 집계 숫자(구별 total, ㎡당 상위 법정동 3개, 서울 합계)뿐이다.
+- 모델: env `BEDROCK_MODEL_ID`, 기본 `anthropic.claude-haiku-5-5`. 바꾸려면 `npx cdk deploy -c bedrockModelId=<ID>`(예: `us.anthropic.claude-haiku-4-5-20251001-v1:0`). on-demand 호출이 안 되는 모델이면 작업자가 `us.` 인퍼런스 프로파일로 한 번 바꿔 부르고, 실제로 쓴 ID 를 `model` 에 적는다.
+- IAM: 작업자만 `bedrock:InvokeModel`, 대상은 `arn:aws:bedrock:*::foundation-model/<기반 모델>` 과 `arn:aws:bedrock:us-east-1:<계정>:inference-profile/us.<기반 모델>` 둘뿐. 공개 함수(API)에는 Bedrock 권한이 없다.
+- 계정에서 그 모델 접근이 막혀 있으면 작업은 `error`("Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요")로 끝난다. Bedrock 콘솔 Model access 에서 Anthropic Claude Haiku 를 켠다(처음이면 사용 목적 양식).
+
+### 8. 알려진 한계
+
+- 서울 API 는 `http://openapi.seoul.go.kr:8088` (HTTP) 로만 열려 있어 키가 평문으로 오간다(1절 보안 권장: 전용 키, 행사 뒤 폐기).
+- 접수연도(`RCPT_YR`)로 거르므로, 11·12월에 계약하고 다음 해에 신고한 거래는 빠진다. 다음 해까지 뒤지면 그 해 전체를 넘겨야 해서 하지 않고, `done` 메시지로 알린다.
+- 거래가 많은 오래된 달은 30페이지(30,000건, 접수연도 전체 기준) 안에 다 못 받을 수 있다. 그 구는 `truncated: true` 가 되고 `done` 메시지에 이름이 나온다.
+- `truncated` 의 뜻: 실시간 수집(이 Lambda)은 "페이지 상한에 닿아 끝까지 받지 못함", 저장소 스냅샷(tools/data, MCP 1,000건 상한)은 집계 코드 그대로 "그 달 행이 1000건 이상".
+- 서울 API 의 정렬 순서(계약일 순인지)는 확인하지 못했다. 멈춤 규칙은 어느 순서여도 그 달을 빠뜨리지 않게 잡았다(계약일 순이면 구마다 한 페이지를 더 받는다).

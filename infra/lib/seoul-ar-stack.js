@@ -16,6 +16,9 @@ const REGION = "us-east-1";
 const SSM_API_KEY_NAME = "/seoul-ar/seoul-api-key";
 const SSM_PASSCODE_NAME = "/seoul-ar/presenter-passcode";
 const FETCH_MONTH_DIR = path.join(__dirname, "..", "lambda", "fetch-month");
+// AI 해설 모델(CONTRACTS 12.2). 바꾸려면: npx cdk deploy -c bedrockModelId=<모델 또는 us. 인퍼런스 프로파일 ID>
+const DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-haiku-5-5";
+const GEO_PREFIX_RE = /^(us|eu|apac|global|us-gov|jp|au|ca)\./;
 
 class SeoulArStack extends cdk.Stack {
   constructor(scope, id, props) {
@@ -113,8 +116,8 @@ class SeoulArStack extends cdk.Stack {
     }
 
     // 5) 월 실시간 수집 (CONTRACTS 10). 같은 코드(lambda/fetch-month)로 함수 둘:
-    //    - API: Function URL(AuthType NONE, 암호 검사) ← CloudFront /api/*. 잠금을 잡고 작업자를 Event 로 호출한 뒤 202.
-    //    - 작업자: 서울 API 수집·집계, data/* 쓰기, /data/* 무효화, /seoul/jobs 발행.
+    //    - API: Function URL(AuthType AWS_IAM, CloudFront OAC 만 호출) ← CloudFront /api/*. 암호 검사, 잠금, 작업자 Event 호출 뒤 202.
+    //    - 작업자: 서울 API 수집·집계, data/* 쓰기, /data/* 무효화, /seoul/jobs 발행, AI 해설(Bedrock).
     //    한 함수로 합치면 Distribution → FunctionUrl → Function → (env DISTRIBUTION_ID) → Distribution
     //    순환이 생겨 배포가 안 된다. API 는 작업자를 CloudFormation 참조 없이 리터럴 이름/ARN 으로만 가리킨다.
     this.addFetchMonth({ bucket, distribution, httpEndpoint, apiKey, seedDeployment });
@@ -130,6 +133,10 @@ class SeoulArStack extends cdk.Stack {
 
   addFetchMonth({ bucket, distribution, httpEndpoint, apiKey, seedDeployment }) {
     const workerName = `${this.stackName}-FetchMonthWorker`;
+    const bedrockModelId = this.node.tryGetContext("bedrockModelId") ?? DEFAULT_BEDROCK_MODEL_ID;
+    // 기반 모델 ID 와 us. 인퍼런스 프로파일 ID. 작업자는 on-demand 가 안 되면 us. 프로파일로 바꿔 부른다.
+    const baseModelId = bedrockModelId.replace(GEO_PREFIX_RE, "");
+    const profileId = GEO_PREFIX_RE.test(bedrockModelId) ? bedrockModelId : `us.${bedrockModelId}`;
     const workerArn = this.formatArn({ service: "lambda", resource: "function", resourceName: workerName, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME });
     const paramArn = (name) => this.formatArn({ service: "ssm", resource: "parameter", resourceName: name.replace(/^\//, "") });
     // aws/ssm 관리형 키로 암호화한 SecureString 을 SSM 을 통해서만 복호화
@@ -151,6 +158,7 @@ class SeoulArStack extends cdk.Stack {
       memorySize: 512,
       timeout: cdk.Duration.seconds(600),
       retryAttempts: 0,
+      maxEventAge: cdk.Duration.minutes(5), // 5분 안에 시작 못 한 작업은 버린다(잠금 10분 stale 전에)
       logGroup: logGroup("FetchMonthWorkerLogs"),
       environment: {
         BUCKET: bucket.bucketName,
@@ -158,6 +166,7 @@ class SeoulArStack extends cdk.Stack {
         EVENTS_HTTP_ENDPOINT: httpEndpoint,
         EVENTS_API_KEY: apiKey,
         SSM_API_KEY_NAME,
+        BEDROCK_MODEL_ID: bedrockModelId,
       },
     });
     worker.addToRolePolicy(new iam.PolicyStatement({ actions: ["s3:GetObject", "s3:PutObject"], resources: [bucket.arnForObjects("data/*")] }));
@@ -170,9 +179,17 @@ class SeoulArStack extends cdk.Stack {
     worker.addToRolePolicy(new iam.PolicyStatement({ actions: ["cloudfront:CreateInvalidation"], resources: [distribution.distributionArn] }));
     worker.addToRolePolicy(new iam.PolicyStatement({ actions: ["ssm:GetParameter"], resources: [paramArn(SSM_API_KEY_NAME)] }));
     worker.addToRolePolicy(kmsViaSsm);
+    // Converse 는 bedrock:InvokeModel 권한을 쓴다. 그 모델(교차 리전 프로파일이 보내는 모든 리전)과 us. 프로파일로만.
+    worker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["bedrock:InvokeModel"],
+      resources: [
+        `arn:${this.partition}:bedrock:*::foundation-model/${baseModelId}`,
+        this.formatArn({ service: "bedrock", resource: "inference-profile", resourceName: profileId }),
+      ],
+    }));
 
     const api = new lambda.Function(this, "FetchMonthApi", {
-      description: "서울이 선다: POST /api/fetch-month (발표자 암호, 잠금, 작업자 비동기 호출)",
+      description: "서울이 선다: POST /api/fetch-month, /api/narrate-month (발표자 암호, 잠금, 작업자 비동기 호출)",
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       handler: "index.handler",
@@ -187,12 +204,16 @@ class SeoulArStack extends cdk.Stack {
       },
     });
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["s3:GetObject", "s3:PutObject"], resources: [bucket.arnForObjects("data/jobs/*")] }));
+    // POST /api/narrate-month 가 그 달이 index 에 있는지 바로 확인한다(읽기만)
+    api.addToRolePolicy(new iam.PolicyStatement({ actions: ["s3:GetObject"], resources: [bucket.arnForObjects("data/index.json")] }));
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["ssm:GetParameter"], resources: [paramArn(SSM_PASSCODE_NAME)] }));
     api.addToRolePolicy(kmsViaSsm);
     api.addToRolePolicy(new iam.PolicyStatement({ actions: ["lambda:InvokeFunction"], resources: [workerArn] }));
 
-    const url = api.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });
-    distribution.addBehavior("/api/*", new origins.FunctionUrlOrigin(url), {
+    // AWS_IAM + CloudFront OAC: 이 배포만 Function URL 을 부를 수 있다(9a fix S1). 발표자 암호 검사는 그대로.
+    // OAC 는 POST 본문을 서명해야 하므로 브라우저가 x-amz-content-sha256 (본문 SHA-256 hex) 헤더를 보내야 한다.
+    const url = api.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.AWS_IAM });
+    distribution.addBehavior("/api/*", origins.FunctionUrlOrigin.withOriginAccessControl(url), {
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,

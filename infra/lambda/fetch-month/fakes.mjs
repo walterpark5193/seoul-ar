@@ -137,11 +137,13 @@ export function fakeDeps(over = {}) {
       invalidations.push(args);
       if (over.invalidate) return over.invalidate(args);
     },
+    converse: over.converse ?? fakeConverse(() => bulkReply()),
     async publish(msg) {
       published.push(msg);
       if (over.publish) return over.publish(msg);
     },
     now: () => clock,
+    sleep: async () => {},
     randomId: over.randomId ?? (() => "job-0001-aaaa"),
     log: (level, msg, fields) => logs.push({ level, msg, fields }),
     concurrency: over.concurrency ?? 1,
@@ -157,15 +159,40 @@ export function fakeDeps(over = {}) {
 }
 
 /** Function URL 이벤트(페이로드 2.0). */
-export function httpEvent({ method = "POST", path = "/api/fetch-month", headers = {}, body, isBase64Encoded = false } = {}) {
+export function httpEvent({ method = "POST", path = "/api/fetch-month", headers = {}, body, isBase64Encoded = false, sourceIp = "130.176.1.10" } = {}) {
   return {
     version: "2.0",
     rawPath: path,
     headers: { "content-type": "application/json", ...headers },
-    requestContext: { http: { method, path } },
+    requestContext: { http: { method, path, sourceIp } },
     body,
     isBase64Encoded,
   };
 }
 
 export { GU_ORDER };
+
+const NARRATION_KEYS_FAKE = ["서울 전체", ...GU_ORDER];
+
+/** 26개 키가 모두 통과하는 일괄 응답 JSON. over[key] 가 undefined 면 그 키를 뺀다. */
+export function bulkReply(over = {}) {
+  const items = Object.fromEntries(NARRATION_KEYS_FAKE.map((k) => [k, `${k} 10월 요약입니다.`]));
+  for (const [k, v] of Object.entries(over)) {
+    if (v === undefined) delete items[k];
+    else items[k] = v;
+  }
+  return "```json\n" + JSON.stringify(items) + "\n```";
+}
+
+/** 가짜 Bedrock Converse. responder({modelId, system, prompt, maxTokens, single}) → 응답 문자열. single 은 구별 재시도 대상 키(없으면 null). */
+export function fakeConverse(responder) {
+  const calls = [];
+  const fn = async (args) => {
+    const m = /^대상 키: (.+)$/m.exec(args.prompt);
+    const call = { ...args, single: m ? m[1].trim() : null };
+    calls.push(call);
+    return responder(call, calls.length);
+  };
+  fn.calls = calls;
+  return fn;
+}

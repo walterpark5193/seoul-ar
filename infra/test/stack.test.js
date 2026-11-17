@@ -92,7 +92,8 @@ test("bucket deployment is configured and emits config.json source", () => {
 // Distribution → FunctionUrl → Function → (env DISTRIBUTION_ID) → Distribution 순환이 생긴다.
 // 그래서 같은 코드(lambda/fetch-month)로 함수 둘을 만든다: API(Function URL) 와 작업자(무효화·발행).
 const WORKER_NAME = "SeoulArStack-FetchMonthWorker";
-const CONTRACT_ENV = ["BUCKET", "DISTRIBUTION_ID", "EVENTS_HTTP_ENDPOINT", "EVENTS_API_KEY", "SSM_API_KEY_NAME", "SSM_PASSCODE_NAME", "SELF_FUNCTION_NAME"];
+// CONTRACTS 10.6 의 7개 + 12.2 의 BEDROCK_MODEL_ID
+const CONTRACT_ENV = ["BUCKET", "DISTRIBUTION_ID", "EVENTS_HTTP_ENDPOINT", "EVENTS_API_KEY", "SSM_API_KEY_NAME", "SSM_PASSCODE_NAME", "SELF_FUNCTION_NAME", "BEDROCK_MODEL_ID"];
 
 function fetchMonthFns() {
   const fns = Object.entries(template.findResources("AWS::Lambda::Function"));
@@ -121,7 +122,8 @@ test("fetch-month worker: Node.js 22, 512 MB, 600 s, worker env", () => {
   assert.equal(w.Properties.MemorySize, 512);
   assert.equal(w.Properties.Timeout, 600);
   const env = w.Properties.Environment.Variables;
-  assert.deepEqual(Object.keys(env).sort(), ["BUCKET", "DISTRIBUTION_ID", "EVENTS_API_KEY", "EVENTS_HTTP_ENDPOINT", "SSM_API_KEY_NAME"]);
+  assert.deepEqual(Object.keys(env).sort(), ["BEDROCK_MODEL_ID", "BUCKET", "DISTRIBUTION_ID", "EVENTS_API_KEY", "EVENTS_HTTP_ENDPOINT", "SSM_API_KEY_NAME"]);
+  assert.equal(env.BEDROCK_MODEL_ID, "anthropic.claude-haiku-5-5");
   assert.deepEqual(env.BUCKET, { Ref: logicalId("AWS::S3::Bucket") });
   assert.deepEqual(env.DISTRIBUTION_ID, { Ref: logicalId("AWS::CloudFront::Distribution") });
   assert.equal(env.SSM_API_KEY_NAME, "/seoul-ar/seoul-api-key");
@@ -163,12 +165,43 @@ test("fetch-month: 로그 그룹 보존 14일", () => {
   }
 });
 
-test("Function URL: API 함수, AuthType NONE, 공개 호출 권한", () => {
+test("Function URL: API 함수, AuthType AWS_IAM, 이 배포의 CloudFront(OAC)만 호출 가능 (9a fix S1)", () => {
   const [apiId] = fetchMonthFns().api;
   template.resourceCountIs("AWS::Lambda::Url", 1);
-  template.hasResourceProperties("AWS::Lambda::Url", { AuthType: "NONE", TargetFunctionArn: { "Fn::GetAtt": [apiId, "Arn"] } });
-  template.hasResourceProperties("AWS::Lambda::Permission", {
-    Action: "lambda:InvokeFunctionUrl", Principal: "*", FunctionUrlAuthType: "NONE", FunctionName: { "Fn::GetAtt": [apiId, "Arn"] },
+  template.hasResourceProperties("AWS::Lambda::Url", { AuthType: "AWS_IAM", TargetFunctionArn: { "Fn::GetAtt": [apiId, "Arn"] } });
+  const perms = Object.values(template.findResources("AWS::Lambda::Permission"));
+  assert.ok(perms.length >= 1);
+  assert.ok(perms.every((p) => p.Properties.Principal !== "*"), "공개 권한 없음");
+  const distId = logicalId("AWS::CloudFront::Distribution");
+  const urlPerm = perms.find((p) => p.Properties.Action === "lambda:InvokeFunctionUrl");
+  assert.equal(urlPerm.Properties.Principal, "cloudfront.amazonaws.com");
+  assert.ok(JSON.stringify(urlPerm.Properties.SourceArn).includes(`{"Ref":"${distId}"}`), "SourceArn = 이 배포");
+  assert.deepEqual(urlPerm.Properties.FunctionName, { "Fn::GetAtt": [logicalId("AWS::Lambda::Url"), "FunctionArn"] });
+  const fnPerm = perms.find((p) => p.Properties.Action === "lambda:InvokeFunction");
+  assert.ok(fnPerm, "OAC 는 lambda:InvokeFunction 도 필요");
+  assert.equal(fnPerm.Properties.InvokedViaFunctionUrl, true);
+  for (const p of perms) {
+    assert.equal(p.Properties.Principal, "cloudfront.amazonaws.com");
+    assert.ok(JSON.stringify(p.Properties.SourceArn).includes(`{"Ref":"${distId}"}`));
+  }
+});
+
+test("CloudFront /api/* 오리진은 Lambda 용 OAC 로 서명한다 (sigv4, always)", () => {
+  const oacs = Object.entries(template.findResources("AWS::CloudFront::OriginAccessControl"));
+  const lambdaOac = oacs.find(([, r]) => r.Properties.OriginAccessControlConfig.OriginAccessControlOriginType === "lambda");
+  assert.ok(lambdaOac, "lambda OAC");
+  assert.equal(lambdaOac[1].Properties.OriginAccessControlConfig.SigningBehavior, "always");
+  assert.equal(lambdaOac[1].Properties.OriginAccessControlConfig.SigningProtocol, "sigv4");
+  const dist = Object.values(template.findResources("AWS::CloudFront::Distribution"))[0].Properties.DistributionConfig;
+  const cb = dist.CacheBehaviors.find((x) => x.PathPattern === "/api/*");
+  const origin = dist.Origins.find((o) => o.Id === cb.TargetOriginId);
+  assert.deepEqual(origin.OriginAccessControlId, { "Fn::GetAtt": [lambdaOac[0], "Id"] });
+});
+
+test("fetch-month worker: 비동기 이벤트는 5분 안에 시작 못 하면 버린다 (maxEventAge)", () => {
+  template.hasResourceProperties("AWS::Lambda::EventInvokeConfig", {
+    FunctionName: { Ref: fetchMonthFns().worker[0] },
+    MaximumEventAgeInSeconds: 300,
   });
 });
 
@@ -357,4 +390,36 @@ test("dist 에 data/ 가 없으면 시드 배포 없이 합성되고 재구성�
     process.env.SEOUL_AR_DIST = saved;
     fs.rmSync(bare, { recursive: true, force: true });
   }
+});
+
+// ---- Task 11: AI 해설 (CONTRACTS 12.2) ----
+test("IAM 작업자: bedrock:InvokeModel 은 그 모델과 us. 인퍼런스 프로파일로만", () => {
+  const sts = statementsOf(fetchMonthFns().worker);
+  const br = findStatement(sts, "bedrock:InvokeModel");
+  assert.deepEqual(actionsOf(br), ["bedrock:InvokeModel"]);
+  const res = JSON.stringify(br.Resource);
+  assert.ok(res.includes(":bedrock:*::foundation-model/anthropic.claude-haiku-5-5"), res);
+  assert.ok(res.includes(":bedrock:us-east-1:557395122774:inference-profile/us.anthropic.claude-haiku-5-5"), res);
+  assert.equal([].concat(br.Resource).length, 2);
+  assert.equal(findStatement(statementsOf(fetchMonthFns().api), "bedrock:InvokeModel"), undefined, "공개 함수에는 Bedrock 권한 없음");
+});
+
+test("IAM API: narrate-month 의 달 확인용 data/index.json 읽기만 추가", () => {
+  const sts = statementsOf(fetchMonthFns().api);
+  const reads = sts.filter((st) => actionsOf(st).includes("s3:GetObject") && !actionsOf(st).includes("s3:PutObject"));
+  assert.equal(reads.length, 1);
+  assert.deepEqual(actionsOf(reads[0]), ["s3:GetObject"]);
+  assert.deepEqual(reads[0].Resource, { "Fn::Join": ["", [{ "Fn::GetAtt": [logicalId("AWS::S3::Bucket"), "Arn"] }, "/data/index.json"]] });
+});
+
+test("모델 ID 는 cdk 컨텍스트 bedrockModelId 로 바꿀 수 있고, 프로파일 ID 를 주면 그 프로파일과 기반 모델로 권한을 건다", () => {
+  const app = new cdk.App({ context: { bedrockModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0" } });
+  const { SeoulArStack } = require("../lib/seoul-ar-stack");
+  const t = Template.fromStack(new SeoulArStack(app, "Ctx", { env: { account: "557395122774", region: "us-east-1" } })).toJSON();
+  const worker = Object.values(t.Resources).find((r) => r.Type === "AWS::Lambda::Function" && r.Properties.FunctionName === "Ctx-FetchMonthWorker");
+  assert.equal(worker.Properties.Environment.Variables.BEDROCK_MODEL_ID, "us.anthropic.claude-haiku-4-5-20251001-v1:0");
+  const res = JSON.stringify(Object.values(t.Resources).filter((r) => r.Type === "AWS::IAM::Policy").flatMap((p) => p.Properties.PolicyDocument.Statement).find((st) => [].concat(st.Action).includes("bedrock:InvokeModel")).Resource);
+  assert.ok(res.includes("foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"), res);
+  assert.ok(res.includes("inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"), res);
+  assert.ok(!res.includes("us.us."), res);
 });
