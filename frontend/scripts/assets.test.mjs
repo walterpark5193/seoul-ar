@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,9 +26,9 @@ describe("checkModel", () => {
   it("PK 파일은 ok", async () => {
     const dir = await mkdtemp(join(tmpdir(), "assets-"));
     const p = join(dir, "m.task");
-    await writeFile(p, Buffer.from([0x50, 0x4b, 3, 4, 0, 0]));
+    await writeFile(p, Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4, 0, 0]), Buffer.alloc(20)]));
     const r = await checkModel(p);
-    expect(r).toEqual({ ok: true, reason: null, bytes: 6 });
+    expect(r).toEqual({ ok: true, reason: null, bytes: 26 });
   });
   it("텍스트 파일은 not-zip", async () => {
     const dir = await mkdtemp(join(tmpdir(), "assets-"));
@@ -37,6 +37,52 @@ describe("checkModel", () => {
     const r = await checkModel(p);
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("not-zip");
+  });
+});
+
+// 최소 zip: 빈 아카이브 = EOCD 22바이트(PK\x05\x06 + 0 18바이트)
+const EOCD = Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]);
+
+describe("checkModel zip 판별(EOCD)", () => {
+  async function tmpFile(content) {
+    const dir = await mkdtemp(join(tmpdir(), "assets-"));
+    const p = join(dir, "m.task");
+    await writeFile(p, content);
+    return p;
+  }
+  it("앞에 데이터가 붙은 zip(00 00 시작)은 ok", async () => {
+    const buf = Buffer.concat([Buffer.alloc(100), Buffer.from("payload"), EOCD]);
+    const r = await checkModel(await tmpFile(buf));
+    expect(r).toEqual({ ok: true, reason: null, bytes: buf.length });
+  });
+  it("EOCD 뒤에 최대 길이 주석이 있어도 ok", async () => {
+    const buf = Buffer.concat([Buffer.alloc(200), EOCD, Buffer.alloc(65535)]);
+    expect((await checkModel(await tmpFile(buf))).ok).toBe(true);
+  });
+  it("PK로 시작하는 일반 zip은 ok", async () => {
+    const buf = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(30), EOCD]);
+    expect((await checkModel(await tmpFile(buf))).ok).toBe(true);
+  });
+  it("무작위 바이트는 not-zip", async () => {
+    const buf = Buffer.alloc(5000);
+    for (let i = 0; i < buf.length; i++) buf[i] = (i * 131 + 7) % 251;
+    expect((await checkModel(await tmpFile(buf))).reason).toBe("not-zip");
+  });
+  it("HTML 텍스트는 not-zip", async () => {
+    expect((await checkModel(await tmpFile("<!doctype html><html>404</html>"))).reason).toBe("not-zip");
+  });
+  it("22바이트보다 짧으면 not-zip", async () => {
+    const r = await checkModel(await tmpFile(Buffer.alloc(21)));
+    expect(r).toEqual({ ok: false, reason: "not-zip", bytes: 21 });
+  });
+  it("실제 모델 파일이 있으면 ok", async (ctx) => {
+    const real = fileURLToPath(new URL("../public/models/gesture_recognizer.task", import.meta.url));
+    try {
+      if (!(await stat(real)).isFile()) return ctx.skip();
+    } catch {
+      return ctx.skip();
+    }
+    expect((await checkModel(real)).ok).toBe(true);
   });
 });
 
