@@ -52,6 +52,11 @@ function fakeClock(start = 1_000_000) {
       }
       t = end;
     },
+    /** 숨은 탭: 시간은 흐르는데 타이머는 돌지 않는다. 밀린 타이머는 다음 advance에서 한 번씩만 돈다(몰아서 돌지 않음). */
+    skip(ms: number) {
+      t += ms;
+      for (const j of jobs) if (j.next < t) j.next = t;
+    },
     get jobs() { return jobs.size; },
   };
 }
@@ -701,11 +706,102 @@ describe("stage controller", () => {
     hidden = true;
     s.clock.advance(10_000);
     expect(s.c.state.input).toBe("hands");
-    hidden = false; // 돌아온 뒤에도 프레임이 안 오면 그때부터 1.5초
+    hidden = false; // 돌아온 뒤에도 프레임이 안 오면 그때부터 1.5초(돌아온 것을 본 첫 틱부터 잰다, 많아야 한 틱 늦음)
+    s.clock.advance(1200);
+    expect(s.c.state.input).toBe("hands");
+    s.clock.advance(600 + VOTE_TICK_MS);
+    expect(s.c.state.input).toBe("mouse");
+  });
+
+  it("back from a hidden tab whose timers slept a minute: no stall fallback on the first ticks, then 1.5s without frames still falls back", async () => {
+    let hidden = false;
+    const s = setup({ extra: { hidden: () => hidden } });
+    await s.c.start("hands");
+    s.live(300, []);
+    hidden = true;
+    s.clock.advance(VOTE_TICK_MS); // 숨은 뒤 틱이 한 번은 돈다
+    s.clock.skip(60_000);          // 그 뒤로는 타이머가 1분 동안 돌지 않는다(숨은 탭 제한)
+    hidden = false;
+    s.clock.advance(VOTE_TICK_MS); // 보이게 된 첫 틱(밀린 틱)과 다음 틱
+    expect(s.c.state.input).toBe("hands");
+    s.clock.advance(1000);         // 돌아온 지 1.25초: 아직
+    expect(s.c.state.input).toBe("hands");
+    expect(s.toast).not.toHaveBeenCalled();
+    s.clock.advance(600);          // 돌아온 지 1.5초가 넘도록 프레임이 없다
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    expect(s.toast.mock.calls[0]![0]).toContain("카메라 영상이 끊겨");
+  });
+
+  it("visibilitychange to visible resets the stall baseline even when no tick ran while hidden", async () => {
+    let hidden = false;
+    const subs = new Set<() => void>();
+    const s = setup({ extra: { hidden: () => hidden, onVisibilityChange: (cb) => { subs.add(cb); return () => { subs.delete(cb); }; } } });
+    const notify = () => { for (const cb of [...subs]) cb(); };
+    expect(subs.size).toBe(1);
+    await s.c.start("hands");
+    s.live(300, []);
+    hidden = true; notify();
+    s.clock.skip(60_000);          // 숨은 동안 틱이 한 번도 돌지 않았다
+    hidden = false; notify();
+    s.clock.advance(VOTE_TICK_MS);
+    expect(s.c.state.input).toBe("hands");
     s.clock.advance(1200);
     expect(s.c.state.input).toBe("hands");
     s.clock.advance(600);
     expect(s.c.state.input).toBe("mouse");
+    s.c.dispose();
+    expect(subs.size).toBe(0);
+  });
+
+  it("hand start: hidden time does not count, the timeout does not fire on the first tick after coming back, 20s visible still times out (F3)", async () => {
+    let hidden = false;
+    let resolve!: (r: StartResult) => void;
+    const s = setup({ start: () => new Promise<StartResult>((r) => { resolve = r; }), extra: { hidden: () => hidden } });
+    const p = s.c.start("hands");
+    await flush();
+    s.clock.advance(5000);
+    hidden = true;
+    s.clock.advance(VOTE_TICK_MS);
+    s.clock.skip(60_000);          // 준비가 숨은 탭에서 이어지는 동안 타이머는 1분 동안 돌지 않는다
+    hidden = false;
+    s.clock.advance(VOTE_TICK_MS); // 보이게 된 첫 틱
+    await flush();
+    expect(s.c.started).toBe(false);
+    expect(s.toast).not.toHaveBeenCalled();
+    s.clock.advance(HAND_START_TIMEOUT_MS - 2 * VOTE_TICK_MS); // 돌아온 지 20초 - 250ms
+    await flush();
+    expect(s.c.started).toBe(false);
+    s.clock.advance(2 * VOTE_TICK_MS);
+    await p;
+    expect(s.c.started).toBe(true);
+    expect(s.c.state.input).toBe("mouse");
+    expect(s.toast).toHaveBeenCalledTimes(1);
+    expect(s.toast.mock.calls[0]![0]).toContain("G로 다시 시도");
+    expect(s.clock.jobs).toBe(2); // 시작 대기 감시는 정리되고 tick·heartbeat만
+    resolve({ ok: true, source: s.src.source as unknown as HandSource });
+    await flush();
+    expect(s.src.source.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("hand start: a source that arrives after coming back from a hidden tab starts hand mode (F3)", async () => {
+    let hidden = false;
+    let resolve!: (r: StartResult) => void;
+    const s = setup({ start: () => new Promise<StartResult>((r) => { resolve = r; }), extra: { hidden: () => hidden } });
+    const p = s.c.start("hands");
+    await flush();
+    s.clock.advance(15_000);
+    hidden = true;
+    s.clock.advance(VOTE_TICK_MS);
+    s.clock.skip(60_000);
+    hidden = false;
+    s.clock.advance(VOTE_TICK_MS);
+    resolve({ ok: true, source: s.src.source as unknown as HandSource });
+    await p;
+    expect(s.c.state.input).toBe("hands");
+    expect(s.toast).not.toHaveBeenCalled();
+    s.live(2000, []);
+    expect(s.c.state.input).toBe("hands");
   });
 
   it("no stall fallback while frames keep coming, or after switching to mouse (F4)", async () => {

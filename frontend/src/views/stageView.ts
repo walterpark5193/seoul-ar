@@ -146,8 +146,13 @@ export interface StageControllerDeps {
   startHands(): Promise<StartResult>;
   hash(): string;
   modelReady?(): Promise<boolean>;
-  /** 페이지가 보이지 않는가(document.hidden). 숨은 탭에서는 프레임이 멈추므로 정지 감지를 쉰다. */
+  /**
+   * 페이지가 보이지 않는가(document.hidden). 숨은 탭에서는 프레임이 멈추고 타이머도 늦춰지므로(길면 1분에 한 번)
+   * 정지 감지·손 준비 시간 제한을 쉬고, 다시 보이게 된 때부터 새로 잰다.
+   */
   hidden?(): boolean;
+  /** 페이지 보임이 바뀔 때 cb를 부른다(visibilitychange). 숨은 동안 틱이 한 번도 돌지 않았어도 돌아온 순간 기준을 맞춘다. */
+  onVisibilityChange?(cb: () => void): () => void;
   /** 본체 state를 발행할 때마다(호스트 화면과 store를 맞추는 용도) */
   onState?(msg: StateMessage): void;
   clock?: StageClock;
@@ -181,18 +186,6 @@ const systemClock: StageClock = {
   },
 };
 
-/** clock.every로 만든 한 번짜리 타이머. 돌려준 함수로 취소한다. */
-function after(clock: StageClock, ms: number, fn: () => void): () => void {
-  let done = false;
-  const stop = clock.every(ms, () => {
-    if (done) return;
-    done = true;
-    stop();
-    fn();
-  });
-  return () => { done = true; stop(); };
-}
-
 /** 손 인식 준비를 기다린 결과: 준비 결과, 시간 초과, 또는 "마우스로 계속"·화면 떠남으로 그만 기다림. */
 type HandWait = { kind: "result"; r: StartResult } | { kind: "timeout" } | { kind: "skip" };
 
@@ -220,6 +213,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   let acquiring = false;
   let skipHandWait: (() => void) | null = null; // 손 준비 대기 중이면 그만 기다리게 하는 함수
   let frameAt = 0;                               // 마지막 인식 프레임을 받은 시각(clock). 정지 감지용
+  let handWaitFrom = 0;                          // 손 준비를 기다리기 시작한 시각(clock). 시작 시간 제한용
+  let wasHidden = false;                         // 마지막으로 본 페이지 숨김 여부
   let liveHands = 0;
   let gesture = { name: "None", score: 0 };
   let handPoint: Point | null = null;
@@ -454,8 +449,22 @@ export function createStageController(deps: StageControllerDeps): StageControlle
     dispatch({ type: "setInput", input: "hands", now: clock.now() });
   }
   /**
-   * 손 인식 준비를 기다린다. HAND_START_TIMEOUT_MS가 지나거나 skipHandWait(마우스로 계속·화면 떠남)가 불리면
-   * 그것을 먼저 돌려주고, 그 뒤에 도착한 소스는 받는 즉시 끈다(카메라·GPU가 남지 않게).
+   * 숨은 탭에서는 프레임이 멈추고 타이머도 늦춰진다(길면 1분에 한 번). 숨어 있는 동안과 다시 보이게 된 첫 순간에
+   * 시간 기준(마지막 프레임 시각, 손 준비 대기 시작 시각)을 지금으로 맞춘다: 묵은 기준 때문에 돌아온 첫 틱이
+   * 정지 폴백·시작 시간 초과로 잘못 빠지지 않게. 틱·손 준비 감시·visibilitychange에서 부른다.
+   */
+  function syncVisibility(): void {
+    const hidden = deps.hidden?.() ?? false;
+    if (hidden || wasHidden) {
+      const now = clock.now();
+      frameAt = now;
+      handWaitFrom = now;
+    }
+    wasHidden = hidden;
+  }
+  /**
+   * 손 인식 준비를 기다린다. 보이는 시간으로 HAND_START_TIMEOUT_MS가 지나거나 skipHandWait(마우스로 계속·화면 떠남)가
+   * 불리면 그것을 먼저 돌려주고, 그 뒤에 도착한 소스는 받는 즉시 끈다(카메라·GPU가 남지 않게).
    */
   function waitHands(): Promise<HandWait> {
     return new Promise((resolve) => {
@@ -471,7 +480,12 @@ export function createStageController(deps: StageControllerDeps): StageControlle
         skipHandWait = null;
         resolve(w);
       };
-      cancelTimer = after(clock, HAND_START_TIMEOUT_MS, () => settle({ kind: "timeout" }));
+      // 한 번짜리 20초 타이머가 아니라 틱 간격으로 잰다: 숨은 탭에서 밀린 타이머가 돌아오자마자 터지지 않게.
+      handWaitFrom = clock.now();
+      cancelTimer = clock.every(VOTE_TICK_MS, () => {
+        syncVisibility();
+        if (clock.now() - handWaitFrom >= HAND_START_TIMEOUT_MS) settle({ kind: "timeout" });
+      });
       skipHandWait = () => settle({ kind: "skip" });
       let p: Promise<StartResult>;
       try { p = deps.startHands(); } catch (err) { p = Promise.reject(err); }
@@ -551,8 +565,8 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   }
 
   function tick(): void {
+    syncVisibility(); // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
     const now = clock.now();
-    if (deps.hidden?.()) frameAt = now; // 숨은 탭: 프레임이 멈추는 게 정상이다. 돌아온 때부터 다시 잰다
     if (source && source.errors > HAND_ERROR_LIMIT) fallbackToMouse(HAND_ERRORS_TOAST);
     else if (source && state.input === "hands" && now - frameAt > HAND_STALL_MS) fallbackToMouse(HAND_STALL_TOAST);
     if (state.vote) dispatch({ type: "voteTick", now, cameraCount: counter.result() });
@@ -592,6 +606,7 @@ export function createStageController(deps: StageControllerDeps): StageControlle
   stops.push(narrator.onCaption((t) => setPart("caption", renderCaption(t))));
   stops.push(narrator.onBlocked(() => { if (phase !== "disposed") deps.toast(AUDIO_BLOCKED_TOAST); }));
   stops.push(deps.realtime.onStatus(() => renderTop()), deps.stageChannel.onStatus(() => renderTop()));
+  if (deps.onVisibilityChange) stops.push(deps.onVisibilityChange(syncVisibility));
   setPart("caption", renderCaption(null));
   renderAll();
   deps.modelReady?.().then(
@@ -860,6 +875,10 @@ function build(root: HTMLElement, ctx: ViewContext, manifest: NarrationManifest 
       hash: () => location.hash,
       modelReady: modelOnServer,
       hidden: () => document.hidden,
+      onVisibilityChange: (cb) => {
+        document.addEventListener("visibilitychange", cb);
+        return () => document.removeEventListener("visibilitychange", cb);
+      },
       onState: (m) => ctx.store.dispatch({ type: "local", month: m.month, gu: m.gu, metric: m.metric }),
     });
     undo.push(() => controller.dispose());
