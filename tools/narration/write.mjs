@@ -1,6 +1,7 @@
 // 구 해설 문장 쓰기: Bedrock Converse로 사실표에서 {caption, speech}를 만들고 검증한다.
 // 실패하면 재시도하고, 그래도 안 되면 템플릿 문장으로 대체한다.
 import { pathToFileURL } from "node:url";
+import { TOP_DONG_MIN_N } from "./facts.mjs";
 
 export const MODEL_ID = "global.anthropic.claude-sonnet-5-5";
 export const MAX_CAPTION = 90;
@@ -15,6 +16,8 @@ const BANNED = [
 const gu_id = (f) => `gu-${f.month}-${f.gu}`;
 const comma = (v) => Math.round(v).toLocaleString("en-US");
 const eok = (v) => (v / 10000).toFixed(1);
+// 최고 동은 "거래 N건 이상인 동 가운데"라는 단서와 함께일 때만 말할 수 있다(facts.topDongBasis 참고).
+const dongSpeakable = (f) => Boolean(f.topDong) && f.topDongBasis === "min3";
 const ym = (month) => ({ y: String(month).slice(0, 4), m: String(Number(String(month).slice(4, 6))) });
 
 export function buildPrompt(facts) {
@@ -29,8 +32,8 @@ export function buildPrompt(facts) {
     if (facts.medPerM2 != null) lines.push(`㎡당 중위 가격: ${comma(facts.medPerM2)}만 원`);
     if (facts.rankPrice != null) lines.push(`㎡당 가격 순위: ${facts.totalGus}개 구 중 ${facts.rankPrice}위`);
     if (facts.maxAmt != null) lines.push(`최고 거래가: ${eok(facts.maxAmt)}억 원`);
-    if (facts.topDong) {
-      lines.push(`㎡당 가격이 가장 높은 동: ${facts.topDong}` +
+    if (dongSpeakable(facts)) {
+      lines.push(`거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데 ㎡당 중위 가격이 가장 높은 동: ${facts.topDong}` +
         (facts.topDongMedPerM2 != null ? ` (㎡당 중위 ${comma(facts.topDongMedPerM2)}만 원)` : ""));
     }
   } else {
@@ -48,6 +51,9 @@ export function buildPrompt(facts) {
     `- caption은 자막 한 개만 씁니다. 자막용이며 공백 포함 ${MAX_CAPTION}자 이내입니다. 숫자는 아라비아 숫자로 쓰고 금액은 "2,890만 원", "52.6억 원"처럼 씁니다.`,
     "- 사실표에 있는 숫자만 사용합니다. 계산해서 새 숫자를 만들거나 다른 달·다른 구와 비교하는 숫자를 쓰지 않습니다.",
     "- 아파트 이름(단지명), 건물명, 지번, 본번, 부번은 쓰지 않습니다.",
+    dongSpeakable(facts)
+      ? `- 동을 말할 때는 "거래 ${TOP_DONG_MIN_N}건 이상인 동 가운데"라는 단서를 반드시 붙입니다. 거래가 적은 동 중에 더 비싼 곳이 있을 수 있으므로 이 단서 없이 어떤 동이 "가장 높다"고 쓰지 않습니다.`
+      : "- 동 이름은 쓰지 않습니다. 이번 달에는 대표로 말할 만큼 거래가 많은 동이 없습니다.",
     '- 투자 권유와 과장("폭등", "대박", "꼭 사야" 등)은 쓰지 않습니다.',
     '- 거래가 없으면 "이번 달 거래가 없었습니다"는 취지로만 씁니다.',
     "",
@@ -98,7 +104,10 @@ export function allowedNumbers(facts) {
   addInt(facts.rankPrice);
   addInt(facts.totalGus);
   addInt(facts.medPerM2);
-  addInt(facts.topDongMedPerM2);
+  if (dongSpeakable(facts)) {
+    addInt(facts.topDongMedPerM2);
+    set.add(String(TOP_DONG_MIN_N));
+  }
   if (facts.maxAmt != null && Number.isFinite(facts.maxAmt)) {
     set.add(eok(facts.maxAmt));
     set.add(String(facts.maxAmt));
@@ -124,6 +133,9 @@ export function validateScript(facts, script) {
   if ([...speech].length > MAX_SPEECH) errors.push(`speech가 ${MAX_SPEECH}자를 넘습니다`);
   for (const w of BANNED) {
     if (caption.includes(w) || speech.includes(w)) errors.push(`금지어: ${w}`);
+  }
+  if (facts.topDong && !dongSpeakable(facts) && (caption.includes(facts.topDong) || speech.includes(facts.topDong))) {
+    errors.push(`거래가 적어 대표로 말할 수 없는 동 이름: ${facts.topDong}`);
   }
   const allowed = allowedNumbers(facts);
   let scan = caption;

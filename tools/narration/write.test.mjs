@@ -5,10 +5,11 @@ import {
 
 const facts = {
   gu: "강남구", month: "202611", n: 25, cancelled: 2, medPerM2: 2890, rankPrice: 1,
-  maxAmt: 526000, topDong: "압구정동", topDongMedPerM2: 3500, totalGus: 25,
+  maxAmt: 526000, topDong: "압구정동", topDongMedPerM2: 3500, topDongBasis: "min3", totalGus: 25,
 };
 const good = { caption: "강남구는 2026년 11월 거래가 25건이었습니다. ㎡당 중위 2,890만 원으로 25개 구 중 1위입니다.", speech: "강남구는 이천이십육 년 십일 월 거래가 스물다섯 건이었습니다. 제곱미터당 이천팔백구십만 원입니다." };
-const zero = { ...facts, n: 0, cancelled: 0, medPerM2: null, rankPrice: null, maxAmt: null, topDong: null, topDongMedPerM2: null };
+const zero = { ...facts, n: 0, cancelled: 0, medPerM2: null, rankPrice: null, maxAmt: null, topDong: null, topDongMedPerM2: null, topDongBasis: null };
+const thin = { ...facts, topDong: "홍파동", topDongMedPerM2: 3250, topDongBasis: "maxN" };
 const reply = (obj) => ({ output: { message: { content: [{ reasoningContent: { reasoningText: { text: "생각" } } }, { text: typeof obj === "string" ? obj : JSON.stringify(obj) }] } } });
 
 describe("extractText", () => {
@@ -38,6 +39,11 @@ describe("allowedNumbers", () => {
     for (const v of ["52.6", "2,890", "2890", "25", "1", "2026", "11", "3,500"]) expect(s.has(v)).toBe(true);
     expect(s.has("3,100")).toBe(false);
   });
+  it("min3이면 기준 건수 3 허용, 아니면 불허", () => {
+    expect(allowedNumbers(facts).has("3")).toBe(true);
+    expect(allowedNumbers(thin).has("3")).toBe(false);
+    expect(allowedNumbers(zero).has("3")).toBe(false);
+  });
 });
 
 describe("validateScript", () => {
@@ -52,6 +58,17 @@ describe("validateScript", () => {
   it("금지어 거절", () => {
     expect(validateScript(facts, { ...good, caption: "123번지입니다." }).ok).toBe(false);
     expect(validateScript(facts, { ...good, speech: "폭등했습니다." }).ok).toBe(false);
+  });
+  it("min3 동은 3건 이상 단서와 함께 통과", () => {
+    const c = "강남구는 25건이 거래됐습니다. 거래 3건 이상인 동 가운데 압구정동이 ㎡당 중위 3,500만 원으로 가장 높았습니다.";
+    expect(validateScript(facts, { caption: c })).toEqual({ ok: true, errors: [] });
+  });
+  it("maxN·null 동은 이름을 쓰면 거절", () => {
+    const c = "강남구는 25건이 거래됐습니다. 홍파동이 ㎡당 중위 3,250만 원으로 가장 높았습니다.";
+    const r = validateScript(thin, { caption: c });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain("홍파동");
+    expect(validateScript(thin, good).ok).toBe(true);
   });
   it("n 0은 없었다는 취지 필요", () => {
     expect(validateScript(zero, good).ok).toBe(false);
@@ -93,6 +110,21 @@ describe("buildPrompt", () => {
     for (const v of ["강남구", "2,890", "52.6", "압구정동", "25"]) expect(p).toContain(v);
     expect(p).toContain('{"caption"');
     expect(p).toContain("90자");
+  });
+  it("min3이면 3건 이상 단서를 요구한다", () => {
+    const p = buildPrompt(facts);
+    expect(p).toContain("거래 3건 이상인 동 가운데");
+    expect(p).toMatch(/단서/);
+    expect(p).not.toMatch(/동 이름은 쓰지 않습니다/);
+  });
+  it("maxN·null이면 동 이름을 주지 않고 쓰지 말라고 한다", () => {
+    for (const f of [thin, { ...facts, topDong: null, topDongMedPerM2: null, topDongBasis: null }]) {
+      const p = buildPrompt(f);
+      expect(p).not.toContain("홍파동");
+      expect(p).not.toContain("압구정동");
+      expect(p).not.toContain("3,250");
+      expect(p).toContain("동 이름은 쓰지 않습니다");
+    }
   });
 });
 

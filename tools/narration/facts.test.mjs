@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildFacts } from "./facts.mjs";
+import { buildFacts, TOP_DONG_MIN_N } from "./facts.mjs";
 import { GU_ORDER } from "../data/gu.mjs";
 
 const DATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/public/data");
@@ -42,6 +42,7 @@ describe("buildFacts", () => {
     expect(f.rankPrice).toBeNull();
     expect(f.topDong).toBeNull();
     expect(f.topDongMedPerM2).toBeNull();
+    expect(f.topDongBasis).toBeNull();
     expect(f.maxAmt).toBeNull();
     expect(JSON.stringify(f)).not.toMatch(/NaN|undefined/);
   });
@@ -51,6 +52,7 @@ describe("buildFacts", () => {
     const facts = buildFacts(index, {}, MONTH);
     expect(facts).toHaveLength(25);
     expect(facts.every((f) => f.topDong === null)).toBe(true);
+    expect(facts.every((f) => f.topDongBasis === null)).toBe(true);
   });
 
   it("topDong prefers n>=3", () => {
@@ -66,6 +68,7 @@ describe("buildFacts", () => {
     const f = buildFacts(index, { 강남구: data }, MONTH).find((x) => x.gu === "강남구");
     expect(f.topDong).toBe("표본동");
     expect(f.topDongMedPerM2).toBe(1200);
+    expect(f.topDongBasis).toBe("min3");
   });
 
   it("n>=3 동이 없으면 n 최대 동", () => {
@@ -79,5 +82,16 @@ describe("buildFacts", () => {
     };
     const f = buildFacts(index, { 강남구: data }, MONTH).find((x) => x.gu === "강남구");
     expect(f.topDong).toBe("나동");
+    expect(f.topDongBasis).toBe("maxN");
+  });
+
+  it("기준 건수는 3, 실데이터 종로구는 maxN(전부 1건), 서초구는 min3", () => {
+    expect(TOP_DONG_MIN_N).toBe(3);
+    const { index, byName } = load();
+    const facts = buildFacts(index, byName, MONTH);
+    const by = Object.fromEntries(facts.map((f) => [f.gu, f]));
+    expect(by["종로구"].topDongBasis).toBe("maxN");
+    expect(by["서초구"]).toMatchObject({ topDong: "방배동", topDongBasis: "min3" });
+    for (const f of facts) expect(["min3", "maxN", null]).toContain(f.topDongBasis);
   });
 });
