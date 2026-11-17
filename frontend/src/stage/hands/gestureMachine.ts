@@ -81,7 +81,14 @@ export function createGestureMachine(cfg: Partial<GestureConfig> = {}): GestureM
     // 주 손. 추적 손을 기억하는 동안에는 그 손목 근처(TRACK_RADIUS 안)의 손만 다시 잡는다.
     // 근처에 손이 없으면 이번 프레임은 "추적 손 없음"이고, 다른 손으로 넘어가지 않는다.
     // releaseAfterMs 동안 추적 손이 안 보이면 기억을 버리고 가장 큰 손으로 돌아간다.
-    const remembered = tracked !== null && t - tracked.t < c.releaseAfterMs;
+    let remembered = tracked !== null && t - tracked.t < c.releaseAfterMs;
+    if (tracked !== null && !remembered && fist) {
+      // 정지 가드: 프레임 자체가 releaseAfterMs 넘게 멈췄다 다시 온 경우(느린 기기·탭 전환·3fps 이하),
+      // 쥔 손이 추적 손목 근처에 그대로 있으면 놓지 않고 같은 손으로 이어 잡는다.
+      // 손이 실제로 화면을 벗어났다면 손 없는 프레임이 이어지므로 그대로 releaseAfterMs에 놓인다.
+      const n = nearest(hands, tracked.wrist);
+      if (n !== null && n.d <= TRACK_RADIUS) remembered = true;
+    }
     const lostTracked = tracked !== null && !remembered;
     let primary: number | null;
     if (tracked !== null && remembered) {

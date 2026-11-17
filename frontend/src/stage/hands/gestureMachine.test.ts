@@ -153,6 +153,50 @@ describe("release", () => {
     expect(outs.findIndex((o) => o.events.length > 0)).toBe(9);
   });
 
+  it("frames stalling for 400ms with the fist in the same place: no release", () => {
+    // T3 ⚑: 프레임이 멈췄다 다시 와도 같은 자리 주먹이면 같은 손이다(구가 떨어졌다 다시 들리면 안 된다).
+    const m = createGestureMachine();
+    let t = 1000;
+    const outs: GestureOutput[] = [];
+    for (let i = 0; i < 6; i++) outs.push(m.push({ t: (t += 33), hands: [fist()] }, { voting: false }));
+    expect(types(outs)).toEqual(["grab"]);
+    t += 400; // 프레임 정지
+    const after: GestureOutput[] = [];
+    for (let i = 0; i < 40; i++) after.push(m.push({ t: (t += 33), hands: [fist()] }, { voting: false }));
+    expect(types(after)).toEqual([]);
+    expect(after[0]!.primary).toBe(0);
+    expect(m.fist).toBe(true);
+  });
+
+  it("at 3fps a held fist grabs once and never releases", () => {
+    const m = createGestureMachine();
+    let t = 1000;
+    const outs: GestureOutput[] = [];
+    for (let i = 0; i < 30; i++) outs.push(m.push({ t: (t += 340), hands: [fist()] }, { voting: false })); // 약 10초
+    expect(types(outs)).toEqual(["grab"]);
+    expect(m.fist).toBe(true);
+  });
+
+  it("after a stall, a fist that comes back far away is a different hand: release", () => {
+    const m = createGestureMachine();
+    let t = 1000;
+    for (let i = 0; i < 6; i++) m.push({ t: (t += 33), hands: [fist()] }, { voting: false });
+    t += 400;
+    const out = m.push({ t: (t += 33), hands: [hand("Closed_Fist", 0.9, [0.9, 0.9])] }, { voting: false });
+    expect(out.events).toEqual([{ type: "release" }]);
+  });
+
+  it("after a stall, the same hand opened releases normally", () => {
+    const m = createGestureMachine();
+    let t = 1000;
+    for (let i = 0; i < 6; i++) m.push({ t: (t += 33), hands: [fist()] }, { voting: false });
+    t += 400;
+    const outs: GestureOutput[] = [];
+    for (let i = 0; i < 6; i++) outs.push(m.push({ t: (t += 33), hands: [open()] }, { voting: false }));
+    expect(types(outs)).toEqual(["release"]);
+    expect(outs.findIndex((o) => o.events.length > 0)).toBe(5); // 비주먹 6프레임 확정(만료로 바로 놓지 않음)
+  });
+
   it("hand-loss release uses elapsed time, not frame count (uneven intervals)", () => {
     const m = createGestureMachine();
     let t = 1000;
