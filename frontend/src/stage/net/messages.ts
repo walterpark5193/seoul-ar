@@ -11,10 +11,10 @@ export interface VoteMessage {
 }
 export type StageChannelMessage = StageMessage | VoteMessage;
 
-export const ALLOWED_KEYS: { stage: readonly string[]; vote: readonly string[] } = {
-  stage: ["v", "type", "mode", "lifted", "ts"],
-  vote: ["v", "type", "round", "phase", "candidates", "counts", "winner", "ts"],
-};
+export const ALLOWED_KEYS: { readonly stage: readonly string[]; readonly vote: readonly string[] } = Object.freeze({
+  stage: Object.freeze(["v", "type", "mode", "lifted", "ts"]),
+  vote: Object.freeze(["v", "type", "round", "phase", "candidates", "counts", "winner", "ts"]),
+});
 
 const GUS: readonly string[] = GU_ORDER;
 const isGu = (x: unknown): x is string => typeof x === "string" && GUS.includes(x);
@@ -68,4 +68,13 @@ export function toVoteMessage(v: VoteState, ts: number): VoteMessage {
     phase: v.phase === "result" ? "result" : "counting",
     candidates: [...v.candidates], counts: [...v.counts], winner: v.winner, ts,
   };
+}
+
+/** 실제로 전선에 실릴 JSON 사본을 만들어 그 사본을 검사해 돌려준다. toJSON·빈 칸 배열 같은 우회를 막는다. */
+export function toWire(x: unknown): StageChannelMessage {
+  const json = JSON.stringify(x);
+  if (json === undefined) throw new Error("무대 메시지를 직렬화할 수 없습니다");
+  const wire: unknown = JSON.parse(json);
+  assertPublishable(wire);
+  return wire;
 }

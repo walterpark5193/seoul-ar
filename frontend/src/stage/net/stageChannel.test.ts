@@ -62,6 +62,28 @@ describe("createMockStageChannel", () => {
   });
 });
 
+describe("직렬화 사본 검사", () => {
+  const vote = { v: 1, type: "vote", round: 1, phase: "counting", candidates: ["중구", "강남구", "마포구"], counts: [1, 2, 3], winner: null, ts: 2 };
+  it("toJSON으로 좌표를 싣는 counts는 거절", async () => {
+    const ch = createMockStageChannel({ channel: () => null });
+    await ch.connect();
+    const counts = [1, 2, 3] as unknown as { toJSON?: () => unknown };
+    counts.toJSON = () => [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]];
+    await expect(ch.publish({ ...vote, counts } as unknown as StageChannelMessage)).rejects.toThrow();
+  });
+  it("빈 칸 배열은 순수 데이터로만 전달", async () => {
+    const [a, b] = fakePair();
+    const ch = createMockStageChannel({ channel: () => a });
+    await ch.connect();
+    const seen: unknown[] = []; b.onmessage = (ev) => seen.push(ev.data);
+    // eslint-disable-next-line no-sparse-arrays
+    const counts = [, 2, 3];
+    await ch.publish({ ...vote, counts } as unknown as StageChannelMessage);
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as { counts: unknown[] }).counts).toEqual([null, 2, 3]);
+  });
+});
+
 describe("makeStageChannel", () => {
   it("events null이면 mock", async () => {
     const ch = makeStageChannel(null);

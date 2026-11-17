@@ -4,7 +4,7 @@ import { events, type EventsChannel } from "aws-amplify/data";
 import type { EventsConfig } from "../../config";
 import type { BroadcastLike } from "../../realtime/mock";
 import type { ConnStatus } from "../../realtime/types";
-import { STAGE_CHANNEL, assertPublishable, isStageChannelMessage, type StageChannelMessage } from "./messages";
+import { STAGE_CHANNEL, isStageChannelMessage, toWire, type StageChannelMessage } from "./messages";
 
 const CONNECT_TIMEOUT_MS = 8000;
 const RETRY_MIN_MS = 3000;
@@ -101,6 +101,7 @@ export function createAppSyncStageChannel(cfg: EventsConfig): StageChannel {
       });
       sub = s;
       await withTimeout(s.ready, CONNECT_TIMEOUT_MS, "subscribe");
+      if (closed) { teardown(); return; }
       retryMs = RETRY_MIN_MS;
       core.setStatus("open");
     } catch (err) {
@@ -115,8 +116,8 @@ export function createAppSyncStageChannel(cfg: EventsConfig): StageChannel {
     connect: () => { closed = false; return open(); },
     subscribe: core.subscribe,
     async publish(msg) {
-      assertPublishable(msg);
-      const failed = await events.post(STAGE_CHANNEL, { ...msg });
+      const wire = toWire(msg);
+      const failed = await events.post(STAGE_CHANNEL, wire);
       if (Array.isArray(failed) && failed.length > 0) throw new Error("AppSync가 이벤트 발행을 거부했습니다");
     },
     onStatus: core.onStatus,
@@ -156,9 +157,9 @@ export function createMockStageChannel(opts: { channel?: () => BroadcastLike | n
     },
     subscribe: core.subscribe,
     async publish(msg) {
-      assertPublishable(msg);
-      core.deliver(msg);
-      channel?.postMessage(msg);
+      const wire = toWire(msg);
+      core.deliver(wire);
+      channel?.postMessage(wire);
     },
     onStatus: core.onStatus,
     close() {
