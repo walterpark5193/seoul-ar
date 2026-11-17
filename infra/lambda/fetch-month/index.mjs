@@ -14,9 +14,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { GU_ORDER } from "./gu.mjs";
 import { aggregateRows } from "./aggregate.mjs";
-import { fetchMonthRows, SeoulApiError } from "./seoulApi.mjs";
+import { fetchMonthRows, fetchYearRows, SeoulApiError } from "./seoulApi.mjs";
+import { validateYear, expectedMonths, bucketByMonth, isGuComplete, yearJobMonth } from "./yearly.mjs";
 import {
-  acquireLock, releaseLock, writeJobRecord, mergeIndex, rebuildIndexFromStore, mapPool, JobError, INDEX_KEY, JSON_PUT, guKey,
+  acquireLock, releaseLock, writeJobRecord, mergeIndex, rebuildIndexFromStore, mapPool, JobError, INDEX_KEY, LOCK_KEY, JSON_PUT, guKey,
 } from "./job.mjs";
 import { jobMessage, createReporter } from "./publish.mjs";
 import { generateNarration, narrationKey, NARRATION_KEYS } from "./narrate.mjs";
@@ -196,12 +197,15 @@ async function handleHttp(event, deps, caches) {
   }
   if (!lock.ok) {
     const holder = lock.holder;
-    const label = holder?.month && /^\d{6}$/.test(holder.month) ? monthLabel(holder.month) : null;
-    const message = !label
-      ? "다른 달을 가져오는 중입니다. 잠시 뒤 다시 시도해 주세요."
-      : holder.kind === "narration"
-        ? `${label} 해설을 만드는 중입니다. 끝난 뒤 다시 시도해 주세요.`
-        : `${label} 데이터를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.`;
+    const validMonth = holder?.month && /^\d{6}$/.test(holder.month);
+    const label = validMonth ? monthLabel(holder.month) : null;
+    const message = holder?.kind === "fetch-year" && validMonth
+      ? `${holder.month.slice(0, 4)}년 한 해 데이터를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.`
+      : !label
+        ? "다른 달을 가져오는 중입니다. 잠시 뒤 다시 시도해 주세요."
+        : holder.kind === "narration"
+          ? `${label} 해설을 만드는 중입니다. 끝난 뒤 다시 시도해 주세요.`
+          : `${label} 데이터를 가져오는 중입니다. 끝난 뒤 다시 시도해 주세요.`;
     return fail(409, "busy", message, holder?.jobId && holder.month ? { jobId: holder.jobId, month: holder.month } : {});
   }
 
@@ -343,6 +347,28 @@ async function runNarrateJob(event, deps, context) {
     return { ok: false };
   }
   const month = typeof event.month === "string" ? event.month.slice(0, 6) : "";
+  // API 경로는 잠금을 이 jobId 로 잡아 두고 부른다. 운영자가 직접 부르면(잠금이 이 jobId 가 아니면) 여기서 잡는다.
+  let held = null;
+  try {
+    const cur = await store.get(LOCK_KEY);
+    held = cur ? JSON.parse(cur.text) : null;
+  } catch (e) {
+    log("warn", "잠금 파일을 읽지 못함: 새로 잡아 본다", errFields(e));
+    held = null;
+  }
+  if (!(held && held.jobId === jobId && !held.released)) {
+    let lock;
+    try {
+      lock = await acquireLock(store, { jobId, month, nowMs: deps.now(), kind: "narration" });
+    } catch (e) {
+      log("error", "해설 작업 잠금 확인 실패", errFields(e));
+      return { ok: false, error: "lock" };
+    }
+    if (!lock.ok) {
+      log("warn", "다른 작업이 잠금을 잡고 있어 해설 작업을 시작하지 않음", { holder: lock.holder?.jobId ?? null });
+      return { ok: false, error: "busy", holder: lock.holder };
+    }
+  }
   const send = narrationSender(deps, jobId, month);
   const checkDeadline = makeDeadline(deps, context);
   let terminal;
@@ -392,6 +418,216 @@ async function safeRelease(deps, jobId) {
   } catch (e) {
     deps.log("error", "잠금 해제 실패(10분 뒤 stale 로 풀림)", errFields(e));
   }
+}
+
+/** 연도 작업의 구 실패 문구. 서울 API 오류 코드(하루 한도 등)면 한도와 resume 을 안내한다. 키·URL 은 없다. */
+function yearFetchMessage(gu, e) {
+  const resumeHint = "resume: true 로 다시 실행하면 받은 구는 건너뛰고 이어서 받습니다.";
+  const reason = e instanceof SeoulApiError ? e.message : "알 수 없는 오류";
+  const apiCode = e instanceof SeoulApiError && (!["NETWORK", "HTTP", "FORMAT"].includes(e.code) || e.status === 429);
+  if (apiCode) return `${gu} 거래를 가져오지 못했습니다(${reason}). 서울 API 하루 호출 한도를 다 썼을 수 있습니다. ${resumeHint}`;
+  return `${gu} 거래를 가져오지 못했습니다(${reason}). ${resumeHint}`;
+}
+
+/**
+ * 연도 작업(Task 13, 운영자가 Lambda 를 직접 호출): {action: "fetch-year", year, jobId?, resume?, narrate?}.
+ * 구마다 접수연도 전체를 한 번 받아 계약 연월로 나눠 data/{YYYYMM}/{gu}.json 을 쓴다(구가 끝날 때마다 바로 써서 resume 이 가능).
+ * 모든 구가 끝나면 보인 달마다 빠진 구를 빈 통계로 채우고, 그 달들을 index 에 합치고, /data/* 를 무효화한다.
+ * 진행은 /seoul/jobs 에 kind "fetch-year", month "YYYY00", total 25. 같은 잠금을 쓴다.
+ */
+async function runFetchYear(event, deps, context) {
+  const { env, store, log } = deps;
+  const nowMs = deps.now();
+  const year = event.year;
+  const check = validateYear(year, nowMs);
+  if (!check.ok) {
+    log("error", "연도 작업 입력 오류: year", { year: String(year ?? "").slice(0, 10) });
+    return { ok: false, error: "bad_year", message: check.message };
+  }
+  const jobId = event.jobId === undefined ? `year-${year}-${nowMs}` : event.jobId;
+  if (typeof jobId !== "string" || !JOB_ID_RE.test(jobId)) {
+    log("error", "연도 작업 입력 오류: jobId 형식", {});
+    return { ok: false, error: "bad_job_id" };
+  }
+  const month = yearJobMonth(year);
+  let lock;
+  try {
+    lock = await acquireLock(store, { jobId, month, nowMs, kind: "fetch-year" });
+  } catch (e) {
+    log("error", "잠금 확인 실패", errFields(e));
+    return { ok: false, error: "lock" };
+  }
+  if (!lock.ok) {
+    log("warn", "다른 작업이 잠금을 잡고 있어 연도 작업을 시작하지 않음", { holder: lock.holder?.jobId ?? null });
+    return { ok: false, error: "busy", holder: lock.holder };
+  }
+
+  const report = createReporter({ publish: deps.publish, record: (m) => writeJobRecord(store, m), log });
+  const send = (fields) => report(jobMessage({ kind: "fetch-year", jobId, month, total: TOTAL, ...fields, ts: deps.now() }));
+  await send({ state: "running", done: 0 });
+
+  const checkDeadline = makeDeadline(deps, context);
+  const generatedAt = new Date(nowMs).toISOString();
+  const expected = expectedMonths(year, nowMs);
+  const resume = event.resume === true;
+  let poolFailed = false;
+  let pages = 0;
+  const beforePage = () => {
+    if (poolFailed) throw new JobError("다른 구에서 오류가 나 수집을 멈췄습니다.");
+    checkDeadline();
+    pages++;
+  };
+  let done = 0;
+  let apiKey = "";
+  const fetched = new Map(); // gu → { perMonth: Map<month, GuData>, capped }
+  const skipped = new Set();
+  let monthsOut = [];
+  let byMonth = new Map(); // month → GuData[25]
+  let terminal;
+
+  try {
+    try {
+      apiKey = String(await deps.getParameter(env.SSM_API_KEY_NAME));
+    } catch (e) {
+      log("error", "서울 API 키 파라미터를 읽지 못함", errFields(e));
+      throw new JobError("서울 API 키를 읽지 못했습니다. SSM 파라미터 설정을 확인해 주세요.");
+    }
+    let existing = new Set();
+    if (resume) {
+      try {
+        existing = new Set(await store.list(`data/${year}`));
+      } catch (e) {
+        log("warn", "기존 파일 목록을 읽지 못해 모든 구를 다시 받는다", errFields(e));
+      }
+    }
+
+    await mapPool(GU_ORDER, deps.concurrency ?? DEFAULT_CONCURRENCY, async (gu) => {
+      try {
+        if (resume && isGuComplete(existing, gu, expected)) {
+          skipped.add(gu);
+          log("info", "이미 받아 둔 구라 건너뜀(resume)", { year, gu });
+        } else {
+          let res;
+          try {
+            res = await fetchYearRows({ fetch: deps.fetch, key: apiKey, gu, year, sleep: deps.sleep, beforePage });
+          } catch (e) {
+            if (e instanceof JobError) throw e;
+            log("error", "서울 API 호출 실패", { gu, year, ...errFields(e, apiKey) });
+            throw new JobError(yearFetchMessage(gu, e));
+          }
+          const perMonth = new Map();
+          for (const [m, rows] of bucketByMonth(res.rows, year, expected)) {
+            const data = aggregateRows(rows, { month: m, gu, generatedAt }, {
+              onMalformed: (info) => log("warn", "금액을 읽을 수 없는 행 제외", info),
+            });
+            data.total.truncated = res.capped; // 상한에 닿았으면 그 구의 모든 달이 불완전하다
+            perMonth.set(m, data);
+          }
+          if (res.capped) log("warn", "연도 페이지 상한에 닿음: 그 구의 달들이 빠졌을 수 있음", { gu, year, pages: res.pages });
+          try {
+            await Promise.all([...perMonth.values()].map((d) => store.put(guKey(d.month, gu), JSON.stringify(d) + "\n", JSON_PUT)));
+          } catch (e) {
+            log("error", "구 파일 저장 실패", { gu, ...errFields(e) });
+            throw new JobError("집계 파일을 저장하지 못했습니다. resume: true 로 다시 실행하면 이어서 받습니다.");
+          }
+          fetched.set(gu, { perMonth, capped: res.capped });
+        }
+        done += 1;
+        await send({ state: "running", done, gu });
+      } catch (e) {
+        poolFailed = true;
+        throw e;
+      }
+    });
+
+    // 보인 달: 받은 구에 행이 있는 달 + 건너뛴 구의 달(건너뛴 구는 기대한 달 파일이 모두 있다)
+    const seen = new Set();
+    for (const { perMonth } of fetched.values()) for (const m of perMonth.keys()) seen.add(m);
+    if (skipped.size > 0) for (const m of expected) seen.add(m);
+    monthsOut = expected.filter((m) => seen.has(m));
+
+    // 받은 구가 보인 달에 행이 없으면 빈 통계 파일로 채운다(보인 달 폴더마다 25개)
+    const fills = [];
+    for (const [gu, entry] of fetched) {
+      for (const m of monthsOut) {
+        if (entry.perMonth.has(m)) continue;
+        const empty = aggregateRows([], { month: m, gu, generatedAt });
+        empty.total.truncated = entry.capped;
+        entry.perMonth.set(m, empty);
+        fills.push(empty);
+      }
+    }
+    try {
+      await Promise.all(fills.map((d) => store.put(guKey(d.month, d.gu), JSON.stringify(d) + "\n", JSON_PUT)));
+    } catch (e) {
+      log("error", "빈 구 파일 저장 실패", errFields(e));
+      throw new JobError("집계 파일을 저장하지 못했습니다. resume: true 로 다시 실행하면 이어서 받습니다.");
+    }
+
+    // 건너뛴 구는 저장된 파일을 읽어 index(와 해설)에 쓴다
+    const skippedData = new Map();
+    await mapPool([...skipped].flatMap((gu) => monthsOut.map((m) => ({ gu, m }))), 8, async ({ gu, m }) => {
+      const cur = await store.get(guKey(m, gu)).catch(() => null);
+      let data = null;
+      try { data = cur ? JSON.parse(cur.text) : null; } catch { data = null; }
+      if (!data?.total) log("warn", "건너뛴 구 파일을 읽지 못해 빈 통계로 둔다", { gu, month: m });
+      skippedData.set(`${m}|${gu}`, data?.total ? { ...data, gu, month: m } : aggregateRows([], { month: m, gu, generatedAt }));
+    });
+    byMonth = new Map(monthsOut.map((m) => [m, GU_ORDER.map((gu) => fetched.get(gu)?.perMonth.get(m) ?? skippedData.get(`${m}|${gu}`))]));
+
+    if (monthsOut.length > 0) {
+      let existingIndex = null;
+      try {
+        const cur = await store.get(INDEX_KEY);
+        if (cur) existingIndex = JSON.parse(cur.text);
+      } catch (e) {
+        log("error", "index.json 읽기 실패", errFields(e));
+        throw new JobError("기존 월 목록(index.json)을 읽지 못해 갱신하지 않았습니다.");
+      }
+      let merged = existingIndex;
+      for (const m of monthsOut) merged = mergeIndex(merged, byMonth.get(m), { month: m, generatedAt });
+      try {
+        await store.put(INDEX_KEY, JSON.stringify(merged, null, 2) + "\n", JSON_PUT);
+      } catch (e) {
+        log("error", "index.json 저장 실패", errFields(e));
+        throw new JobError("월 목록(index.json)을 저장하지 못했습니다. resume: true 로 다시 실행하면 이어서 받습니다.");
+      }
+      if (env.DISTRIBUTION_ID) {
+        try {
+          await deps.invalidate({ distributionId: env.DISTRIBUTION_ID, paths: ["/data/*"], callerReference: jobId });
+        } catch (e) {
+          log("warn", "CloudFront 무효화 실패", errFields(e));
+        }
+      }
+    }
+
+    const cappedGus = GU_ORDER.filter((gu) => fetched.get(gu)?.capped);
+    const notes = [];
+    if (monthsOut.length === 0) notes.push(`${year}년에 받은 거래가 없습니다`);
+    if (cappedGus.length > 0) notes.push(`일부 구는 거래가 많아 끝까지 받지 못했습니다: ${cappedGus.join(", ")}`);
+    if (monthsOut.some((m) => m.endsWith("11") || m.endsWith("12"))) notes.push("11·12월은 다음 해에 신고된 거래가 빠질 수 있습니다");
+    terminal = { state: "done", done: TOTAL, ...(notes.length > 0 ? { message: notes.join(". ") + "." } : {}) };
+  } catch (e) {
+    const message = e instanceof JobError ? e.message : "알 수 없는 오류로 연도 수집을 마치지 못했습니다. resume: true 로 다시 실행해 주세요.";
+    if (!(e instanceof JobError)) log("error", "연도 작업 실패", errFields(e, apiKey));
+    terminal = { state: "error", done, message };
+  } finally {
+    log("info", "연도 수집 서울 API 페이지 호출 수(재시도 제외)", { year, pages });
+    await safeRelease(deps, jobId);
+  }
+  // 잠금을 푼 뒤에 마지막 상태를 알린다
+  await send(terminal);
+  if (terminal.state !== "done") return { ok: false, jobId, year, pages, error: "failed", message: terminal.message };
+
+  if (event.narrate === true) {
+    if (!env.BEDROCK_MODEL_ID) log("warn", "BEDROCK_MODEL_ID 없음: 연도 작업의 해설을 건너뜀", {});
+    else for (const m of monthsOut) await autoNarrate({ deps, jobId: `${jobId}-${m}-narration`, month: m, perGu: byMonth.get(m), checkDeadline });
+  }
+  return {
+    ok: true, jobId, year, months: monthsOut, pages,
+    capped: GU_ORDER.filter((gu) => fetched.get(gu)?.capped),
+    skipped: GU_ORDER.filter((gu) => skipped.has(gu)),
+  };
 }
 
 /** 수집 done 에 붙일 안내: 페이지 상한에 닿은 구, 11·12월의 다음 해 신고. 없으면 {}. */
@@ -567,6 +803,7 @@ export function createHandler(deps) {
   return async function handle(event, context) {
     if (event?.requestContext?.http) return handleHttp(event, deps, caches);
     if (event?.action === "rebuild-index") return rebuildIndex(deps);
+    if (event?.action === "fetch-year") return runFetchYear(event, deps, context);
     if (event?.action === "narrate") return runNarrateJob(event, deps, context);
     if (event && typeof event === "object" && "jobId" in event) return runWorker(event, deps, context);
     deps.log("warn", "알 수 없는 이벤트 형식", {});

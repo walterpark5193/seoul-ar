@@ -155,6 +155,30 @@ node infra/scripts/sync-lambda-shared.mjs --check  # 다르면 exit 1
 - IAM: 작업자만 `bedrock:InvokeModel`, 대상은 `arn:aws:bedrock:*::foundation-model/<기반 모델>` 과 `arn:aws:bedrock:us-east-1:<계정>:inference-profile/us.<기반 모델>` 둘뿐. 공개 함수(API)에는 Bedrock 권한이 없다.
 - 계정에서 그 모델 접근이 막혀 있으면 작업은 `error`("Bedrock 모델 접근 권한과 모델 ID 를 확인해 주세요")로 끝난다. Bedrock 콘솔 Model access 에서 Anthropic Claude Haiku 를 켠다(처음이면 사용 목적 양식).
 
+### 7b. 3년치 미리 받기 (접수연도 2024, 2025, 2026)
+
+달마다 가져오면 같은 구·접수연도를 달 수만큼(3년이면 최대 36번) 다시 넘겨 서울 API 를 3,600번 안팎 부른다. 연도 작업은 **구마다 접수연도 전체를 한 번** 받아 계약 연월로 나눈다(1년에 보통 100~200번, 3년에 수백 번).
+
+운영자가 작업자 Lambda 를 직접 비동기로 부른다(API 경로 없음, 한 번에 한 해씩, 앞 작업이 끝난 뒤 다음 해):
+
+```bash
+aws lambda invoke --region us-east-1 \
+  --function-name SeoulArStack-FetchMonthWorker \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"fetch-year","year":"<YYYY>","jobId":"year-<YYYY>-<번호>","resume":true,"narrate":false}' \
+  /dev/stdout
+```
+
+- `year`: 2006 ~ 한국 시간 올해. 올해는 이번 달까지만 쓴다. `jobId` 는 영문·숫자·`-` 8~64자(빼면 `year-YYYY-<시각>`).
+- 진행: `/seoul/jobs` 에 `kind: "fetch-year"`, `month: "YYYY00"`, `total: 25`(구마다 `done` 증가), 마지막 `done`/`error`. 같은 내용이 `data/jobs/<jobId>.json` 에 남으니 `aws s3 cp s3://<BucketName>/data/jobs/<jobId>.json -` 로 보면 된다(작업자 CloudWatch 로그에도 있다). 수집·해설 작업과 같은 잠금을 쓰므로 그동안 "월 가져오기"는 409 "YYYY년 한 해 데이터를 가져오는 중입니다".
+- 동작: 구마다 `RCPT_YR=<YYYY>` 로 1000건씩 끝까지(1000건 미만, `list_total_count`, 60페이지 상한에서 멈춤, 동시 4개). 계약 연월이 그 해인 행만 남기고(1월에 신고된 전년 12월 계약은 버림) 달마다 `aggregateRows` 로 집계해 그 구가 끝나는 즉시 `data/YYYYMM/<구>.json` 을 쓴다. 상한에 닿은 구는 그 구의 모든 달이 `truncated: true`. 모든 구가 끝나면 거래가 보인 달마다 빠진 구를 빈 통계로 채우고(달 폴더마다 25개), 그 달들을 `index.json` 에 합치고 `/data/*` 를 무효화한다. `done` 메시지에 상한에 닿은 구와 11·12월 안내가 붙는다.
+- 걸리는 시간: 한 해에 보통 2~5분. Lambda 제한 시간 90초 전이면 스스로 멈추고 `error` 를 남긴다 → 같은 명령을 다시 실행한다.
+- `resume: true`(권장): 그 해의 기대한 달 파일(올해는 이번 달까지)이 모두 있는 구는 서울 API 를 부르지 않고 건너뛴다. 중간에 멈춘 작업을 이어서 받는다. 단, 거래가 한 건도 없는 달(예: 이번 달 1일)이 있으면 그 해는 늘 처음부터 다시 받는다.
+- 하루 호출 한도: 서울 API 가 `INFO-000`/`INFO-200` 이 아닌 코드(하루 한도 초과 등)를 주면 작업은 `error` "…서울 API 하루 호출 한도를 다 썼을 수 있습니다. resume: true 로 다시 실행하면…" 로 끝난다. 다음 날 같은 명령을 다시 실행한다. 작업마다 부른 페이지 수가 로그 `연도 수집 서울 API 페이지 호출 수` 에 남는다.
+- 한계: 접수연도로 나누므로 11·12월 계약 중 다음 해에 신고된 것은 그 해 작업에서 빠지고, 다음 해 작업에서는 "다른 해 계약"이라 버려진다.
+- 해설: 기본(`narrate: false`)은 데이터만 빨리 올린다. 해설은 호스트 화면의 "해설 생성"으로 달마다 만들거나, 운영자가 달마다 `{"action":"narrate","jobId":"n-<YYYYMM>-<번호>","month":"<YYYYMM>"}` 로 작업자를 부른다(직접 부르면 스스로 잠금을 잡는다). `narrate: true` 는 연도 작업이 끝난 뒤 달마다 차례로 만들지만 12달이면 제한 시간에 걸리기 쉽다.
+
 ### 8. 리허설 점검표 (배포 전후)
 
 1. **배포 직전에 프론트를 다시 빌드한다**: `frontend/` 에서 빌드해 `frontend/dist` 를 새로 만든 다음 `infra/` 에서 `npx cdk deploy …`. 사이트 배포는 그때의 dist 를 올린다(오래된 dist 면 옛 화면이 나간다).
