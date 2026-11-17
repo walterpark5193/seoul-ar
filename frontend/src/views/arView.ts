@@ -6,9 +6,13 @@ import type { AppState } from "../state/store";
 import type { GuData } from "../data/types";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
+import { isStageMessage } from "../stage/net/messages";
+import { bindStageFollow } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
 export const TARGET_SRC = "/marker/target.mind";
+export const STAGE_BANNER_TEXT = "무대 진행 중 · 3D로 따라가기";
+export const VOTE_LINE_MS = 6000;
 export const UNSUPPORTED_MESSAGE = "이 브라우저에서는 카메라 AR을 쓸 수 없어 3D 화면으로 바꿨습니다.";
 
 export function fallbackMessage(err: unknown): string {
@@ -95,6 +99,8 @@ export const mountArView: MountView = (root, ctx) => {
     `</section>` +
     `<div class="scan" data-scan hidden><div class="scan-frame" aria-hidden="true"></div>` +
     `<p class="scan-text" role="status">슬라이드의 그림을 비춰 주세요</p></div>` +
+    `<button type="button" class="stage-banner" data-banner hidden>${STAGE_BANNER_TEXT}</button>` +
+    `<p class="vote-line" data-vote role="status" hidden></p>` +
     `<div class="sheet-host" data-sheet hidden></div>` +
     `</div>`;
 
@@ -117,6 +123,28 @@ export const mountArView: MountView = (root, ctx) => {
       if (running) drawCity(running.city, ctx.index, s, d);
     },
     onSheet: (s, d) => sheet.render(s, d),
+  });
+
+  // AR에서는 씬을 직접 움직이지 않는다. 무대 메시지를 처음 받으면 배너로 3D 따라가기를 권한다.
+  const banner = root.querySelector<HTMLButtonElement>("[data-banner]")!;
+  const voteEl = root.querySelector<HTMLElement>("[data-vote]")!;
+  banner.addEventListener("click", () => ctx.navigate("#/3d"));
+  let voteTimer: ReturnType<typeof setTimeout> | null = null;
+  const offBanner = ctx.stageChannel.subscribe((m) => {
+    if (isStageMessage(m)) banner.hidden = false; // follow와 무관하게 처음 받으면 보인다
+  });
+  const offVote = bindStageFollow({
+    channel: ctx.stageChannel,
+    store: ctx.store,
+    index: ctx.index,
+    onLayout: () => {},
+    onLift: () => {},
+    onVote: (text) => {
+      voteEl.textContent = text;
+      voteEl.hidden = false;
+      if (voteTimer) clearTimeout(voteTimer);
+      voteTimer = setTimeout(() => { voteEl.hidden = true; }, VOTE_LINE_MS);
+    },
   });
 
   startBtn.addEventListener("click", async () => {
@@ -146,6 +174,9 @@ export const mountArView: MountView = (root, ctx) => {
 
   return () => {
     alive = false;
+    offBanner();
+    offVote();
+    if (voteTimer) clearTimeout(voteTimer);
     unbind();
     sheet.destroy();
     running?.stop();

@@ -426,3 +426,22 @@ kbd {
   .toast { animation: toast-in 0.2s ease-out; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } }
 }
+
+/* ---------- 무대 따라가기: 배너·투표 결과 한 줄 ---------- */
+
+.stage-banner {
+  position: absolute; z-index: 20; left: 50%; transform: translateX(-50%);
+  top: calc(64px + var(--safe-t));
+  max-width: min(92vw, 420px); min-height: 44px; padding: 10px 18px;
+  border: 0; border-radius: var(--r-ctl);
+  background: var(--ink); color: var(--night);
+  font: inherit; font-size: 15px; font-weight: 600; line-height: 1.4; cursor: pointer;
+}
+.stage-banner[hidden], .vote-line[hidden] { display: none; }
+.vote-line {
+  position: absolute; z-index: 20; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--sheet-h, 168px) + 12px + var(--safe-b, 0px));
+  max-width: min(92vw, 480px); margin: 0; padding: 8px 14px;
+  border-radius: var(--r-ctl); background: var(--ink); color: var(--night);
+  font-size: 15px; font-weight: 500; line-height: 1.4; text-align: center;
+}

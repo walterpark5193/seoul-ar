@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { Group, PerspectiveCamera, Scene } from "three";
+vi.mock("../ui/sheetDom", () => ({ mountSheet: () => ({ render: () => {}, destroy: () => {} }) }));
+
 import { beginAr, fallbackMessage, mountArView } from "./arView";
 import type { ViewContext } from "./types";
 import type { ArSession } from "../ar/session";
 import type { SeoulScene } from "../scene/seoulScene";
+import type { StageChannelMessage } from "../stage/net/messages";
 import { INITIAL_STATE, createStore } from "../state/store";
 
 function fakeScene(): SeoulScene {
   return {
     group: new Group(),
     setOverview: vi.fn(), focus: vi.fn(), setMetric: vi.fn(), update: vi.fn(), dispose: vi.fn(),
+    setHover: vi.fn(), lift: vi.fn(), setLayout: vi.fn(), pick: vi.fn(() => null),
   };
 }
 
@@ -29,6 +33,9 @@ function fakeSession(start: () => Promise<void>) {
   return { session, hooks };
 }
 
+const stageHandlers = new Set<(m: StageChannelMessage) => void>();
+const emitStage = (m: StageChannelMessage) => { for (const h of [...stageHandlers]) h(m); };
+
 function fakeCtx(arSupported: () => boolean, createArSession = vi.fn()): ViewContext {
   return {
     store: createStore({ ...INITIAL_STATE, month: "202611" }),
@@ -40,6 +47,7 @@ function fakeCtx(arSupported: () => boolean, createArSession = vi.fn()): ViewCon
     toast: vi.fn(),
     createScene: vi.fn(fakeScene),
     reducedMotion: false,
+    stageChannel: { subscribe: (h: (m: StageChannelMessage) => void) => { stageHandlers.add(h); return () => { stageHandlers.delete(h); }; } } as unknown as ViewContext["stageChannel"],
     ar: { arSupported, createArSession },
   };
 }
@@ -112,5 +120,29 @@ describe("arView", () => {
     expect(fallbackMessage(Object.assign(new Error(""), { name: "NotAllowedError" }))).toContain("권한");
     expect(fallbackMessage(Object.assign(new Error(""), { name: "NotFoundError" }))).toContain("카메라를 찾지 못해");
     expect(fallbackMessage(new Error("x"))).toContain("3D 화면으로 바꿨습니다");
+  });
+
+  it("shows the stage banner on the first StageMessage and taps through to #/3d", () => {
+    const listeners = new Map<string, () => void>();
+    const els: Record<string, { hidden: boolean; textContent: string; addEventListener(t: string, f: () => void): void }> = {};
+    const mk = (k: string) => (els[k] = { hidden: true, textContent: "", addEventListener: (t, f) => { listeners.set(`${k}:${t}`, f); } });
+    const root = {
+      set innerHTML(_v: string) {},
+      querySelector: (sel: string) => {
+        const k = /data-(\w+)/.exec(sel)?.[1] ?? "x";
+        return els[k] ?? mk(k);
+      },
+    } as unknown as HTMLElement;
+    const ctx = fakeCtx(() => true);
+    const unmount = mountArView(root, ctx);
+    expect(els.banner?.hidden).toBe(true);
+    emitStage({ v: 1, type: "stage", mode: "spread", lifted: null, ts: 1 });
+    expect(els.banner?.hidden).toBe(false);
+    listeners.get("banner:click")?.();
+    expect(ctx.navigate).toHaveBeenCalledWith("#/3d");
+    emitStage({ v: 1, type: "vote", round: 1, phase: "result", candidates: ["강남구", "마포구", "노원구"], counts: [2, 1, 0], winner: "강남구", ts: 2 });
+    expect(els.vote?.textContent).toBe("투표 결과 강남구 2표 · 마포구 1표 · 노원구 0표");
+    expect(els.vote?.hidden).toBe(false);
+    unmount();
   });
 });

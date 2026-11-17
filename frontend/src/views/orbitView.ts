@@ -3,10 +3,12 @@ import { PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mountSheet } from "../ui/sheetDom";
 import type { MountView } from "./types";
+import { bindStageFollow } from "./stageFollow";
 import { bindViewer, drawCity } from "./viewerSync";
 
 export const AUTO_ROTATE_RAD_PER_S = 0.3;
 const RESUME_AFTER_MS = 4000;
+export const VOTE_LINE_MS = 6000;
 
 /** OrbitControls.update(dt초)는 autoRotateSpeed × 2π/60 rad/s로 돈다. */
 export function autoRotateSpeedFor(radPerSec: number): number {
@@ -26,6 +28,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
   root.innerHTML = `<div class="viewer viewer--3d">` +
     `<div class="stage" data-stage></div>` +
     `<a class="back" href="#/">처음으로</a>` +
+    `<p class="vote-line" data-vote role="status" hidden></p>` +
     `<p class="stage-hint">한 손가락으로 돌리고, 두 손가락으로 확대합니다</p>` +
     `<div class="sheet-host" data-sheet></div>` +
     `</div>`;
@@ -111,7 +114,29 @@ export const mountOrbitView: MountView = (root, ctx) => {
     onSheet: (s, d) => sheet.render(s, d),
   });
 
+  // 무대를 따라가기: 펼침·들어올림은 follow가 true일 때만, 투표 결과 한 줄은 늘 6초.
+  const voteEl = root.querySelector<HTMLElement>("[data-vote]")!;
+  let voteTimer: ReturnType<typeof setTimeout> | null = null;
+  const unbindFollow = bindStageFollow({
+    channel: ctx.stageChannel,
+    store: ctx.store,
+    index: ctx.index,
+    onLayout: (mode) => {
+      const st = ctx.store.getState();
+      city.setLayout(mode, ctx.index.summary[st.month] ?? {}, st.metric);
+    },
+    onLift: (gu) => city.lift(gu),
+    onVote: (text) => {
+      voteEl.textContent = text;
+      voteEl.hidden = false;
+      if (voteTimer) clearTimeout(voteTimer);
+      voteTimer = setTimeout(() => { voteEl.hidden = true; }, VOTE_LINE_MS);
+    },
+  });
+
   return () => {
+    unbindFollow();
+    if (voteTimer) clearTimeout(voteTimer);
     unbind();
     sheet.destroy();
     if (resumeTimer) clearTimeout(resumeTimer);
