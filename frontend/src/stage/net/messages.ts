@@ -1,10 +1,11 @@
-// 무대 채널 메시지 계약 (CONTRACTS-stage 4.1). 손 좌표·영상 프레임이 채널로 새지 않도록 허용 키만 통과시킨다.
+// 무대 채널 메시지 계약 (CONTRACTS-stage 4.1, 13.6). 손 좌표·영상 프레임이 채널로 새지 않도록 허용 키만 통과시킨다.
 import { GU_ORDER } from "../../data/gu";
 import type { StageMode, StageState, VoteState } from "../types";
 
 export const STAGE_CHANNEL = "/seoul/stage";
 
-export interface StageMessage { v: 1; type: "stage"; mode: StageMode; lifted: string | null; ts: number; }
+/** yaw·zoom은 선택(CONTRACTS-stage 13.6). 없으면 큰 화면은 (0, 1)로 본다. */
+export interface StageMessage { v: 1; type: "stage"; mode: StageMode; lifted: string | null; ts: number; yaw?: number; zoom?: number; }
 export interface VoteMessage {
   v: 1; type: "vote"; round: number; phase: "counting" | "result";
   candidates: string[]; counts: (number | null)[]; winner: string | null; ts: number;
@@ -12,13 +13,18 @@ export interface VoteMessage {
 export type StageChannelMessage = StageMessage | VoteMessage;
 
 export const ALLOWED_KEYS: { readonly stage: readonly string[]; readonly vote: readonly string[] } = Object.freeze({
-  stage: Object.freeze(["v", "type", "mode", "lifted", "ts"]),
+  stage: Object.freeze(["v", "type", "mode", "lifted", "ts", "yaw", "zoom"]),
   vote: Object.freeze(["v", "type", "round", "phase", "candidates", "counts", "winner", "ts"]),
 });
 
 const GUS: readonly string[] = GU_ORDER;
 const isGu = (x: unknown): x is string => typeof x === "string" && GUS.includes(x);
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+const isFinite_ = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 1.6;
+const isYaw = (x: unknown): boolean => isFinite_(x) && x > -Math.PI && x <= Math.PI;
+const isZoom = (x: unknown): boolean => isFinite_(x) && x >= ZOOM_MIN && x <= ZOOM_MAX;
 const isTs = (x: unknown): boolean => typeof x === "number" && Number.isFinite(x);
 
 export function isStageMessage(x: unknown): x is StageMessage {
@@ -27,6 +33,8 @@ export function isStageMessage(x: unknown): x is StageMessage {
     x.v === 1 && x.type === "stage" &&
     (x.mode === "map" || x.mode === "spread") &&
     (x.lifted === null || isGu(x.lifted)) &&
+    (x.yaw === undefined || isYaw(x.yaw)) &&
+    (x.zoom === undefined || isZoom(x.zoom)) &&
     isTs(x.ts)
   );
 }
@@ -58,8 +66,10 @@ export function assertPublishable(x: unknown): asserts x is StageChannelMessage 
   if (!isStageChannelMessage(x)) throw new Error("무대 메시지 형식이 올바르지 않습니다");
 }
 
-export function toStageMessage(s: StageState, ts: number): StageMessage {
-  return { v: 1, type: "stage", mode: s.mode, lifted: s.lifted, ts };
+export function toStageMessage(s: StageState, ts: number, view?: { yaw: number; zoom: number }): StageMessage {
+  const m: StageMessage = { v: 1, type: "stage", mode: s.mode, lifted: s.lifted, ts };
+  if (view) { m.yaw = view.yaw; m.zoom = view.zoom; }
+  return m;
 }
 
 export function toVoteMessage(v: VoteState, ts: number): VoteMessage {

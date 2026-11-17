@@ -23,6 +23,36 @@ export function autoRotateSpeedFor(radPerSec: number): number {
   return (radPerSec * 60) / (2 * Math.PI);
 }
 
+/** 큰 화면이 무대의 yaw·zoom을 따라가는 속도(1/초). 값이 5Hz로 오므로 그 사이를 부드럽게 메운다. */
+export const VIEW_FOLLOW_RATE = 8;
+
+interface ViewTarget { rotation: { y: number }; scale: { setScalar(n: number): unknown } }
+
+/**
+ * 무대가 보낸 yaw·zoom을 도시 group에 부드럽게 적용한다(CONTRACTS-stage 13.6).
+ * enabled가 false(일반 관객 폰)면 set은 아무 일도 하지 않아 group은 그대로다.
+ */
+export function createViewFollower(group: ViewTarget, enabled: boolean, rate = VIEW_FOLLOW_RATE) {
+  let yaw = 0, zoom = 1, tYaw = 0, tZoom = 1;
+  const wrap = (a: number) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+  return {
+    set(y: number, z: number): void {
+      if (!enabled || !Number.isFinite(y) || !Number.isFinite(z)) return;
+      tYaw = y; tZoom = z;
+    },
+    /** 한 프레임. 각도는 가까운 쪽으로 돈다(π 경계를 넘어도 한 바퀴 되감지 않는다). */
+    step(dt: number): void {
+      if (!enabled) return;
+      const k = 1 - Math.exp(-rate * Math.max(dt, 0));
+      const dy = wrap(tYaw - yaw);
+      yaw = Math.abs(dy) < 1e-4 ? tYaw : yaw + dy * k;
+      zoom = Math.abs(tZoom - zoom) < 1e-4 ? tZoom : zoom + (tZoom - zoom) * k;
+      group.rotation.y = yaw;
+      group.scale.setScalar(zoom);
+    },
+  };
+}
+
 function tryRenderer(): WebGLRenderer | null {
   try {
     return new WebGLRenderer({ antialias: true, alpha: true });
@@ -168,6 +198,8 @@ export const mountOrbitView: MountView = (root, ctx) => {
 
   const city = ctx.createScene();
   world.add(city.group);
+  // 무대의 회전·확대는 큰 화면만 따른다. 일반 관객 폰은 값을 받아도 무시한다.
+  const view = createViewFollower(city.group, stageMode);
 
   // 정보 면(바텀시트나 큰 화면 패널)을 피해, 보이는 영역 가운데에 도시가 오도록 시야를 옮긴다.
   const resize = () => {
@@ -189,6 +221,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     const dt = Math.min(Math.max((t - last) / 1000, 0), 0.1);
     last = t;
     controls.update(dt);
+    view.step(dt);
     city.update(dt, camera);
     renderer.render(world, camera);
   });
@@ -206,6 +239,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     onLayout: (mode) => followLayout(city, ctx.index, ctx.store.getState().month, mode),
     onLift: (gu) => city.lift(gu),
     onVote: (text) => voteLine.show(text),
+    onView: stageMode ? (yaw, zoom) => view.set(yaw, zoom) : undefined,
   });
 
   return () => {

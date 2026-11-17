@@ -18,7 +18,7 @@ vi.mock("./stageFollow", () => ({
 
 import { createStore } from "../state/store";
 import { drawQr } from "../ui/qr";
-import { mountOrbitView } from "./orbitView";
+import { createViewFollower, mountOrbitView } from "./orbitView";
 import type { ViewContext } from "./types";
 
 type Listener = () => void;
@@ -128,5 +128,58 @@ describe("mountOrbitView 마운트 스모크", () => {
     expect(root.querySelector("[data-stage]")!.html).toContain("stage-fail");
     unmount();
     expect(root.html).toBe("");
+  });
+});
+
+describe("createViewFollower: 큰 화면만 무대 yaw·zoom을 따른다", () => {
+  const mkGroup = () => {
+    const g = { rotation: { y: 0 }, scale: { v: 1, setScalar(n: number) { this.v = n; } } };
+    return g;
+  };
+
+  it("큰 화면: 여러 프레임 뒤 목표 yaw·zoom에 닿는다(처음엔 중간값)", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true);
+    f.set(1, 1.5);
+    f.step(1 / 60);
+    expect(g.rotation.y).toBeGreaterThan(0);
+    expect(g.rotation.y).toBeLessThan(1);
+    expect(g.scale.v).toBeGreaterThan(1);
+    expect(g.scale.v).toBeLessThan(1.5);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.rotation.y).toBeCloseTo(1, 3);
+    expect(g.scale.v).toBeCloseTo(1.5, 3);
+  });
+
+  it("일반 3D(관객 폰): 값을 받아도 group은 그대로", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, false);
+    f.set(2, 1.6);
+    for (let i = 0; i < 60; i++) f.step(1 / 60);
+    expect(g.rotation.y).toBe(0);
+    expect(g.scale.v).toBe(1);
+  });
+
+  it("π 경계를 넘으면 가까운 쪽으로 돈다", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true);
+    f.set(3.0, 1);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    f.set(-3.0, 1); // 3.0 → -3.0은 짧게 0.28 rad(π 너머)
+    f.step(1 / 60);
+    expect(g.rotation.y).toBeGreaterThan(3.0); // 0쪽으로 되감지 않는다
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(Math.cos(g.rotation.y)).toBeCloseTo(Math.cos(-3.0), 3);
+  });
+
+  it("(0, 1)로 돌아간다", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true);
+    f.set(1, 1.4);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    f.set(0, 1);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.rotation.y).toBeCloseTo(0, 3);
+    expect(g.scale.v).toBeCloseTo(1, 3);
   });
 });

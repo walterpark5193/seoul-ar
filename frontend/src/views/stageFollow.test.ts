@@ -224,3 +224,48 @@ describe("stageFollow: 무대가 사라지면(30초 무소식) 폰을 지도로 
     expect(o.onStage).not.toHaveBeenCalledWith(false);
   });
 });
+
+describe("stageFollow: onView (yaw·zoom)", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  const base = { v: 1, type: "stage", mode: "map", lifted: null, ts: 1 } as const;
+
+  function setupView(follow: boolean) {
+    const store = createStore({ ...INITIAL_STATE, month: "202611", follow });
+    const f = fakeChannel();
+    const o = { onLayout: vi.fn(), onLift: vi.fn(), onVote: vi.fn(), onView: vi.fn() };
+    bindStageFollow({ channel: f.channel, store, index, ...o });
+    return { store, f, o };
+  }
+
+  it("onView called while following; missing fields mean (0, 1)", () => {
+    const { f, o } = setupView(true);
+    f.emit({ ...base, yaw: 1.1, zoom: 1.3 });
+    expect(o.onView).toHaveBeenLastCalledWith(1.1, 1.3);
+    f.emit({ ...base, ts: 2 });
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+  });
+
+  it("not called when not following; applied when follow turns on", () => {
+    const { store, f, o } = setupView(false);
+    f.emit({ ...base, yaw: 1, zoom: 1.2 });
+    expect(o.onView).not.toHaveBeenCalled();
+    store.dispatch({ type: "follow" });
+    expect(o.onView).toHaveBeenLastCalledWith(1, 1.2);
+  });
+
+  it("onView reset on stale", () => {
+    const { f, o } = setupView(true);
+    f.emit({ ...base, yaw: 1, zoom: 1.2 });
+    vi.advanceTimersByTime(STAGE_STALE_MS);
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+  });
+
+  it("follow off -> onView(0,1)", () => {
+    const { store, f, o } = setupView(true);
+    f.emit({ ...base, yaw: 1, zoom: 1.2 });
+    store.dispatch({ type: "local", metric: "count" }); // 직접 조작하면 따라가기가 꺼진다
+    expect(store.getState().follow).toBe(false);
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+  });
+});

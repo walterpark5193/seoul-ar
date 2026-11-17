@@ -11,6 +11,8 @@ export interface StageFollowOptions {
   onLayout(mode: StageMode): void; onLift(gu: string | null): void; onVote(text: string): void;
   /** 무대가 살아 있는지. StageMessage를 받으면 true, STAGE_STALE_MS 동안 소식이 없으면 false(arView 배너). */
   onStage?(active: boolean): void;
+  /** 따라가는 중 StageMessage가 오면 그 yaw·zoom(없으면 0, 1). 따라가기를 끄거나 무대가 사라지면 (0, 1). 큰 화면만 쓴다. */
+  onView?(yaw: number, zoom: number): void;
 }
 
 /** 무대 하트비트(10초)의 3배. 이 시간 동안 StageMessage가 없으면 무대가 떠난 것으로 본다. */
@@ -45,6 +47,7 @@ export function bindStageFollow(o: StageFollowOptions): () => void {
     applied = true;
     o.onLayout(m.mode);
     o.onLift(m.lifted);
+    o.onView?.(m.yaw ?? 0, m.zoom ?? 1);
   };
   const expire = () => {
     staleTimer = null;
@@ -52,6 +55,7 @@ export function bindStageFollow(o: StageFollowOptions): () => void {
     if (applied && o.store.getState().follow) {
       o.onLayout("map");
       o.onLift(null);
+      o.onView?.(0, 1);
     }
     applied = false;
     o.onStage?.(false);
@@ -75,6 +79,7 @@ export function bindStageFollow(o: StageFollowOptions): () => void {
       applied = false;
       o.onLayout("map");
       o.onLift(null);
+      o.onView?.(0, 1);
       return;
     }
     if (!s.follow || !last) return;

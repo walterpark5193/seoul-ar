@@ -27,6 +27,28 @@ describe("isStageMessage", () => {
   });
 });
 
+describe("stage message view (yaw·zoom)", () => {
+  it("isStageMessage accepts valid yaw/zoom and rejects bad ones", () => {
+    expect(isStageMessage({ ...stage, yaw: 1.2, zoom: 1.5 })).toBe(true);
+    expect(isStageMessage({ ...stage, yaw: Math.PI, zoom: 0.7 })).toBe(true);
+    for (const yaw of [NaN, Infinity, 4, -4, -Math.PI, "1"]) expect(isStageMessage({ ...stage, yaw })).toBe(false);
+    for (const zoom of [NaN, 2, 0.5, "1"]) expect(isStageMessage({ ...stage, zoom })).toBe(false);
+  });
+  it("stage message keys with view equal ALLOWED_KEYS.stage", () => {
+    const m = toStageMessage(ss, 5, { yaw: 0.5, zoom: 1.2 });
+    expect(Object.keys(m).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
+    expect(m.yaw).toBe(0.5);
+    expect(() => assertPublishable(m)).not.toThrow();
+    expect(() => assertPublishable({ ...m, zoom: 2 })).toThrow();
+    expect(() => assertPublishable({ ...m, extra: 1 })).toThrow();
+  });
+  it("toStageMessage without view omits fields", () => {
+    const m = toStageMessage(ss, 5);
+    expect("yaw" in m).toBe(false);
+    expect("zoom" in m).toBe(false);
+  });
+});
+
 describe("isVoteMessage", () => {
   it("정상 통과, 결과 null 허용", () => {
     expect(isVoteMessage(vote)).toBe(true);
@@ -60,7 +82,7 @@ describe("assertPublishable", () => {
 
 describe("toStageMessage / toVoteMessage", () => {
   it("키가 ALLOWED_KEYS와 정확히 같다", () => {
-    expect(Object.keys(toStageMessage(ss, 5)).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
+    expect(Object.keys(toStageMessage(ss, 5, { yaw: 0, zoom: 1 })).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
     expect(Object.keys(toVoteMessage(vs, 5)).sort()).toEqual([...ALLOWED_KEYS.vote].sort());
   });
   it("값 변환", () => {
