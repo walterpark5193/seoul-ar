@@ -24,7 +24,8 @@ describe("diffEffects", () => {
   });
   it("release emits lift null focus publish.state (no map-back)", () => {
     const e = diffEffects(s({ mode: "spread", lifted: "강남구" }), s({ mode: "map", lifted: null, focus: "강남구" }));
-    expect(types(e)).toEqual(["scene.layout", "scene.lift", "scene.focus", "publish.state", "publish.stage"]);
+    // 13.8: 펼치기에서 나가면 펼침 확대를 풀도록 rotate.reset이 맨 앞
+    expect(types(e)).toEqual(["rotate.reset", "scene.layout", "scene.lift", "scene.focus", "publish.state", "publish.stage"]);
     expect(e.some((x) => x.type === "narrate")).toBe(false);
     const e2 = diffEffects(s({ lifted: "강남구" }), s({ lifted: null, focus: "강남구" }));
     expect(types(e2)).toEqual(["scene.lift", "scene.focus", "publish.state", "publish.stage"]);
@@ -73,6 +74,7 @@ describe("diffEffects", () => {
   it("victory while lifted emits map-back", () => {
     const e = diffEffects(s({ mode: "spread", lifted: "강남구" }), s({ mode: "map", lifted: null, focus: null }));
     expect(e).toEqual([
+      { type: "rotate.reset" }, // 13.8: 펼치기에서 나갈 때도
       { type: "scene.layout", mode: "map" },
       { type: "scene.lift", gu: null },
       { type: "narrate", id: "map-back", interrupt: true, protect: false },
@@ -89,6 +91,7 @@ describe("diffEffects", () => {
       s({ mode: "map", focus: "마포구", vote: vote({ phase: "result", counts: [1, 2, 0], winner: "마포구" }) }),
     );
     expect(e).toEqual([
+      { type: "rotate.reset" }, // 13.8: 펼치기에서 나갈 때도
       { type: "scene.layout", mode: "map" },
       { type: "scene.focus", gu: "마포구" },
       { type: "narrate.stop" },
@@ -121,6 +124,7 @@ describe("diffEffects", () => {
       s({ mode: "map", focus: "노원구", vote: vote({ phase: "result", counts: [0, 0, 0], winner: "노원구", allZero: true }) }),
     );
     expect(e).toEqual([
+      { type: "rotate.reset" }, // 13.8: 펼치기에서 나갈 때도
       { type: "scene.layout", mode: "map" },
       { type: "scene.focus", gu: "노원구" },
       { type: "narrate.stop" },
@@ -189,6 +193,20 @@ describe("diffEffects", () => {
     expect(types(settle)).not.toContain("narrate.stop");
     // cause 없이 같은 상태 차이만으로는 내지 않는다(두 주먹인지 알 수 없음)
     expect(types(diffEffects(lifted, rotating))).not.toContain("narrate.stop");
+  });
+  it("spread zoom hold (13.8): grabTwo / release in spread, reset on leaving spread like entering", () => {
+    const twoFist: StageEvent = { type: "twoFist" };
+    const sp = s({ input: "hands", mode: "spread" });
+    const held = s({ input: "hands", mode: "spread", rotate: "two" });
+    expect(diffEffects(sp, held, twoFist)).toEqual([{ type: "rotate.grabTwo" }]);
+    expect(diffEffects(held, sp, { type: "twoFistEnd" })).toEqual([{ type: "rotate.release" }]);
+    // 잡은 채 지도로 나가면 놓기가 아니라 리셋 하나가 scene.layout 앞
+    expect(types(diffEffects(held, s({ input: "hands" }), { type: "spread" }))).toEqual([
+      "rotate.reset", "scene.layout", "narrate", "publish.stage",
+    ]);
+    // cause가 없어도 상태 차이(spread→map)로 리셋
+    expect(diffEffects(sp, s({ input: "hands" }))[0]).toEqual({ type: "rotate.reset" });
+    expect(types(diffEffects(sp, s({ input: "hands" }))).filter((t) => t === "rotate.reset")).toHaveLength(1);
   });
   it("NARRATION_IDS literals", () => {
     expect(NARRATION_IDS.voteResult("마포구", 2)).toBe("vote-result-마포구-2");

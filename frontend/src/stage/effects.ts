@@ -1,4 +1,4 @@
-// 상태 변화 → 부수 효과 목록. 계약: docs/CONTRACTS-stage.md 3.2, 13.4(rotate.*). 순수 함수.
+// 상태 변화 → 부수 효과 목록. 계약: docs/CONTRACTS-stage.md 3.2, 13.4(rotate.*), 13.8(펼치기 나갈 때 리셋). 순수 함수.
 import type { Effect, StageEvent, StageState, VoteState } from "./types";
 
 export const NARRATION_IDS = {
@@ -22,13 +22,14 @@ function entered(prev: VoteState | null, next: VoteState, phase: VoteState["phas
 }
 
 /**
- * 회전기 조작(계약 13.4). 정면 복귀(펼치기 진입·투표 시작·입력 전환·브이)면 rotate.reset 하나만 낸다(놓기·관성 없음).
+ * 회전기 조작(계약 13.4). 정면 복귀(펼치기 진입·나가기·투표 시작·입력 전환·브이)면 rotate.reset 하나만 낸다(놓기·관성 없음).
+ * 펼치기에서 나갈 때(토글·앉히기·브이·투표 확정 등 원인과 무관)도 들어갈 때처럼 리셋해 펼침 확대·panX를 지도에 남기지 않는다(13.8).
  * 아니면 잡기 상태 변화대로: 놓으면 release, 잡으면 grabOne/grabTwo, 관성 중에 잡았으면 그 앞에 catch.
  * 브이는 상태가 그대로일 수 있어(돌려 놓고 놓인 지도) 상태 차이로는 알 수 없다: cause로 알아본다.
  */
 function rotateEffects(prev: StageState, next: StageState, cause: StageEvent | undefined): Effect[] {
   const reset =
-    (prev.mode === "map" && next.mode === "spread") ||
+    prev.mode !== next.mode ||
     (next.vote !== null && newRound(prev.vote, next.vote)) ||
     prev.input !== next.input ||
     (cause?.type === "victory" && next !== prev); // 리듀서가 무시한 이벤트는 같은 객체를 돌려준다

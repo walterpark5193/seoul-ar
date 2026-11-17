@@ -1,8 +1,8 @@
 // #/3d: 같은 씬을 손가락으로 돌려 본다. 천천히 자동 회전(reduced-motion이면 멈춤), 바텀시트.
 // #/3d?stage=1: 큰 화면 모드(CONTRACTS 13). 같은 씬·같은 라이브 따라가기지만 따라가기 고정, 직접 조작 없음,
-// 무대가 살아 있는 동안은 자동 회전을 멈추고 정면에서 무대의 회전·확대를 그대로 보인다(CONTRACTS-stage 13.6),
+// 무대가 살아 있는 동안은 자동 회전을 멈추고 정면에서 무대의 회전·확대·펼침 옆 이동을 그대로 보인다(CONTRACTS-stage 13.6, 13.8),
 // 바텀시트 대신 왼쪽 위 큰 제목·수치·AI 해설(views/stage.ts), 오른쪽 아래 관객용 QR, 잠시 움직임이 없으면 커서를 숨긴다.
-import { PerspectiveCamera, Scene, WebGLRenderer } from "three";
+import { PerspectiveCamera, Scene, WebGLRenderer, type Vector3 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Narration } from "../data/narration";
 import type { GuData } from "../data/types";
@@ -24,10 +24,18 @@ export function autoRotateSpeedFor(radPerSec: number): number {
   return (radPerSec * 60) / (2 * Math.PI);
 }
 
-/** 큰 화면이 무대의 yaw·zoom을 따라가는 속도(1/초). 값이 5Hz로 오므로 그 사이를 부드럽게 메운다. */
+/** 큰 화면이 무대의 yaw·zoom·panX를 따라가는 속도(1/초). 값이 5Hz로 오므로 그 사이를 부드럽게 메운다. */
 export const VIEW_FOLLOW_RATE = 8;
 
-interface ViewTarget { rotation: { y: number }; scale: { setScalar(n: number): unknown } }
+interface ViewTarget { rotation: { y: number }; scale: { setScalar(n: number): unknown }; position: { x: number } }
+
+/**
+ * 확대 1배일 때 target 평면에서 보이는 화면 절반 폭(월드 단위, CONTRACTS-stage 13.8의 hb): tan(세로 fov/2)·aspect·target까지 거리.
+ * setViewOffset은 창을 옮길 뿐 폭은 그대로라 정보 패널 오프셋과 무관하다.
+ */
+export function zoomOneHalfWidth(camera: { fov: number; aspect: number; position: Vector3 }, target: Vector3): number {
+  return Math.tan((camera.fov * Math.PI) / 360) * camera.aspect * camera.position.distanceTo(target);
+}
 
 const TWO_PI = 2 * Math.PI;
 /** (-π, π] 근처로 감싼다(가까운 쪽 각도 차이). */
@@ -38,37 +46,49 @@ export interface ViewFollowerOptions {
   rate?: number;
   /** 동작 줄이기: 보간 없이 다음 프레임에 목표 그대로. */
   reducedMotion?: boolean;
+  /**
+   * 이 화면 카메라의 확대 1배 절반 폭 hb(zoomOneHalfWidth). 창 크기가 바뀌어도 맞도록 프레임마다 읽는다.
+   * 없으면 panX를 무시하고 group.position은 건드리지 않는다.
+   */
+  halfWidth?: () => number;
 }
 
 /**
- * 무대가 보낸 yaw·zoom을 도시 group에 부드럽게 적용한다(CONTRACTS-stage 13.6).
+ * 무대가 보낸 yaw·zoom·panX를 도시 group에 부드럽게 적용한다(CONTRACTS-stage 13.6, 13.8).
  * enabled가 false(일반 관객 폰)면 set은 아무 일도 하지 않아 group은 그대로다.
  * 새 목표 yaw는 직전 목표 기준으로 이어 붙인다(unwrap): 목표 사이가 180° 미만이면(5Hz 발행이면 900°/s 미만)
  * 표시가 목표를 늦게 따라가는 중이라도 무대가 돈 방향 그대로 돈다(거꾸로 짧은 쪽으로 돌지 않는다).
+ * panX(펼침 확대의 옆 이동)는 도시를 −panX·hb만큼 옆(월드 x, 큰 화면은 무대를 따르는 동안 정면)으로 옮긴다. hb는 도시 자기
+ * 단위(확대 전)라 group 원점 기준 배율을 곱해 월드로는 −panX·hb·zoom: 무대 화면 중심(panX·hb)이 큰 화면 가운데에,
+ * 무대 화면의 양 끝이 큰 화면의 양 끝에 온다(근사: 두 화면의 1배 구도가 같다고 본다).
  */
 export function createViewFollower(group: ViewTarget, enabled: boolean, opts: ViewFollowerOptions = {}) {
   const rate = opts.rate ?? VIEW_FOLLOW_RATE;
   // tYaw는 받은 yaw를 이어 붙인 연속 각도, lastYaw는 마지막으로 받은 원래 값.
-  let yaw = 0, zoom = 1, tYaw = 0, tZoom = 1, lastYaw = 0;
+  let yaw = 0, zoom = 1, pan = 0, tYaw = 0, tZoom = 1, tPan = 0, lastYaw = 0;
+  const ease = (from: number, to: number, k: number) => (Math.abs(to - from) < 1e-4 ? to : from + (to - from) * k);
   return {
-    set(y: number, z: number): void {
-      if (!enabled || !Number.isFinite(y) || !Number.isFinite(z)) return;
+    set(y: number, z: number, p = 0): void {
+      if (!enabled || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(p)) return;
       tYaw += wrapAngle(y - lastYaw);
       lastYaw = y;
       tZoom = z;
+      tPan = p;
     },
     /** 한 프레임. 표시 yaw는 연속 목표를 그대로 따라간다(여기서는 감싸지 않는다). */
     step(dt: number): void {
       if (!enabled) return;
       const k = opts.reducedMotion ? 1 : 1 - Math.exp(-rate * Math.max(dt, 0));
-      const dy = tYaw - yaw;
-      yaw = Math.abs(dy) < 1e-4 ? tYaw : yaw + dy * k;
-      zoom = Math.abs(tZoom - zoom) < 1e-4 ? tZoom : zoom + (tZoom - zoom) * k;
+      yaw = ease(yaw, tYaw, k);
+      zoom = ease(zoom, tZoom, k);
+      pan = ease(pan, tPan, k);
       // 여러 바퀴 돌아도 수가 커지지 않게 표시와 목표를 함께 한 바퀴 단위로 되접는다(보이는 각도는 같다).
       const turns = TWO_PI * Math.round(yaw / TWO_PI);
       if (turns !== 0) { yaw -= turns; tYaw -= turns; }
       group.rotation.y = yaw;
       group.scale.setScalar(zoom);
+      // 0 + 0이 -0이 되지 않게(가운데는 늘 +0)
+      if (opts.halfWidth) group.position.x = pan === 0 ? 0 : -pan * opts.halfWidth() * zoom;
     },
   };
 }
@@ -250,8 +270,12 @@ export const mountOrbitView: MountView = (root, ctx) => {
 
   const city = ctx.createScene();
   world.add(city.group);
-  // 무대의 회전·확대는 큰 화면만 따른다. 일반 관객 폰은 값을 받아도 무시한다.
-  const view = createViewFollower(city.group, stageMode, { reducedMotion: ctx.reducedMotion });
+  // 무대의 회전·확대·펼침 옆 이동은 큰 화면만 따른다. 일반 관객 폰은 값을 받아도 무시한다.
+  // 옆 이동 폭 hb는 이 화면 카메라의 1배 절반 폭(창 비율이 바뀌면 같이 바뀐다).
+  const view = createViewFollower(city.group, stageMode, {
+    reducedMotion: ctx.reducedMotion,
+    halfWidth: () => zoomOneHalfWidth(camera, controls.target),
+  });
   // 큰 화면은 무대가 살아 있는 동안 자동 회전을 멈추고 정면에서 무대 각도를 그대로 보인다(일반 #/3d는 없음).
   const orbit = stageMode ? createStageOrbit(controls, ctx.reducedMotion) : null;
 
@@ -294,7 +318,7 @@ export const mountOrbitView: MountView = (root, ctx) => {
     onLayout: (mode) => followLayout(city, ctx.index, ctx.store.getState().month, mode),
     onLift: (gu) => city.lift(gu),
     onVote: (text) => voteLine.show(text),
-    onView: stageMode ? (yaw, zoom) => view.set(yaw, zoom) : undefined,
+    onView: stageMode ? (yaw, zoom, panX) => view.set(yaw, zoom, panX) : undefined,
     // StageMessage마다 true, 30초 무소식(stale)이면 false: 그동안 자동 회전을 멈춘다.
     onStage: orbit ? (active) => orbit.setLive(active) : undefined,
   });

@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const gl = vi.hoisted(() => ({
   ok: false,
   loop: null as ((t: number) => void) | null,
-  controls: null as null | { autoRotate: boolean; enabled: boolean; enableDamping: boolean; getAzimuthalAngle(): number },
+  controls: null as null | {
+    autoRotate: boolean; enabled: boolean; enableDamping: boolean; getAzimuthalAngle(): number;
+    target: import("three").Vector3;
+  },
+  camera: null as null | import("three").PerspectiveCamera,
 }));
 
 vi.mock("three", async (importOriginal) => ({
@@ -24,7 +28,7 @@ vi.mock("three", async (importOriginal) => ({
     setPixelRatio() {}
     setClearColor() {}
     setSize() {}
-    render() {}
+    render(_scene: unknown, camera: import("three").PerspectiveCamera) { gl.camera = camera; }
     dispose() {}
     forceContextLoss() {}
     setAnimationLoop(fn: ((t: number) => void) | null) { gl.loop = fn; }
@@ -50,10 +54,10 @@ vi.mock("./stageFollow", () => ({
   followLayout: vi.fn(),
 }));
 
-import { Group } from "three";
+import { Group, Vector3 } from "three";
 import { createStore } from "../state/store";
 import { drawQr } from "../ui/qr";
-import { createStageOrbit, createViewFollower, mountOrbitView } from "./orbitView";
+import { createStageOrbit, createViewFollower, mountOrbitView, zoomOneHalfWidth } from "./orbitView";
 import { bindStageFollow, type StageFollowOptions } from "./stageFollow";
 import type { ViewContext } from "./types";
 
@@ -171,7 +175,7 @@ describe("mountOrbitView 마운트 스모크", () => {
 
 describe("createViewFollower: 큰 화면만 무대 yaw·zoom을 따른다", () => {
   const mkGroup = () => {
-    const g = { rotation: { y: 0 }, scale: { v: 1, setScalar(n: number) { this.v = n; } } };
+    const g = { rotation: { y: 0 }, scale: { v: 1, setScalar(n: number) { this.v = n; } }, position: { x: 0 } };
     return g;
   };
 
@@ -246,6 +250,14 @@ describe("createViewFollower: 큰 화면만 무대 yaw·zoom을 따른다", () =
     }
   });
 
+  it("panX 없이 set하면(기존 호출) 옆 이동 없음", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true, { halfWidth: () => 2 });
+    f.set(0.5, 1.4);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.position.x).toBeCloseTo(0, 9);
+  });
+
   it("reduced-motion: 보간 없이 다음 프레임에 목표 그대로", () => {
     const g = mkGroup();
     const f = createViewFollower(g, true, { reducedMotion: true });
@@ -258,6 +270,76 @@ describe("createViewFollower: 큰 화면만 무대 yaw·zoom을 따른다", () =
     expect(Math.cos(g.rotation.y)).toBeCloseTo(Math.cos(-3.1), 9);
     expect(Math.sin(g.rotation.y)).toBeCloseTo(Math.sin(-3.1), 9);
     expect(g.scale.v).toBeCloseTo(0.7, 9);
+  });
+});
+
+describe("createViewFollower: 펼침 확대의 panX를 도시 옆 이동으로(계약 13.8)", () => {
+  const mkGroup = () => ({ rotation: { y: 0 }, scale: { v: 1, setScalar(n: number) { this.v = n; } }, position: { x: 0 } });
+  const HB = 0.8;
+  const PAN = -(1 - 1 / 1.6); // 왼쪽 끝(1위 쪽)에서 1.6배
+
+  it("큰 화면: 도시를 −panX·hb(확대 전 도시 단위)만큼 옮긴다 — 무대가 가운데 둔 쪽이 가운데", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true, { halfWidth: () => HB });
+    f.set(0, 1.6, PAN);
+    f.step(1 / 60);
+    expect(g.position.x).toBeGreaterThan(0); // 부드럽게: 첫 프레임은 중간
+    expect(g.position.x).toBeLessThan(-PAN * HB * 1.6);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.scale.v).toBeCloseTo(1.6, 3);
+    expect(g.position.x).toBeCloseTo(-PAN * HB * 1.6, 3);
+    // 도시 단위 x = panX·hb(무대 화면 중심에 해당하는 점)가 월드 x 0(화면 가운데)에 온다
+    expect(PAN * HB * g.scale.v + g.position.x).toBeCloseTo(0, 3);
+    // 무대 화면 왼쪽 끝(panX − 1/zoom)은 큰 화면 왼쪽 끝(−hb)에 온다: 1위 쪽이 화면 안에 남는다
+    expect((PAN - 1 / 1.6) * HB * g.scale.v + g.position.x).toBeCloseTo(-HB, 3);
+  });
+
+  it("panX 0으로 돌아가면 옆 이동도 0으로, 창 크기가 바뀌면 hb를 다시 읽는다", () => {
+    const g = mkGroup();
+    let hb = HB;
+    const f = createViewFollower(g, true, { halfWidth: () => hb });
+    f.set(0, 1.5, 0.3);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.position.x).toBeCloseTo(-0.3 * HB * 1.5, 3);
+    hb = 1.2;
+    f.step(1 / 60);
+    expect(g.position.x).toBeCloseTo(-0.3 * 1.2 * 1.5, 3);
+    f.set(0, 1, 0);
+    for (let i = 0; i < 300; i++) f.step(1 / 60);
+    expect(g.position.x).toBeCloseTo(0, 3);
+  });
+
+  it("reduced-motion: 다음 프레임에 그대로", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true, { reducedMotion: true, halfWidth: () => HB });
+    f.set(0, 1.6, PAN);
+    f.step(1 / 60);
+    expect(g.position.x).toBeCloseTo(-PAN * HB * 1.6, 9);
+  });
+
+  it("일반 3D(관객 폰): panX를 받아도 도시는 옆으로 가지 않는다", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, false, { halfWidth: () => HB });
+    f.set(0, 1.6, PAN);
+    for (let i = 0; i < 60; i++) f.step(1 / 60);
+    expect(g.position.x).toBe(0);
+    expect(g.scale.v).toBe(1);
+  });
+
+  it("숫자가 아닌 panX는 받지 않는다", () => {
+    const g = mkGroup();
+    const f = createViewFollower(g, true, { halfWidth: () => HB });
+    f.set(0, 1.6, Number.NaN);
+    for (let i = 0; i < 60; i++) f.step(1 / 60);
+    expect(g.position.x).toBe(0);
+    expect(g.scale.v).toBe(1);
+  });
+
+  it("zoomOneHalfWidth: tan(세로 fov/2)·aspect·target까지 거리", () => {
+    const cam = { fov: 38, aspect: 16 / 9, position: new Vector3(0, 0.95, 1.1) };
+    const target = new Vector3(0, 0.04, 0);
+    const d = Math.hypot(0.91, 1.1);
+    expect(zoomOneHalfWidth(cam, target)).toBeCloseTo(Math.tan((19 * Math.PI) / 180) * (16 / 9) * d, 9);
   });
 });
 
@@ -345,7 +427,7 @@ describe("mountOrbitView 큰 화면 배선: 무대를 따르는 동안 자동 �
     m.frames(120); // 0.3 rad/s로 2초
     expect(Math.abs(m.controls.getAzimuthalAngle())).toBeGreaterThan(0.4);
     m.opts.onStage!(true);
-    m.opts.onView!(1.2, 1.3);
+    m.opts.onView!(1.2, 1.3, 0);
     expect(m.controls.autoRotate).toBe(false);
     // 정면으로 곧게 돌아온다: 남은 방위가 줄기만 하고 정면을 지나쳐 되돌아오지 않는다
     const start = m.controls.getAzimuthalAngle();
@@ -363,7 +445,7 @@ describe("mountOrbitView 큰 화면 배선: 무대를 따르는 동안 자동 �
     m.frames(60);
     expect(m.controls.getAzimuthalAngle()).toBeCloseTo(0, 3); // 서 있다
     // 무대 30초 무소식: bindStageFollow가 (0, 1)과 onStage(false)를 낸다
-    m.opts.onView!(0, 1);
+    m.opts.onView!(0, 1, 0);
     m.opts.onStage!(false);
     expect(m.controls.autoRotate).toBe(true);
     m.frames(120);
@@ -376,12 +458,36 @@ describe("mountOrbitView 큰 화면 배선: 무대를 따르는 동안 자동 �
     const m = mount("stage=1", true);
     expect(m.controls.autoRotate).toBe(false);
     m.opts.onStage!(true);
-    m.opts.onView!(-2.5, 0.8);
+    m.opts.onView!(-2.5, 0.8, 0);
     m.frames(1);
     expect(m.group.rotation.y).toBeCloseTo(-2.5, 6);
     expect(m.group.scale.x).toBeCloseTo(0.8, 6);
     m.opts.onStage!(false);
     expect(m.controls.autoRotate).toBe(false);
+    m.unmount();
+  });
+
+  it("큰 화면: 펼침 panX를 자기 카메라 hb로 환산해 무대가 가운데 둔 쪽을 화면 가운데에(13.8)", () => {
+    const m = mount("stage=1");
+    m.opts.onStage!(true);
+    const pan = -(1 - 1 / 1.6);
+    m.opts.onView!(0, 1.6, pan);
+    m.frames(240);
+    const camera = gl.camera!;
+    expect(m.controls.getAzimuthalAngle()).toBeCloseTo(0, 4); // 정면
+    const hb = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect * camera.position.distanceTo(m.controls.target);
+    expect(m.group.position.x).toBeCloseTo(-pan * hb * 1.6, 3);
+    // 도시 단위 x = panX·hb(무대 화면 중심) 점이 target과 같은 화면 x에 투영된다
+    m.group.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const centre = new Vector3(pan * hb, 0.04, 0).applyMatrix4(m.group.matrixWorld).project(camera);
+    const target = m.controls.target.clone().project(camera);
+    expect(centre.x).toBeCloseTo(target.x, 3);
+    // 무대가 끊기면 (0, 1, 0)으로 돌아온다
+    m.opts.onView!(0, 1, 0);
+    m.opts.onStage!(false);
+    m.frames(240);
+    expect(m.group.position.x).toBeCloseTo(0, 3);
     m.unmount();
   });
 
@@ -392,6 +498,8 @@ describe("mountOrbitView 큰 화면 배선: 무대를 따르는 동안 자동 �
     expect(m.controls.autoRotate).toBe(true);
     expect(m.controls.enabled).toBe(true);
     expect(m.controls.enableDamping).toBe(true);
+    m.frames(60);
+    expect(m.group.position.x).toBe(0); // 도시를 옆으로 옮기지 않는다
     m.unmount();
   });
 });

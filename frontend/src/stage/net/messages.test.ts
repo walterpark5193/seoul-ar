@@ -35,9 +35,10 @@ describe("stage message view (yaw·zoom)", () => {
     for (const zoom of [NaN, 2, 0.5, "1"]) expect(isStageMessage({ ...stage, zoom })).toBe(false);
   });
   it("stage message keys with view equal ALLOWED_KEYS.stage", () => {
-    const m = toStageMessage(ss, 5, { yaw: 0.5, zoom: 1.2 });
+    const m = toStageMessage(ss, 5, { yaw: 0.5, zoom: 1.2, panX: -0.3 });
     expect(Object.keys(m).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
     expect(m.yaw).toBe(0.5);
+    expect(m.panX).toBe(-0.3);
     expect(() => assertPublishable(m)).not.toThrow();
     expect(() => assertPublishable({ ...m, zoom: 2 })).toThrow();
     expect(() => assertPublishable({ ...m, extra: 1 })).toThrow();
@@ -46,6 +47,38 @@ describe("stage message view (yaw·zoom)", () => {
     const m = toStageMessage(ss, 5);
     expect("yaw" in m).toBe(false);
     expect("zoom" in m).toBe(false);
+    expect("panX" in m).toBe(false);
+  });
+});
+
+describe("stage message panX (13.8)", () => {
+  it("ALLOWED_KEYS.stage is exactly the stage fields plus yaw·zoom·panX (no other new keys)", () => {
+    expect([...ALLOWED_KEYS.stage]).toEqual(["v", "type", "mode", "lifted", "ts", "yaw", "zoom", "panX"]);
+    expect(Object.isFrozen(ALLOWED_KEYS.stage)).toBe(true);
+  });
+  it("isStageMessage accepts finite panX in [-1, 1]", () => {
+    for (const panX of [-1, -0.375, 0, 0.2, 1]) expect(isStageMessage({ ...stage, yaw: 0, zoom: 1.6, panX })).toBe(true);
+    expect(isStageMessage({ ...stage, panX: 0.5 })).toBe(true); // 다른 view 필드처럼 선택
+  });
+  it("isStageMessage rejects bad panX", () => {
+    for (const panX of [NaN, 1.5, -1.5, 1.0001, Infinity, -Infinity, "x", "0", null, [0], {}]) {
+      expect(isStageMessage({ ...stage, panX })).toBe(false);
+    }
+  });
+  it("keys are exact with view; panX is validated on publish", () => {
+    const m = toStageMessage(ss, 5, { yaw: 0, zoom: 1.6, panX: -0.375 });
+    expect(Object.keys(m).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
+    expect(m).toEqual({ v: 1, type: "stage", mode: "spread", lifted: "중구", ts: 5, yaw: 0, zoom: 1.6, panX: -0.375 });
+    expect(() => assertPublishable(m)).not.toThrow();
+    expect(() => assertPublishable({ ...m, panX: 1.5 })).toThrow();
+    expect(() => assertPublishable({ ...m, panX: "x" })).toThrow();
+    expect(() => assertPublishable({ ...m, panY: 0 })).toThrow(); // 다른 새 키는 여전히 거절
+  });
+  it("a view without panX omits it (the big screen reads it as 0, centre)", () => {
+    const m = toStageMessage(ss, 5, { yaw: 0.5, zoom: 1.2 });
+    expect("panX" in m).toBe(false);
+    expect(m).toEqual({ v: 1, type: "stage", mode: "spread", lifted: "중구", ts: 5, yaw: 0.5, zoom: 1.2 });
+    expect(() => assertPublishable(m)).not.toThrow();
   });
 });
 
@@ -82,7 +115,7 @@ describe("assertPublishable", () => {
 
 describe("toStageMessage / toVoteMessage", () => {
   it("키가 ALLOWED_KEYS와 정확히 같다", () => {
-    expect(Object.keys(toStageMessage(ss, 5, { yaw: 0, zoom: 1 })).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
+    expect(Object.keys(toStageMessage(ss, 5, { yaw: 0, zoom: 1, panX: 0 })).sort()).toEqual([...ALLOWED_KEYS.stage].sort());
     expect(Object.keys(toVoteMessage(vs, 5)).sort()).toEqual([...ALLOWED_KEYS.vote].sort());
   });
   it("값 변환", () => {

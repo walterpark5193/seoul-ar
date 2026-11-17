@@ -225,7 +225,7 @@ describe("stageFollow: 무대가 사라지면(30초 무소식) 폰을 지도로 
   });
 });
 
-describe("stageFollow: onView (yaw·zoom)", () => {
+describe("stageFollow: onView (yaw·zoom·panX)", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
   const base = { v: 1, type: "stage", mode: "map", lifted: null, ts: 1 } as const;
@@ -238,12 +238,46 @@ describe("stageFollow: onView (yaw·zoom)", () => {
     return { store, f, o };
   }
 
-  it("onView called while following; missing fields mean (0, 1)", () => {
+  it("onView called while following; missing fields mean (0, 1, 0)", () => {
     const { f, o } = setupView(true);
     f.emit({ ...base, yaw: 1.1, zoom: 1.3 });
-    expect(o.onView).toHaveBeenLastCalledWith(1.1, 1.3);
+    expect(o.onView).toHaveBeenLastCalledWith(1.1, 1.3, 0); // panX 없음 → 0
     f.emit({ ...base, ts: 2 });
-    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1, 0);
+  });
+
+  it("passes panX through (13.8)", () => {
+    const { f, o } = setupView(true);
+    f.emit({ ...base, mode: "spread", yaw: 0, zoom: 1.6, panX: -0.375, ts: 2 });
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1.6, -0.375);
+    f.emit({ ...base, mode: "spread", zoom: 1.2, panX: 0.1, ts: 3 }); // yaw만 없음
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1.2, 0.1);
+    // 형식이 틀린 panX는 메시지째 버린다(직전 값 그대로)
+    f.emit({ ...base, mode: "spread", zoom: 1.6, panX: 1.5, ts: 4 });
+    f.emit({ ...base, mode: "spread", zoom: 1.6, panX: Number.NaN, ts: 5 });
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1.2, 0.1);
+  });
+
+  it("panX: re-applied when follow turns on; reset to (0, 1, 0) on stale and on follow off", () => {
+    const a = setupView(false);
+    a.f.emit({ ...base, mode: "spread", zoom: 1.5, panX: 0.3 });
+    expect(a.o.onView).not.toHaveBeenCalled();
+    a.store.dispatch({ type: "follow" });
+    expect(a.o.onView).toHaveBeenLastCalledWith(0, 1.5, 0.3);
+    a.store.dispatch({ type: "local", metric: "count" });
+    expect(a.o.onView).toHaveBeenLastCalledWith(0, 1, 0);
+
+    const b = setupView(true);
+    b.f.emit({ ...base, mode: "spread", zoom: 1.5, panX: -0.3 });
+    vi.advanceTimersByTime(STAGE_STALE_MS);
+    expect(b.o.onView).toHaveBeenLastCalledWith(0, 1, 0);
+  });
+
+  it("the stage's final {map, null} without a view returns the big screen to (0, 1, 0)", () => {
+    const { f, o } = setupView(true);
+    f.emit({ ...base, mode: "spread", zoom: 1.6, panX: -0.375 });
+    f.emit({ v: 1, type: "stage", mode: "map", lifted: null, ts: 9 });
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1, 0);
   });
 
   it("not called when not following; applied when follow turns on", () => {
@@ -251,14 +285,14 @@ describe("stageFollow: onView (yaw·zoom)", () => {
     f.emit({ ...base, yaw: 1, zoom: 1.2 });
     expect(o.onView).not.toHaveBeenCalled();
     store.dispatch({ type: "follow" });
-    expect(o.onView).toHaveBeenLastCalledWith(1, 1.2);
+    expect(o.onView).toHaveBeenLastCalledWith(1, 1.2, 0);
   });
 
   it("onView reset on stale", () => {
     const { f, o } = setupView(true);
     f.emit({ ...base, yaw: 1, zoom: 1.2 });
     vi.advanceTimersByTime(STAGE_STALE_MS);
-    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1, 0);
   });
 
   it("follow off -> onView(0,1)", () => {
@@ -266,6 +300,6 @@ describe("stageFollow: onView (yaw·zoom)", () => {
     f.emit({ ...base, yaw: 1, zoom: 1.2 });
     store.dispatch({ type: "local", metric: "count" }); // 직접 조작하면 따라가기가 꺼진다
     expect(store.getState().follow).toBe(false);
-    expect(o.onView).toHaveBeenLastCalledWith(0, 1);
+    expect(o.onView).toHaveBeenLastCalledWith(0, 1, 0);
   });
 });

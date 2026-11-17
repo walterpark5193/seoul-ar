@@ -1,4 +1,4 @@
-// 무대 상태 리듀서 (CONTRACTS-stage 3.1, 13.4 회전 잡기, 설계 5.3). 순수·불변. 시간은 이벤트의 now로만 받는다.
+// 무대 상태 리듀서 (CONTRACTS-stage 3.1, 13.4 회전 잡기, 13.8 펼침 확대, 설계 5.3). 순수·불변. 시간은 이벤트의 now로만 받는다.
 import type { Metric, Stat } from "../data/types";
 import { GU_ORDER } from "../data/gu";
 import type { InputMode, StageEvent, StageState, VoteMethod, VoteState } from "./types";
@@ -46,12 +46,15 @@ function release(s: StageState): StageState {
 }
 
 /**
- * 두 주먹: 지도에서만 두 손 돌리기·확대. 한 손 회전·관성 중이면 그대로 넘겨받는다.
- * 주 손 주먹이 같은 프레임이나 몇 프레임 앞에 확정돼 구를 들었으면 앉히지 않고 내려놓는다(focus 그대로):
- * 두 주먹은 돌리기다(계약 13.4). 그 구 해설은 effects가 narrate.stop으로 멈춘다. 펼치기에서 든 구는 그대로 둔다.
+ * 두 주먹. 지도에서는 두 손 돌리기·확대: 한 손 회전·관성 중이면 그대로 넘겨받고, 주 손 주먹이 같은 프레임이나
+ * 몇 프레임 앞에 확정돼 구를 들었으면 앉히지 않고 내려놓는다(focus 그대로): 두 주먹은 돌리기다(계약 13.4).
+ * 그 구 해설은 effects가 narrate.stop으로 멈춘다.
+ * 펼치기에서는 확대 전용 잡기(계약 13.8): 같은 rotate "two"지만 회전은 stageView가 회전기에서 잠근다
+ * ("왼쪽이 가장 비쌉니다" 유지). 펼치기에서 든 구가 있으면 그대로 두고 무시한다.
  */
 function twoFist(s: StageState): StageState {
-  if (voting(s) || s.mode !== "map" || s.rotate === "two") return s;
+  if (voting(s) || s.rotate === "two") return s;
+  if (s.mode === "spread" && s.lifted !== null) return s;
   return { ...s, rotate: "two", spinning: false, hover: null, lifted: null };
 }
 
@@ -175,8 +178,9 @@ export function reduceStage(s: StageState, e: StageEvent): StageState {
         case "spread": {
           const base = clearResult(s);
           if (base.lifted !== null) return base;
-          // 펼치기는 정면에서만 읽힌다("왼쪽이 가장 비쌉니다"): 들어갈 때 회전을 푼다.
-          return base.mode === "map" ? { ...base, mode: "spread", ...STILL } : { ...base, mode: "map" };
+          // 펼치기는 정면에서만 읽힌다("왼쪽이 가장 비쌉니다"): 들어갈 때 회전을 풀고,
+          // 나올 때는 펼침 확대(계약 13.8, 잡고 있던 확대 포함)를 푼다. 지도는 가운데 기준이라 panX가 남으면 안 된다.
+          return { ...base, mode: base.mode === "map" ? "spread" : "map", ...STILL };
         }
         case "victory":
           return { ...clearResult(s), focus: null, lifted: null, mode: "map", ...STILL };

@@ -204,13 +204,14 @@ describe("rotation hold (13.4)", () => {
     expect(run(s, twoFist)).toBe(s);
   });
 
-  it("twoFist ignored while voting or spread", () => {
+  // 13.8 이전에는 펼치기에서도 두 주먹을 무시했다. 지금은 펼치기의 두 주먹이 확대 전용 잡기다(아래 spread zoom 절).
+  it("twoFist ignored while voting, or with a gu lifted in spread", () => {
     const prompt = run(hands(), start(0));
     const counting = run(prompt, tick(1500));
     const spreadMode = run(hands(), spread);
     const liftedInSpread = run(spreadMode, hover("강남구"), grab);
     expect(liftedInSpread.lifted).toBe("강남구");
-    for (const s0 of [prompt, counting, spreadMode, liftedInSpread]) expect(run(s0, twoFist)).toBe(s0);
+    for (const s0 of [prompt, counting, liftedInSpread]) expect(run(s0, twoFist)).toBe(s0);
   });
 
   // Controller ruling(R2 결과): 주 손 주먹이 twoFist와 같은 프레임이나 몇 프레임 앞에 확정돼 구를 들 수 있다.
@@ -289,8 +290,8 @@ describe("rotation hold (13.4)", () => {
     const [sp2, fxSp2] = step(run(hands(), spin(true)), spread);
     expect(sp2.spinning).toBe(false);
     expect(fxSp2).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
-    // 펼치기에서 지도로: 이미 정면이라 리셋 없음
-    expect(step(sp, spread)[1]).not.toContain("rotate.reset");
+    // 펼치기에서 지도로: 13.8부터 펼침 확대를 풀도록 나갈 때도 리셋(아래 spread zoom 절)
+    expect(step(sp, spread)[1]).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
 
     // 브이: 돌려 놓은 뒤 놓인 깨끗한 지도(상태는 그대로)여도 정면 복귀
     expect(step(hands(), victory)[1]).toEqual(["rotate.reset"]);
@@ -343,6 +344,91 @@ describe("rotation hold (13.4)", () => {
     // 같은 입력이면 무시
     const h = hands();
     expect(run(h, { type: "setInput", input: "hands", now: 0 })).toBe(h);
+  });
+
+  describe("spread zoom (13.8)", () => {
+    it("twoFist in spread starts a zoom-only two-hand hold", () => {
+      const sp = run(hands(), hover("강남구"), spread);
+      expect(sp.mode).toBe("spread");
+      expect(sp.hover).toBe("강남구");
+      const [s, fx] = step(sp, twoFist);
+      expect(s.mode).toBe("spread"); // 펼친 그대로(회전은 stageView가 잠근다)
+      expect(s.rotate).toBe("two");
+      expect(s.lifted).toBeNull();
+      expect(s.focus).toBeNull();
+      expect(s.hover).toBeNull(); // 잡는 동안 구 강조 없음
+      expect(fx).toEqual(["rotate.grabTwo", "scene.hover"]);
+      // 잡은 동안: 다시 두 주먹·주 손 grab·release·hover는 무시
+      for (const e of [twoFist, grab, release, hover("마포구")]) expect(run(s, e)).toBe(s);
+      // 놓으면 rotate.release, 펼친 그대로
+      const [end, fxEnd] = step(s, twoFistEnd);
+      expect(end.rotate).toBe("none");
+      expect(end.mode).toBe("spread");
+      expect(fxEnd).toEqual(["rotate.release"]);
+      // 관성은 펼치기에서 생기지 않는다(놓은 뒤 늦게 온 "돈다"도 무시)
+      expect(run(end, spin(true))).toBe(end);
+      // 놓은 뒤에는 다시 구 강조
+      expect(run(end, hover("마포구")).hover).toBe("마포구");
+    });
+
+    it("twoFist in spread ignored while lifted or voting", () => {
+      const sp = run(hands(), spread);
+      // 같은 프레임 grab+twoFist(구 위): 펼치기에서는 든 구를 그대로 두고 확대하지 않는다
+      const lifted = run(sp, hover("강남구"), grab);
+      expect(lifted.lifted).toBe("강남구");
+      expect(step(lifted, twoFist)).toEqual([lifted, []]);
+      // 펼친 채 투표 진행 중(안내·세기·확인)
+      const prompt = run(sp, start(0));
+      expect(prompt.mode).toBe("spread");
+      const counting = run(prompt, tick(1500));
+      for (const s0 of [prompt, counting]) expect(step(s0, twoFist)).toEqual([s0, []]);
+    });
+
+    it("one-hand empty-space grab in spread is still ignored, also after a zoom hold", () => {
+      const sp = run(hands(), spread);
+      expect(step(sp, grab)).toEqual([sp, []]);
+      const after = run(sp, twoFist, twoFistEnd);
+      expect(after.rotate).toBe("none");
+      expect(step(after, grab)).toEqual([after, []]);
+      expect(run(mouse(), spread, grab).rotate).toBe("none"); // 마우스 빈 곳 누르기도
+    });
+
+    it("spread→map emits rotate.reset like entering does", () => {
+      // 확대 잡은 채 펼치기를 끄면: 잡기를 풀고(놓기·관성 아님) 리셋, 순서는 scene.layout 앞
+      const held = run(hands(), spread, twoFist);
+      const [m, fx] = step(held, spread);
+      expect(m.mode).toBe("map");
+      expect(m.rotate).toBe("none");
+      expect(m.spinning).toBe(false);
+      expect(fx).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+      expect(fx).not.toContain("rotate.release");
+      // 놓은 뒤(확대만 남음) 펼치기 끄기
+      expect(step(run(hands(), spread, twoFist, twoFistEnd), spread)[1]).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+      // 펼치기에서 구를 들었다 놓아 지도로(앉히기)
+      const [settled, fxSettle] = step(run(hands(), spread, hover("강남구"), grab), release);
+      expect(settled.mode).toBe("map");
+      expect(settled.focus).toBe("강남구");
+      expect(fxSettle[0]).toBe("rotate.reset");
+      expect(fxSettle).toContain("scene.layout");
+      // 펼치기에서 브이
+      const [v, fxV] = step(run(hands(), spread, twoFist), victory);
+      expect(v.rotate).toBe("none");
+      expect(fxV).toEqual(["rotate.reset", "scene.layout", "narrate", "publish.stage"]);
+      // 지도 안의 변화는 여전히 리셋 없음(놓기는 release)
+      expect(step(run(hands(), twoFist), twoFistEnd)[1]).toEqual(["rotate.release"]);
+    });
+
+    it("voteStart / setInput during a spread zoom hold reset it", () => {
+      const held = run(hands(), spread, twoFist);
+      const [vs, fxVs] = step(held, start(0));
+      expect(vs.rotate).toBe("none");
+      expect(vs.mode).toBe("spread");
+      expect(fxVs[0]).toBe("rotate.reset");
+      expect(fxVs).not.toContain("rotate.release");
+      const [si, fxSi] = step(held, { type: "setInput", input: "mouse", now: 0 });
+      expect(si.rotate).toBe("none");
+      expect(fxSi).toEqual(["rotate.reset"]);
+    });
   });
 });
 

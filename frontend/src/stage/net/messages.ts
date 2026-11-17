@@ -1,11 +1,18 @@
-// 무대 채널 메시지 계약 (CONTRACTS-stage 4.1, 13.6). 손 좌표·영상 프레임이 채널로 새지 않도록 허용 키만 통과시킨다.
+// 무대 채널 메시지 계약 (CONTRACTS-stage 4.1, 13.6, 13.8). 손 좌표·영상 프레임이 채널로 새지 않도록 허용 키만 통과시킨다.
 import { GU_ORDER } from "../../data/gu";
 import type { StageMode, StageState, VoteState } from "../types";
 
 export const STAGE_CHANNEL = "/seoul/stage";
 
-/** yaw·zoom은 선택(CONTRACTS-stage 13.6). 없으면 큰 화면은 (0, 1)로 본다. */
-export interface StageMessage { v: 1; type: "stage"; mode: StageMode; lifted: string | null; ts: number; yaw?: number; zoom?: number; }
+/**
+ * yaw·zoom·panX는 선택(CONTRACTS-stage 13.6, 13.8). 없으면 큰 화면은 (0, 1, 0)으로 본다.
+ * panX: 확대 1배일 때 target 평면에서 보이는 화면 절반 폭을 1로 한 옆 이동(음수 = 왼쪽, 1위 쪽). 펼침 확대에서만 0이 아니다.
+ */
+export interface StageMessage {
+  v: 1; type: "stage"; mode: StageMode; lifted: string | null; ts: number; yaw?: number; zoom?: number; panX?: number;
+}
+/** 무대 카메라 상태. panX가 없으면 0(가운데). */
+export interface StageView { yaw: number; zoom: number; panX?: number; }
 export interface VoteMessage {
   v: 1; type: "vote"; round: number; phase: "counting" | "result";
   candidates: string[]; counts: (number | null)[]; winner: string | null; ts: number;
@@ -13,7 +20,7 @@ export interface VoteMessage {
 export type StageChannelMessage = StageMessage | VoteMessage;
 
 export const ALLOWED_KEYS: { readonly stage: readonly string[]; readonly vote: readonly string[] } = Object.freeze({
-  stage: Object.freeze(["v", "type", "mode", "lifted", "ts", "yaw", "zoom"]),
+  stage: Object.freeze(["v", "type", "mode", "lifted", "ts", "yaw", "zoom", "panX"]),
   vote: Object.freeze(["v", "type", "round", "phase", "candidates", "counts", "winner", "ts"]),
 });
 
@@ -25,6 +32,7 @@ const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 1.6;
 const isYaw = (x: unknown): boolean => isFinite_(x) && x > -Math.PI && x <= Math.PI;
 const isZoom = (x: unknown): boolean => isFinite_(x) && x >= ZOOM_MIN && x <= ZOOM_MAX;
+const isPanX = (x: unknown): boolean => isFinite_(x) && x >= -1 && x <= 1;
 const isTs = (x: unknown): boolean => typeof x === "number" && Number.isFinite(x);
 
 export function isStageMessage(x: unknown): x is StageMessage {
@@ -35,6 +43,7 @@ export function isStageMessage(x: unknown): x is StageMessage {
     (x.lifted === null || isGu(x.lifted)) &&
     (x.yaw === undefined || isYaw(x.yaw)) &&
     (x.zoom === undefined || isZoom(x.zoom)) &&
+    (x.panX === undefined || isPanX(x.panX)) &&
     isTs(x.ts)
   );
 }
@@ -66,9 +75,17 @@ export function assertPublishable(x: unknown): asserts x is StageChannelMessage 
   if (!isStageChannelMessage(x)) throw new Error("무대 메시지 형식이 올바르지 않습니다");
 }
 
-export function toStageMessage(s: StageState, ts: number, view?: { yaw: number; zoom: number }): StageMessage {
+/**
+ * view가 있으면 yaw·zoom(과 view에 있으면 panX)을 싣는다. panX가 없는 view는 panX 없이 보내고 큰 화면은 0(가운데)으로 본다.
+ * 무대를 떠날 때의 최종 메시지는 view 없이.
+ */
+export function toStageMessage(s: StageState, ts: number, view?: StageView): StageMessage {
   const m: StageMessage = { v: 1, type: "stage", mode: s.mode, lifted: s.lifted, ts };
-  if (view) { m.yaw = view.yaw; m.zoom = view.zoom; }
+  if (view) {
+    m.yaw = view.yaw;
+    m.zoom = view.zoom;
+    if (view.panX !== undefined) m.panX = view.panX;
+  }
   return m;
 }
 
